@@ -6,6 +6,7 @@ import (
 	"everything-you-need/m/services/config"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -30,16 +31,16 @@ type TelegramResponse struct {
 
 func NewTeleNotiService(config *config.Config) *TeleNotiService {
 	if !config.Telegram.Enabled {
-		fmt.Println("Telegram notification is disabled")
+		log.Printf("Telegram notification is disabled")
 		return nil
 	}
 
 	if config.Telegram.BotToken == "" || config.Telegram.ChannelID == "" {
-		fmt.Println("Telegram notification is disabled: bot_token or channel_id is missing")
+		log.Printf("Telegram notification is disabled: bot_token or channel_id is missing")
 		return nil
 	}
 
-	fmt.Println("✓ Telegram notification service initialized")
+	log.Printf("✓ Telegram notification service initialized")
 
 	return &TeleNotiService{
 		botToken: config.Telegram.BotToken,

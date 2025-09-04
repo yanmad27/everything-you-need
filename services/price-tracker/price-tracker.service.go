@@ -24,19 +24,19 @@ func NewPriceTrackerService(config *config.Config) *PriceTrackerService {
 	if config.PriceSources.Doji.Enabled {
 		dojiSource := NewDojiSource(config.PriceSources.Doji.APIURL)
 		service.AddSource(dojiSource)
-		fmt.Println("✓ Added Doji source for gold prices")
+		log.Printf("✓ Added Doji source for gold prices")
 	}
 
 	if config.PriceSources.BTMC.Enabled {
 		btmcSource := NewBTMCSource(config.PriceSources.BTMC.APIURL)
 		service.AddSource(btmcSource)
-		fmt.Println("✓ Added BTMC source for gold prices")
+		log.Printf("✓ Added BTMC source for gold prices")
 	}
 
 	if config.PriceSources.Mihong.Enabled {
 		mihongSource := NewMihongSource(config.PriceSources.Mihong.BaseURL, config.PriceSources.Mihong.APIURL)
 		service.AddSource(mihongSource)
-		fmt.Println("✓ Added Mi Hồng source for gold prices")
+		log.Printf("✓ Added Mi Hồng source for gold prices")
 	}
 
 	return service

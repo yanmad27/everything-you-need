@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,13 +35,13 @@ func main() {
 
 	scheduler.Start(ctx)
 
-	fmt.Println("\n🚀 Job scheduler started. Press Ctrl+C to stop.")
+	log.Printf("\n🚀 Job scheduler started. Press Ctrl+C to stop.")
 
 	<-sigChan
-	fmt.Println("\n📴 Shutting down...")
+	log.Printf("\n📴 Shutting down...")
 
 	scheduler.Stop()
 	cancel()
 
-	fmt.Println("✅ Shutdown complete")
+	log.Printf("✅ Shutdown complete")
 }
