@@ -180,7 +180,7 @@ func (s *SimpleScheduler) run() {
 // checkAndRunJobs checks which jobs need to run
 func (s *SimpleScheduler) checkAndRunJobs() {
 	s.mu.RLock()
-	now := time.Now()
+	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 	jobsToRun := make([]*SimpleJob, 0)
 
 	for _, job := range s.jobs {
