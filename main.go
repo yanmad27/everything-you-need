@@ -1,77 +1,46 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"everything-you-need/m/services/price-tracker"
-	"everything-you-need/m/services/tele-noti"
+	"everything-you-need/m/services/config"
+	jobscheduler "everything-you-need/m/services/job-scheduler"
+	pricetracker "everything-you-need/m/services/price-tracker"
+	telenoti "everything-you-need/m/services/tele-noti"
 )
 
 func main() {
-	// Load configuration
-	config, err := LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-	
-	fmt.Printf("=== %s ===\n", config.App.Name)
-	fmt.Printf("Environment: %s\n", config.App.Environment)
-	
-	// Initialize price service
-	priceService := pricetracker.NewPriceService()
-	
-	// Add price sources based on configuration
-	if config.PriceSources.Doji.Enabled {
-		if config.PriceSources.Doji.APIKey == "" {
-			log.Println("Warning: Doji is enabled but no API key provided")
-		} else {
-			dojiSource := pricetracker.NewDojiSource(config.PriceSources.Doji.APIKey)
-			priceService.AddSource(dojiSource)
-			fmt.Println("✓ Added Doji source for gold prices")
-		}
-	}
-	
-	// Fetch and display prices
-	allPrices, err := priceService.GetAllPrices()
-	if err != nil {
-		log.Fatalf("Failed to get prices: %v", err)
-	}
-	
-	if len(allPrices) == 0 {
-		fmt.Println("No price sources configured or available")
-		return
-	}
-	
-	for source, prices := range allPrices {
-		fmt.Printf("\n--- Prices from %s ---\n", source)
-		for _, price := range prices {
-			fmt.Printf("Type: %s, Buy: %.0f, Sell: %.0f %s\n",
-				price.Type, price.BuyPrice, price.SellPrice, price.Currency)
-		}
-	}
-	
-	// Send Telegram notifications if configured
-	if config.Telegram.Enabled {
-		if config.Telegram.BotToken == "" || config.Telegram.ChannelID == "" {
-			log.Println("Warning: Telegram is enabled but bot_token or channel_id is missing")
-		} else {
-			fmt.Println("\n=== Sending Telegram Notification ===")
-			
-			teleService := telenoti.NewTeleNotiService(config.Telegram.BotToken)
-			
-			pricesJSON, _ := json.MarshalIndent(allPrices, "", "  ")
-			message := fmt.Sprintf("🔔 Price Update from %s\n```json\n%s\n```", config.App.Name, string(pricesJSON))
-			
-			err = teleService.SendToChannelWithMarkdown(config.Telegram.ChannelID, message)
-			if err != nil {
-				log.Printf("Failed to send notification: %v", err)
-			} else {
-				fmt.Println("✓ Notification sent successfully!")
-			}
-		}
-	} else {
-		fmt.Println("\n📱 Telegram notifications disabled in configuration")
-	}
+	cfg := config.ConfigMod.Resolve()
+
+	fmt.Printf("=== %s ===\n", cfg.App.Name)
+	fmt.Printf("Environment: %s\n", cfg.App.Environment)
+
+	priceService := pricetracker.PriceTrackerServiceMod.Resolve()
+	teleService := telenoti.TeleNotiServiceMod.Resolve()
+
+	scheduler := jobscheduler.NewSimpleScheduler()
+
+	registerJobs(scheduler, priceService, teleService, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	scheduler.Start(ctx)
+
+	fmt.Println("\n🚀 Job scheduler started. Press Ctrl+C to stop.")
+
+	<-sigChan
+	fmt.Println("\n📴 Shutting down...")
+
+	scheduler.Stop()
+	cancel()
+
+	fmt.Println("✅ Shutdown complete")
 }
