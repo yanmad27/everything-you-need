@@ -74,7 +74,8 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 }
 
 func generatePriceNotification(allPrices map[string][]pricetracker.Price, err error) string {
-	now := time.Now()
+	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	now := time.Now().In(loc)
 	message := "📊 *Price Update*\n"
 	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
 
