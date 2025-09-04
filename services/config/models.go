@@ -3,6 +3,7 @@ package config
 type PriceSourcesConfig struct {
 	Doji     DojiConfig     `mapstructure:"doji"`
 	BTMC     BTMCConfig     `mapstructure:"btmc"`
+	Mihong   MihongConfig   `mapstructure:"mihong"`
 }
 
 type DojiConfig struct {
@@ -12,6 +13,12 @@ type DojiConfig struct {
 
 type BTMCConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
+	APIURL  string `mapstructure:"api_url"`
+}
+
+type MihongConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	BaseURL string `mapstructure:"base_url"`
 	APIURL  string `mapstructure:"api_url"`
 }
 
