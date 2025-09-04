@@ -3,6 +3,7 @@ package pricetracker
 import (
 	"everything-you-need/m/services/config"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -55,6 +56,7 @@ func (g *PriceTrackerService) GetAllPrices() (map[string][]Price, error) {
 		prices, err := source.GetPrices()
 		if err != nil {
 			results[source.GetSourceName()] = []Price{}
+			log.Printf("❌ Failed to fetch prices from %s source %s", source.GetSourceName(), err.Error())
 			errs = append(errs, err)
 		} else {
 			results[source.GetSourceName()] = prices
