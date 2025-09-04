@@ -53,7 +53,7 @@ func NewDojiSource(apiUrl string) *DojiSource {
 }
 
 func (d *DojiSource) GetSourceName() string {
-	return "doji"
+	return "Doji"
 }
 
 func (d *DojiSource) GetPrices() ([]Price, error) {
@@ -118,18 +118,7 @@ func (d *DojiSource) parseResponse(body []byte) ([]Price, error) {
 		}
 	}
 
-	prices = filterPrices(prices)
 	return prices, nil
-}
-
-func filterPrices(prices []Price) []Price {
-	var filteredPrices []Price
-	for _, price := range prices {
-		if strings.Contains(strings.ToLower(price.Type), "9999") {
-			filteredPrices = append(filteredPrices, price)
-		}
-	}
-	return filteredPrices
 }
 
 func (d *DojiSource) parseRowToPrice(row DojiRow, unit string) (Price, error) {

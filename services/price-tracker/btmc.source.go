@@ -1,7 +1,7 @@
 package pricetracker
 
 import (
-	"encoding/xml"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,62 +14,65 @@ type BTMCSource struct {
 	client *http.Client
 }
 
-type DataList struct {
-	XMLName xml.Name `xml:"DataList"`
-	Data    []Data   `xml:"Data"`
+type BTMCResponse struct {
+	DataList DataList `json:"DataList"`
 }
 
-type Data struct {
-	Row string `xml:"row,attr"`
-	N1  string `xml:"n_1,attr"`
-	K1  string `xml:"k_1,attr"`
-	H1  string `xml:"h_1,attr"`
-	PB1 string `xml:"pb_1,attr"`
-	PS1 string `xml:"ps_1,attr"`
-	PT1 string `xml:"pt_1,attr"`
-	D1  string `xml:"d_1,attr"`
-	N2  string `xml:"n_2,attr"`
-	K2  string `xml:"k_2,attr"`
-	H2  string `xml:"h_2,attr"`
-	PB2 string `xml:"pb_2,attr"`
-	PS2 string `xml:"ps_2,attr"`
-	PT2 string `xml:"pt_2,attr"`
-	D2  string `xml:"d_2,attr"`
-	N3  string `xml:"n_3,attr"`
-	K3  string `xml:"k_3,attr"`
-	H3  string `xml:"h_3,attr"`
-	PB3 string `xml:"pb_3,attr"`
-	PS3 string `xml:"ps_3,attr"`
-	PT3 string `xml:"pt_3,attr"`
-	D3  string `xml:"d_3,attr"`
-	N4  string `xml:"n_4,attr"`
-	K4  string `xml:"k_4,attr"`
-	H4  string `xml:"h_4,attr"`
-	PB4 string `xml:"pb_4,attr"`
-	PS4 string `xml:"ps_4,attr"`
-	PT4 string `xml:"pt_4,attr"`
-	D4  string `xml:"d_4,attr"`
-	N5  string `xml:"n_5,attr"`
-	K5  string `xml:"k_5,attr"`
-	H5  string `xml:"h_5,attr"`
-	PB5 string `xml:"pb_5,attr"`
-	PS5 string `xml:"ps_5,attr"`
-	PT5 string `xml:"pt_5,attr"`
-	D5  string `xml:"d_5,attr"`
-	N6  string `xml:"n_6,attr"`
-	K6  string `xml:"k_6,attr"`
-	H6  string `xml:"h_6,attr"`
-	PB6 string `xml:"pb_6,attr"`
-	PS6 string `xml:"ps_6,attr"`
-	PT6 string `xml:"pt_6,attr"`
-	D6  string `xml:"d_6,attr"`
-	N7  string `xml:"n_7,attr"`
-	K7  string `xml:"k_7,attr"`
-	H7  string `xml:"h_7,attr"`
-	PB7 string `xml:"pb_7,attr"`
-	PS7 string `xml:"ps_7,attr"`
-	PT7 string `xml:"pt_7,attr"`
-	D7  string `xml:"d_7,attr"`
+type DataList struct {
+	Data []DataEntry `json:"Data"`
+}
+
+type DataEntry struct {
+	Row string `json:"@row"`
+	N1  string `json:"@n_1"`
+	K1  string `json:"@k_1"`
+	H1  string `json:"@h_1"`
+	PB1 string `json:"@pb_1"`
+	PS1 string `json:"@ps_1"`
+	PT1 string `json:"@pt_1"`
+	D1  string `json:"@d_1"`
+	N2  string `json:"@n_2"`
+	K2  string `json:"@k_2"`
+	H2  string `json:"@h_2"`
+	PB2 string `json:"@pb_2"`
+	PS2 string `json:"@ps_2"`
+	PT2 string `json:"@pt_2"`
+	D2  string `json:"@d_2"`
+	N3  string `json:"@n_3"`
+	K3  string `json:"@k_3"`
+	H3  string `json:"@h_3"`
+	PB3 string `json:"@pb_3"`
+	PS3 string `json:"@ps_3"`
+	PT3 string `json:"@pt_3"`
+	D3  string `json:"@d_3"`
+	N4  string `json:"@n_4"`
+	K4  string `json:"@k_4"`
+	H4  string `json:"@h_4"`
+	PB4 string `json:"@pb_4"`
+	PS4 string `json:"@ps_4"`
+	PT4 string `json:"@pt_4"`
+	D4  string `json:"@d_4"`
+	N5  string `json:"@n_5"`
+	K5  string `json:"@k_5"`
+	H5  string `json:"@h_5"`
+	PB5 string `json:"@pb_5"`
+	PS5 string `json:"@ps_5"`
+	PT5 string `json:"@pt_5"`
+	D5  string `json:"@d_5"`
+	N6  string `json:"@n_6"`
+	K6  string `json:"@k_6"`
+	H6  string `json:"@h_6"`
+	PB6 string `json:"@pb_6"`
+	PS6 string `json:"@ps_6"`
+	PT6 string `json:"@pt_6"`
+	D6  string `json:"@d_6"`
+	N7  string `json:"@n_7"`
+	K7  string `json:"@k_7"`
+	H7  string `json:"@h_7"`
+	PB7 string `json:"@pb_7"`
+	PS7 string `json:"@ps_7"`
+	PT7 string `json:"@pt_7"`
+	D7  string `json:"@d_7"`
 }
 
 func NewBTMCSource(apiUrl string) *BTMCSource {
@@ -80,7 +83,7 @@ func NewBTMCSource(apiUrl string) *BTMCSource {
 }
 
 func (v *BTMCSource) GetSourceName() string {
-	return "BTMC"
+	return "Bảo Tín Minh Châu"
 }
 
 func (v *BTMCSource) GetPrices() ([]Price, error) {
@@ -94,13 +97,13 @@ func (v *BTMCSource) GetPrices() ([]Price, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	var dataList DataList
-	if err := xml.Unmarshal(body, &dataList); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal XML: %w", err)
+	var response BTMCResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
 
 	var prices []Price
-	for _, data := range dataList.Data {
+	for _, data := range response.DataList.Data {
 		entries := []struct {
 			name, pb, ps string
 		}{
