@@ -17,35 +17,35 @@ type MihongSource struct {
 }
 
 type MihongResponse struct {
-	Success bool           `json:"success"`
+	Success bool          `json:"success"`
 	Data    []MihongPrice `json:"data"`
 }
 
 type MihongPrice struct {
-	BuyingPrice        float64 `json:"buyingPrice"`
-	SellingPrice       float64 `json:"sellingPrice"`
-	Code               string  `json:"code"`
-	SellChange         float64 `json:"sellChange"`
-	SellChangePercent  float64 `json:"sellChangePercent"`
-	BuyChange          float64 `json:"buyChange"`
-	BuyChangePercent   float64 `json:"buyChangePercent"`
-	DateTime           string  `json:"dateTime"`
+	BuyingPrice       float64 `json:"buyingPrice"`
+	SellingPrice      float64 `json:"sellingPrice"`
+	Code              string  `json:"code"`
+	SellChange        float64 `json:"sellChange"`
+	SellChangePercent float64 `json:"sellChangePercent"`
+	BuyChange         float64 `json:"buyChange"`
+	BuyChangePercent  float64 `json:"buyChangePercent"`
+	DateTime          string  `json:"dateTime"`
 }
 
 func NewMihongSource(baseUrl, apiUrl string) *MihongSource {
 	// Create cookie jar for session management
 	jar, _ := cookiejar.New(nil)
-	
+
 	// Create TLS config that skips certificate verification for problematic certificates
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 	}
-	
+
 	// Create transport with custom TLS config
 	transport := &http.Transport{
 		TLSClientConfig: tlsConfig,
 	}
-	
+
 	return &MihongSource{
 		baseUrl: baseUrl,
 		apiUrl:  apiUrl,
@@ -67,9 +67,9 @@ func (m *MihongSource) GetPrices() ([]Price, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create base request: %w", err)
 	}
-	
+
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-	
+
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to visit base page: %w", err)

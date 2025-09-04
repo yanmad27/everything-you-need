@@ -102,14 +102,14 @@ func (p *PriceHistoryService) ComparePrices(currentPrices, previousPrices map[st
 
 		for _, currentPrice := range currentSourcePrices {
 			prevPrice, exists := prevPriceMap[currentPrice.Type]
-			
+
 			var buyChange, sellChange float64
 			var prevBuy, prevSell float64
-			
+
 			if exists {
 				prevBuy = prevPrice.BuyPrice
 				prevSell = prevPrice.SellPrice
-				
+
 				// Calculate percentage change
 				if prevPrice.BuyPrice > 0 {
 					buyChange = ((currentPrice.BuyPrice - prevPrice.BuyPrice) / prevPrice.BuyPrice) * 100
@@ -135,7 +135,7 @@ func (p *PriceHistoryService) ComparePrices(currentPrices, previousPrices map[st
 func (p *PriceHistoryService) RotateHistoryFiles() error {
 	// Keep only the last 30 history files (optional feature)
 	logsDir := "logs"
-	
+
 	files, err := os.ReadDir(logsDir)
 	if err != nil {
 		return err

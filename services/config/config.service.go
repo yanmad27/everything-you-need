@@ -16,7 +16,6 @@ type Config struct {
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
 
-
 func LoadConfig() *Config {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
