@@ -1,9 +1,9 @@
 package config
 
 type PriceSourcesConfig struct {
-	Doji     DojiConfig     `mapstructure:"doji"`
-	BTMC     BTMCConfig     `mapstructure:"btmc"`
-	Mihong   MihongConfig   `mapstructure:"mihong"`
+	Doji   DojiConfig   `mapstructure:"doji"`
+	BTMC   BTMCConfig   `mapstructure:"btmc"`
+	Mihong MihongConfig `mapstructure:"mihong"`
 }
 
 type DojiConfig struct {
