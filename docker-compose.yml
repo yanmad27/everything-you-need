@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   price-tracker:
     build:
@@ -8,24 +6,6 @@ services:
     image: everything-you-need:latest
     container_name: price-tracker-bot
     restart: unless-stopped
-    environment:
-      # App Configuration
-      - APP_NAME=${APP_NAME:-Everything You Need}
-      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
-      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-info}
-      
-      # Price Sources
-      - PRICE_SOURCES_DOJI_ENABLED=${PRICE_SOURCES_DOJI_ENABLED:-true}
-      - PRICE_SOURCES_DOJI_API_URL=${PRICE_SOURCES_DOJI_API_URL:-http://giavang.doji.vn/api/giavang/?api_key=258fbd2a72ce8481089d88c678e9fe4f}
-      - PRICE_SOURCES_BTMC_ENABLED=${PRICE_SOURCES_BTMC_ENABLED:-true}
-      - PRICE_SOURCES_BTMC_API_URL=${PRICE_SOURCES_BTMC_API_URL:-http://api.btmc.vn/api/BTMCAPI/getpricebtmc?key=***REMOVED***}
-      
-      # Telegram Configuration
-      - TELEGRAM_ENABLED=${TELEGRAM_ENABLED:-true}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_CHANNEL_ID=${TELEGRAM_CHANNEL_ID}
-    env_file:
-      - .env
     volumes:
       - ./config.yaml:/root/config.yaml:ro
       - ./logs:/root/logs
