@@ -77,15 +77,21 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, err er
 		return message
 	}
 
+	keywords := []string{"9999", "tròn trơn", "sjc"}
 	for source, prices := range allPrices {
 		if len(prices) > 0 {
-			message += fmt.Sprintf("**%s** (%d items)\n", source, len(prices))
+			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
 
 			count := len(prices)
 			for i := 0; i < count; i++ {
 				price := prices[i]
-				message += fmt.Sprintf("• %s: Buy %s | Sell %s %s\n",
-					price.Type, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), price.Currency)
+				for _, keyword := range keywords {
+					if strings.Contains(strings.ToLower(price.Type), keyword) {
+						message += fmt.Sprintf("• 💰%s: *%s* - *%s* - %s\n",
+							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), price.Type)
+						break
+					}
+				}
 			}
 
 			message += "\n"
