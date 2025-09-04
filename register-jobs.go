@@ -32,22 +32,27 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 	// })
 
 	if teleService != nil && cfg.Telegram.ChannelID != "" {
-		err := scheduler.RegisterDailyJob("price-notification", "07:00", func() error {
-			log.Println("Sending daily price notification...")
+		// Register price notifications for 7am, 1pm, and 7pm
+		times := []string{"07:00", "13:00", "19:00"}
+		for _, timeSlot := range times {
+			jobName := fmt.Sprintf("price-notification-%s", timeSlot)
+			err := scheduler.RegisterDailyJob(jobName, timeSlot, func() error {
+				log.Printf("Sending price notification at %s...", timeSlot)
 
-			allPrices, err := priceService.GetAllPrices()
-			message := generatePriceNotification(allPrices, err)
+				allPrices, err := priceService.GetAllPrices()
+				message := generatePriceNotification(allPrices, err)
 
-			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
+				err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
+				if err != nil {
+					return fmt.Errorf("failed to send notification: %w", err)
+				}
+
+				log.Printf("Price notification at %s sent successfully", timeSlot)
+				return nil
+			})
 			if err != nil {
-				return fmt.Errorf("failed to send notification: %w", err)
+				log.Printf("Failed to register notification job for %s: %v", timeSlot, err)
 			}
-
-			log.Println("Daily price notification sent successfully")
-			return nil
-		})
-		if err != nil {
-			log.Printf("Failed to register daily notification job: %v", err)
 		}
 	}
 
@@ -87,8 +92,12 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, err er
 				price := prices[i]
 				for _, keyword := range keywords {
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
+						typeStr := price.Type
+						if len(typeStr) > 25 {
+							typeStr = typeStr[:25] + "..."
+						}
 						message += fmt.Sprintf("• 💰%s: *%s* - *%s* - %s\n",
-							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), price.Type)
+							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), typeStr)
 						break
 					}
 				}
