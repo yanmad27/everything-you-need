@@ -23,15 +23,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 FROM alpine:latest
 
 # Install ca-certificates and tzdata for HTTPS requests and timezone support
-RUN apk --no-cache add ca-certificates tzdata bind-tools
+RUN apk update && apk --no-cache add ca-certificates tzdata
 
 # Set timezone
 ENV TZ=Asia/Ho_Chi_Minh
-
-# Configure DNS resolution
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 8.8.4.4" >> /etc/resolv.conf && \
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
 
 # Create app directory
 WORKDIR /root/
