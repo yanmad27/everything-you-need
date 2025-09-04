@@ -6,6 +6,14 @@ services:
     image: everything-you-need:latest
     container_name: price-tracker-bot
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    dns_opt:
+      - ndots:1
+    dns_search:
+      - .
     volumes:
       - ./config.yaml:/root/config.yaml:ro
       - ./logs:/root/logs
