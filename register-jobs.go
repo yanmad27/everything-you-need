@@ -7,6 +7,7 @@ import (
 	telenoti "everything-you-need/m/services/tele-noti"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -92,12 +93,8 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, err er
 				price := prices[i]
 				for _, keyword := range keywords {
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
-						typeStr := price.Type
-						if len(typeStr) > 25 {
-							typeStr = typeStr[:25] + "..."
-						}
 						message += fmt.Sprintf("• 💰%s: *%s* - *%s* - %s\n",
-							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), typeStr)
+							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), formatType(price.Type))
 						break
 					}
 				}
@@ -113,6 +110,11 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, err er
 
 	message += "🤖 _Automated update_"
 	return message
+}
+
+func formatType(typeStr string) string {
+	regex := regexp.MustCompile(`\(([^)]+)\)`)
+	return regex.ReplaceAllString(typeStr, "")
 }
 
 func formatPrice(price float64) string {
