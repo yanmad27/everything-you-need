@@ -32,6 +32,12 @@ func NewPriceTrackerService(config *config.Config) *PriceTrackerService {
 		fmt.Println("✓ Added BTMC source for gold prices")
 	}
 
+	if config.PriceSources.Mihong.Enabled {
+		mihongSource := NewMihongSource(config.PriceSources.Mihong.BaseURL, config.PriceSources.Mihong.APIURL)
+		service.AddSource(mihongSource)
+		fmt.Println("✓ Added Mi Hồng source for gold prices")
+	}
+
 	return service
 }
 

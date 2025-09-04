@@ -14,6 +14,10 @@ price_sources:
   btmc:
     enabled: true
     api_url: "http://api.btmc.vn/api/BTMCAPI/getpricebtmc?key=3kd8ub1llcg9t45hnoh8hmn7t5kc2v"
+  mihong:
+    enabled: true
+    base_url: "https://www.mihong.vn/vi/gia-vang-trong-nuoc"
+    api_url: "https://www.mihong.vn/api/v1/gold/prices/current"
 
 # Telegram notifications (optional)
 telegram:
