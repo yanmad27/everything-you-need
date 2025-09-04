@@ -21,9 +21,15 @@ func NewPriceTrackerService(config *config.Config) *PriceTrackerService {
 	}
 
 	if config.PriceSources.Doji.Enabled {
-		dojiSource := NewDojiSource(config.PriceSources.Doji.APIKey)
+		dojiSource := NewDojiSource(config.PriceSources.Doji.APIURL)
 		service.AddSource(dojiSource)
 		fmt.Println("✓ Added Doji source for gold prices")
+	}
+
+	if config.PriceSources.BTMC.Enabled {
+		btmcSource := NewBTMCSource(config.PriceSources.BTMC.APIURL)
+		service.AddSource(btmcSource)
+		fmt.Println("✓ Added BTMC source for gold prices")
 	}
 
 	return service
@@ -37,14 +43,20 @@ func (g *PriceTrackerService) AddSource(source PriceSource) {
 
 func (g *PriceTrackerService) GetAllPrices() (map[string][]Price, error) {
 	results := make(map[string][]Price)
+	errs := make([]error, 0)
 
 	for _, source := range g.sources {
 		prices, err := source.GetPrices()
 		if err != nil {
 			results[source.GetSourceName()] = []Price{}
-			continue
+			errs = append(errs, err)
+		} else {
+			results[source.GetSourceName()] = prices
 		}
-		results[source.GetSourceName()] = prices
+	}
+
+	if len(errs) > 0 {
+		return results, fmt.Errorf("failed to fetch prices from some sources")
 	}
 
 	return results, nil

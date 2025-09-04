@@ -10,7 +10,10 @@ app:
 price_sources:
   doji:
     enabled: true
-    api_key: "258fbd2a72ce8481089d88c678e9fe4f"
+    api_url: "http://giavang.doji.vn/api/giavang/?api_key=258fbd2a72ce8481089d88c678e9fe4f"
+  btmc:
+    enabled: true
+    api_url: "http://api.btmc.vn/api/BTMCAPI/getpricebtmc?key=3kd8ub1llcg9t45hnoh8hmn7t5kc2v"
 
 # Telegram notifications (optional)
 telegram:

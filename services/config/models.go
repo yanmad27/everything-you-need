@@ -1,12 +1,18 @@
 package config
 
 type PriceSourcesConfig struct {
-	Doji DojiConfig `mapstructure:"doji"`
+	Doji     DojiConfig     `mapstructure:"doji"`
+	BTMC     BTMCConfig     `mapstructure:"btmc"`
 }
 
 type DojiConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
-	APIKey  string `mapstructure:"api_key"`
+	APIURL  string `mapstructure:"api_url"`
+}
+
+type BTMCConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIURL  string `mapstructure:"api_url"`
 }
 
 type TelegramConfig struct {
