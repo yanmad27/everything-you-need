@@ -74,7 +74,11 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 }
 
 func generatePriceNotification(allPrices map[string][]pricetracker.Price, err error) string {
-	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		// Fallback to UTC+7 if timezone loading fails
+		loc = time.FixedZone("UTC+7", 7*60*60)
+	}
 	now := time.Now().In(loc)
 	message := "📊 *Price Update*\n"
 	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
