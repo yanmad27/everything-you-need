@@ -14,6 +14,8 @@ import (
 )
 
 func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetracker.PriceTrackerService, teleService *telenoti.TeleNotiService, cfg *config.Config) {
+	// Initialize price history service
+	historyService := pricetracker.NewPriceHistoryService()
 	// scheduler.RegisterJob("price-fetch", 5*time.Minute, func() error {
 	// 	log.Println("Fetching latest prices...")
 
@@ -40,12 +42,36 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 			err := scheduler.RegisterDailyJob(jobName, timeSlot, func() error {
 				log.Printf("Sending price notification at %s...", timeSlot)
 
+				// Get current prices
 				allPrices, err := priceService.GetAllPrices()
-				message := generatePriceNotification(allPrices, err)
+				if err != nil {
+					return fmt.Errorf("failed to fetch prices: %w", err)
+				}
 
+				// Get previous price history
+				lastHistory, err := historyService.GetLastPriceHistory()
+				if err != nil {
+					log.Printf("Warning: failed to get price history: %v", err)
+				}
+
+				// Compare prices and generate changes
+				var changes map[string][]pricetracker.PriceChange
+				if lastHistory != nil {
+					changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
+				}
+
+				// Generate notification message with price changes
+				message := generatePriceNotification(allPrices, changes, nil)
+
+				// Send notification
 				err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 				if err != nil {
 					return fmt.Errorf("failed to send notification: %w", err)
+				}
+
+				// Save current prices as history for next comparison
+				if err := historyService.SavePriceHistory(allPrices); err != nil {
+					log.Printf("Warning: failed to save price history: %v", err)
 				}
 
 				log.Printf("Price notification at %s sent successfully", timeSlot)
@@ -73,7 +99,7 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 	}
 }
 
-func generatePriceNotification(allPrices map[string][]pricetracker.Price, err error) string {
+func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		// Fallback to UTC+7 if timezone loading fails
@@ -93,13 +119,49 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, err er
 		if len(prices) > 0 {
 			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
 
+			// Get changes for this source if available
+			sourceChanges := make(map[string]pricetracker.PriceChange)
+			if changes != nil {
+				if sourceChangesList, exists := changes[source]; exists {
+					for _, change := range sourceChangesList {
+						sourceChanges[change.Price.Type] = change
+					}
+				}
+			}
+
 			count := len(prices)
 			for i := 0; i < count; i++ {
 				price := prices[i]
 				for _, keyword := range keywords {
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
-						message += fmt.Sprintf("• 💰%s: *%s* - *%s* - %s\n",
-							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice), formatType(price.Type))
+						// Check if we have change data for this price
+						change, hasChange := sourceChanges[price.Type]
+						
+						priceText := fmt.Sprintf("• 💰%s: *%s* - *%s*",
+							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice))
+						
+						// Add change indicators if available
+						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) {
+							var changeText string
+							
+							if change.BuyChange > 0 {
+								changeText += fmt.Sprintf(" 📈+%.1f%%", change.BuyChange)
+							} else if change.BuyChange < 0 {
+								changeText += fmt.Sprintf(" 📉%.1f%%", change.BuyChange)
+							}
+							
+							if change.SellChange != 0 && change.SellChange != change.BuyChange {
+								if change.SellChange > 0 {
+									changeText += fmt.Sprintf("/📈+%.1f%%", change.SellChange)
+								} else {
+									changeText += fmt.Sprintf("/📉%.1f%%", change.SellChange)
+								}
+							}
+							
+							priceText += changeText
+						}
+						
+						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
 						break
 					}
 				}
