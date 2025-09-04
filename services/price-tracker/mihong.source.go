@@ -1,6 +1,7 @@
 package pricetracker
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,12 +36,23 @@ func NewMihongSource(baseUrl, apiUrl string) *MihongSource {
 	// Create cookie jar for session management
 	jar, _ := cookiejar.New(nil)
 	
+	// Create TLS config that skips certificate verification for problematic certificates
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	
+	// Create transport with custom TLS config
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+	
 	return &MihongSource{
 		baseUrl: baseUrl,
 		apiUrl:  apiUrl,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
+			Timeout:   30 * time.Second,
+			Jar:       jar,
+			Transport: transport,
 		},
 	}
 }
