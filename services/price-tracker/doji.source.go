@@ -11,7 +11,7 @@ import (
 )
 
 type DojiSource struct {
-	apiKey string
+	apiUrl string
 	client *http.Client
 }
 
@@ -45,9 +45,9 @@ type DojiRow struct {
 	Buy  string `xml:"Buy,attr"`
 }
 
-func NewDojiSource(apiKey string) *DojiSource {
+func NewDojiSource(apiUrl string) *DojiSource {
 	return &DojiSource{
-		apiKey: apiKey,
+		apiUrl: apiUrl,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -57,9 +57,8 @@ func (d *DojiSource) GetSourceName() string {
 }
 
 func (d *DojiSource) GetPrices() ([]Price, error) {
-	url := fmt.Sprintf("http://giavang.doji.vn/api/giavang/?api_key=%s", d.apiKey)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", d.apiUrl, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

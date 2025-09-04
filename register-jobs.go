@@ -36,11 +36,7 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 			log.Println("Sending daily price notification...")
 
 			allPrices, err := priceService.GetAllPrices()
-			if err != nil {
-				return fmt.Errorf("failed to fetch prices for notification: %w", err)
-			}
-
-			message := generatePriceNotification(allPrices)
+			message := generatePriceNotification(allPrices, err)
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -71,7 +67,7 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 	}
 }
 
-func generatePriceNotification(allPrices map[string][]pricetracker.Price) string {
+func generatePriceNotification(allPrices map[string][]pricetracker.Price, err error) string {
 	now := time.Now()
 	message := "📊 *Price Update*\n"
 	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
@@ -94,6 +90,10 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price) string
 
 			message += "\n"
 		}
+	}
+
+	if err != nil {
+		message += fmt.Sprintf("\nError: %s\n", err.Error())
 	}
 
 	message += "🤖 _Automated update_"
