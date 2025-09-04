@@ -47,34 +47,34 @@ func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetr
 				var lastFetchErr error
 				maxFetchRetries := 3
 				fetchRetryDelay := 10 * time.Second
-				
+
 				for attempt := 1; attempt <= maxFetchRetries; attempt++ {
 					allPrices, lastFetchErr = priceService.GetAllPrices()
 					if lastFetchErr == nil {
 						break // Success, exit retry loop
 					}
-					
+
 					log.Printf("Attempt %d failed to fetch prices: %v", attempt, lastFetchErr)
-					
+
 					if attempt < maxFetchRetries {
 						log.Printf("Retrying price fetch in %v...", fetchRetryDelay)
 						time.Sleep(fetchRetryDelay)
 						fetchRetryDelay *= 2 // Exponential backoff: 10s, 20s, 40s
 					}
 				}
-				
+
 				// If all price fetch attempts failed, send error notification
 				if lastFetchErr != nil {
-					errorMessage := fmt.Sprintf("❌ *Price Fetch Error*\n🕐 %s\n\nFailed to fetch gold prices after %d attempts.\nError: %v\n\n🤖 _Automated error report_", 
-						time.Now().In(time.FixedZone("UTC+7", 7*60*60)).Format("15:04 02/01/2006"), 
-						maxFetchRetries, 
+					errorMessage := fmt.Sprintf("❌ *Price Fetch Error*\n🕐 %s\n\nFailed to fetch gold prices after %d attempts.\nError: %v\n\n🤖 _Automated error report_",
+						time.Now().In(time.FixedZone("UTC+7", 7*60*60)).Format("15:04 02/01/2006"),
+						maxFetchRetries,
 						lastFetchErr)
-					
+
 					// Try to send error notification (without retry to avoid infinite loops)
 					if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, errorMessage); sendErr != nil {
 						log.Printf("Failed to send error notification: %v", sendErr)
 					}
-					
+
 					return fmt.Errorf("failed to fetch prices after %d attempts: %w", maxFetchRetries, lastFetchErr)
 				}
 
@@ -166,20 +166,20 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
 						// Check if we have change data for this price
 						change, hasChange := sourceChanges[price.Type]
-						
+
 						priceText := fmt.Sprintf("• 💰%s: *%s* - *%s*",
 							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice))
-						
+
 						// Add change indicators if available
 						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) {
 							var changeText string
-							
+
 							if change.BuyChange > 0 {
 								changeText += fmt.Sprintf(" 📈+%.1f%%", change.BuyChange)
 							} else if change.BuyChange < 0 {
 								changeText += fmt.Sprintf(" 📉%.1f%%", change.BuyChange)
 							}
-							
+
 							if change.SellChange != 0 && change.SellChange != change.BuyChange {
 								if change.SellChange > 0 {
 									changeText += fmt.Sprintf("/📈+%.1f%%", change.SellChange)
@@ -187,10 +187,10 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 									changeText += fmt.Sprintf("/📉%.1f%%", change.SellChange)
 								}
 							}
-							
+
 							priceText += changeText
 						}
-						
+
 						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
 						break
 					}
