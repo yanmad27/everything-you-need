@@ -1,0 +1,26 @@
+# Everything You Need - Example Configuration
+# Copy this file to config.yaml and modify according to your needs
+
+app:
+  name: "Everything You Need"
+  environment: "production" # development, staging, production
+  log_level: "info" # debug, info, warn, error
+
+# Configure price sources
+price_sources:
+  doji:
+    enabled: true
+    api_key: "258fbd2a72ce8481089d88c678e9fe4f"
+
+# Telegram notifications (optional)
+telegram:
+  enabled: true
+  bot_token: "8275670284:AAECfL45PycZ8tYNRIw-mVRuAqzP8Hqn3RQ"
+  channel_id: "-1002923319232"
+# Environment variable examples:
+# APP_NAME="My Price Tracker"
+# APP_ENVIRONMENT="production"
+# PRICE_SOURCES_DOJI_API_KEY="your-api-key"
+# TELEGRAM_ENABLED="true"
+# TELEGRAM_BOT_TOKEN="1234567890:ABCdef..."
+# TELEGRAM_CHANNEL_ID="@mychannel"
