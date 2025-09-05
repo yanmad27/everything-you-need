@@ -111,7 +111,7 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 		return message
 	}
 
-	keywords := []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum"}
+	keywords := []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"}
 
 	goldSources := make(map[string][]pricetracker.Price)
 	cryptoSources := make(map[string][]pricetracker.Price)

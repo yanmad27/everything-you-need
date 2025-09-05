@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -13,10 +14,7 @@ type CoinGeckoSource struct {
 	client *http.Client
 }
 
-type CoinGeckoResponse struct {
-	Bitcoin  CoinGeckoPrice `json:"bitcoin"`
-	Ethereum CoinGeckoPrice `json:"ethereum"`
-}
+type CoinGeckoResponse map[string]CoinGeckoPrice
 
 type CoinGeckoPrice struct {
 	USD float64 `json:"usd"`
@@ -57,28 +55,40 @@ func (c *CoinGeckoSource) GetPrices() ([]Price, error) {
 	var prices []Price
 	timestamp := time.Now().UTC()
 
-	if coinGeckoResp.Bitcoin.USD > 0 {
-		prices = append(prices, Price{
-			Type:      "Bitcoin",
-			BuyPrice:  coinGeckoResp.Bitcoin.USD,
-			SellPrice: coinGeckoResp.Bitcoin.USD,
-			Unit:      "BTC",
-			Currency:  "USD",
-			Source:    "coingecko",
-			Timestamp: timestamp,
-		})
+	coinNameMap := map[string]string{
+		"bitcoin":     "Bitcoin",
+		"ethereum":    "Ethereum",
+		"binancecoin": "BNB",
 	}
 
-	if coinGeckoResp.Ethereum.USD > 0 {
-		prices = append(prices, Price{
-			Type:      "Ethereum",
-			BuyPrice:  coinGeckoResp.Ethereum.USD,
-			SellPrice: coinGeckoResp.Ethereum.USD,
-			Unit:      "ETH",
-			Currency:  "USD",
-			Source:    "coingecko",
-			Timestamp: timestamp,
-		})
+	coinUnitMap := map[string]string{
+		"bitcoin":     "BTC",
+		"ethereum":    "ETH",
+		"binancecoin": "BNB",
+	}
+
+	for coinId, priceData := range coinGeckoResp {
+		if priceData.USD > 0 {
+			displayName := coinNameMap[coinId]
+			if displayName == "" {
+				displayName = strings.Title(coinId)
+			}
+
+			unit := coinUnitMap[coinId]
+			if unit == "" {
+				unit = strings.ToUpper(coinId[:3])
+			}
+
+			prices = append(prices, Price{
+				Type:      displayName,
+				BuyPrice:  priceData.USD,
+				SellPrice: priceData.USD,
+				Unit:      unit,
+				Currency:  "USD",
+				Source:    "coingecko",
+				Timestamp: timestamp,
+			})
+		}
 	}
 
 	return prices, nil
