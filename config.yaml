@@ -18,6 +18,9 @@ price_sources:
     enabled: true
     base_url: "https://www.mihong.vn/vi/gia-vang-trong-nuoc"
     api_url: "https://www.mihong.vn/api/v1/gold/prices/current"
+  coingecko:
+    enabled: true
+    api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd"
 
 # Telegram notifications (optional)
 telegram:

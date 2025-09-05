@@ -56,6 +56,9 @@ func setDefaults() {
 	viper.SetDefault("price_sources.vietgold.enabled", false)
 	viper.SetDefault("price_sources.vietgold.api_url", "")
 
+	viper.SetDefault("price_sources.coingecko.enabled", false)
+	viper.SetDefault("price_sources.coingecko.api_url", "")
+
 	viper.SetDefault("telegram.enabled", false)
 	viper.SetDefault("telegram.bot_token", "")
 	viper.SetDefault("telegram.channel_id", "")
