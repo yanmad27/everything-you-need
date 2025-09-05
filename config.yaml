@@ -20,7 +20,7 @@ price_sources:
     api_url: "https://www.mihong.vn/api/v1/gold/prices/current"
   coingecko:
     enabled: true
-    api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd"
+    api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin&vs_currencies=usd"
 
 # Telegram notifications (optional)
 telegram:
