@@ -127,28 +127,28 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
 						change, hasChange := sourceChanges[price.Type]
 
-						priceText := fmt.Sprintf("• 💰%s: *%s* - *%s*",
-							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice))
+						priceText := fmt.Sprintf("• 💰%s: ", price.Currency)
+						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
+						sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
 
 						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) {
-							var changeText string
 
 							if change.BuyChange > 0 {
-								changeText += fmt.Sprintf(" 📈+%.1f%%", change.BuyChange)
+								buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
 							} else if change.BuyChange < 0 {
-								changeText += fmt.Sprintf(" 📉%.1f%%", change.BuyChange)
+								buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
 							}
 
 							if change.SellChange != 0 && change.SellChange != change.BuyChange {
 								if change.SellChange > 0 {
-									changeText += fmt.Sprintf("/📈+%.1f%%", change.SellChange)
+									sellText += fmt.Sprintf("/📈+%.1f%% ", change.SellChange)
 								} else {
-									changeText += fmt.Sprintf("/📉%.1f%%", change.SellChange)
+									sellText += fmt.Sprintf("/📉%.1f%% ", change.SellChange)
 								}
 							}
 
-							priceText += changeText
 						}
+						priceText += fmt.Sprintf("%s - %s", buyText, sellText)
 
 						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
 						break
