@@ -40,7 +40,7 @@ func NewTeleNotiService(config *config.Config) *TeleNotiService {
 		return nil
 	}
 
-	log.Printf("✓ Telegram notification service initialized")
+	log.Printf("Telegram notification service initialized")
 
 	return &TeleNotiService{
 		botToken: config.Telegram.BotToken,

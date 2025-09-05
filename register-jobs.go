@@ -13,119 +13,81 @@ import (
 	"time"
 )
 
-func registerJobs(scheduler *jobscheduler.SimpleScheduler, priceService *pricetracker.PriceTrackerService, teleService *telenoti.TeleNotiService, cfg *config.Config) {
-	// Initialize price history service
+func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telenoti.TeleNotiService, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
-	// scheduler.RegisterJob("price-fetch", 5*time.Minute, func() error {
-	// 	log.Println("Fetching latest prices...")
-
-	// 	allPrices, err := priceService.GetAllPrices()
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to fetch prices: %w", err)
-	// 	}
-
-	// 	totalPrices := 0
-	// 	for source, prices := range allPrices {
-	// 		totalPrices += len(prices)
-	// 		log.Printf("Fetched %d prices from %s", len(prices), source)
-	// 	}
-
-	// 	log.Printf("Price fetch completed: %d total prices", totalPrices)
-	// 	return nil
-	// })
+	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 
 	if teleService != nil && cfg.Telegram.ChannelID != "" {
-		// Register price notifications for 7am, 1pm, and 7pm
-		times := []string{"07:00", "13:00", "19:00"}
-		for _, timeSlot := range times {
-			jobName := fmt.Sprintf("price-notification-%s", timeSlot)
-			err := scheduler.RegisterDailyJob(jobName, timeSlot, func() error {
-				log.Printf("Sending price notification at %s...", timeSlot)
+		jobName := "price-notification"
+		err := scheduler.RegisterCronJob(jobName, "0 7,13,19 * * *", func() error {
+			log.Printf("Sending price notification at %s...", now.Format("15:04 02/01/2006"))
 
-				// Get current prices with retry logic
-				var allPrices map[string][]pricetracker.Price
-				var lastFetchErr error
-				maxFetchRetries := 3
-				fetchRetryDelay := 10 * time.Second
+			var allPrices map[string][]pricetracker.Price
+			var lastFetchErr error
+			maxFetchRetries := 3
+			fetchRetryDelay := 10 * time.Second
 
-				for attempt := 1; attempt <= maxFetchRetries; attempt++ {
-					allPrices, lastFetchErr = priceService.GetAllPrices()
-					if lastFetchErr == nil {
-						break // Success, exit retry loop
-					}
-
-					log.Printf("Attempt %d failed to fetch prices: %v", attempt, lastFetchErr)
-
-					if attempt < maxFetchRetries {
-						log.Printf("Retrying price fetch in %v...", fetchRetryDelay)
-						time.Sleep(fetchRetryDelay)
-						fetchRetryDelay *= 2 // Exponential backoff: 10s, 20s, 40s
-					}
+			for attempt := 1; attempt <= maxFetchRetries; attempt++ {
+				allPrices, lastFetchErr = priceService.GetAllPrices()
+				if lastFetchErr == nil {
+					break
 				}
 
-				// If all price fetch attempts failed, send error notification
-				if lastFetchErr != nil {
-					errorMessage := fmt.Sprintf("❌ *Price Fetch Error*\n🕐 %s\n\nFailed to fetch gold prices after %d attempts.\nError: %v\n\n🤖 _Automated error report_",
-						time.Now().In(time.FixedZone("UTC+7", 7*60*60)).Format("15:04 02/01/2006"),
-						maxFetchRetries,
-						lastFetchErr)
+				log.Printf("Attempt %d failed to fetch prices: %v", attempt, lastFetchErr)
 
-					// Try to send error notification (without retry to avoid infinite loops)
-					if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, errorMessage); sendErr != nil {
-						log.Printf("Failed to send error notification: %v", sendErr)
-					}
-
-					return fmt.Errorf("failed to fetch prices after %d attempts: %w", maxFetchRetries, lastFetchErr)
+				if attempt < maxFetchRetries {
+					log.Printf("Retrying price fetch in %v...", fetchRetryDelay)
+					time.Sleep(fetchRetryDelay)
+					fetchRetryDelay *= 2
 				}
-
-				// Get previous price history
-				lastHistory, err := historyService.GetLastPriceHistory()
-				if err != nil {
-					log.Printf("Warning: failed to get price history: %v", err)
-				}
-
-				// Compare prices and generate changes
-				var changes map[string][]pricetracker.PriceChange
-				if lastHistory != nil {
-					changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
-				}
-
-				// Generate notification message with price changes
-				message := generatePriceNotification(allPrices, changes, nil)
-
-				// Send notification
-				err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
-				if err != nil {
-					return fmt.Errorf("failed to send notification: %w", err)
-				}
-
-				// Save current prices as history for next comparison
-				if err := historyService.SavePriceHistory(allPrices); err != nil {
-					log.Printf("Warning: failed to save price history: %v", err)
-				}
-
-				log.Printf("Price notification at %s sent successfully", timeSlot)
-				return nil
-			})
-			if err != nil {
-				log.Printf("Failed to register notification job for %s: %v", timeSlot, err)
 			}
+
+			if lastFetchErr != nil {
+				errorMessage := fmt.Sprintf("❌ *Price Fetch Error*\n🕐 %s\n\nFailed to fetch gold prices after %d attempts.\nError: %v\n\n🤖 _Automated error report_",
+					time.Now().In(time.FixedZone("UTC+7", 7*60*60)).Format("15:04 02/01/2006"),
+					maxFetchRetries,
+					lastFetchErr)
+
+				// Try to send error notification (without retry to avoid infinite loops)
+				if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, errorMessage); sendErr != nil {
+					log.Printf("Failed to send error notification: %v", sendErr)
+				}
+
+				return fmt.Errorf("failed to fetch prices after %d attempts: %w", maxFetchRetries, lastFetchErr)
+			}
+
+			lastHistory, err := historyService.GetLastPriceHistory()
+			if err != nil {
+				log.Printf("Warning: failed to get price history: %v", err)
+			}
+			var changes map[string][]pricetracker.PriceChange
+			if lastHistory != nil {
+				changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
+			}
+
+			message := generatePriceNotification(allPrices, changes, nil)
+
+			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
+			if err != nil {
+				return fmt.Errorf("failed to send notification: %w", err)
+			}
+
+			if err := historyService.SavePriceHistory(allPrices); err != nil {
+				log.Printf("Warning: failed to save price history: %v", err)
+			}
+
+			log.Printf("Price notification at %s sent successfully", now.Format("15:04 02/01/2006"))
+			return nil
+		})
+		if err != nil {
+			log.Printf("Failed to register notification job for %s: %v", now.Format("15:04 02/01/2006"), err)
 		}
 	}
-
-	scheduler.RegisterJob("health-check", 1*time.Minute, func() error {
-		log.Printf("Health check: %s is running", cfg.App.Name)
-		return nil
-	})
 
 	jobs := scheduler.GetJobs()
 	log.Printf("Registered %d jobs", len(jobs))
 	for _, job := range jobs {
-		if job["type"] == "daily" {
-			log.Printf("- %s (daily at %s)", job["name"], job["daily_time"])
-		} else {
-			log.Printf("- %s (interval: %s)", job["name"], job["interval"])
-		}
+		log.Printf("- %s (cron: %s)", job["name"], job["cron_expr"])
 	}
 }
 
@@ -149,7 +111,6 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 		if len(prices) > 0 {
 			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
 
-			// Get changes for this source if available
 			sourceChanges := make(map[string]pricetracker.PriceChange)
 			if changes != nil {
 				if sourceChangesList, exists := changes[source]; exists {
@@ -164,13 +125,11 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 				price := prices[i]
 				for _, keyword := range keywords {
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
-						// Check if we have change data for this price
 						change, hasChange := sourceChanges[price.Type]
 
 						priceText := fmt.Sprintf("• 💰%s: *%s* - *%s*",
 							price.Currency, formatPrice(price.BuyPrice), formatPrice(price.SellPrice))
 
-						// Add change indicators if available
 						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) {
 							var changeText string
 

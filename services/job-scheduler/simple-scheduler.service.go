@@ -4,78 +4,56 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-// SimpleJob represents a basic scheduled job
-type SimpleJob struct {
-	Name      string
-	Interval  time.Duration
-	DailyTime string // Format: "15:04" for daily scheduling (optional)
-	Handler   func() error
-	enabled   bool
-	lastRun   time.Time
+type CronJob struct {
+	Name     string
+	CronExpr string
+	Handler  func() error
+	enabled  bool
+	lastRun  time.Time
 }
 
-// SimpleScheduler is a basic job scheduler
-type SimpleScheduler struct {
-	jobs    []*SimpleJob
+type JobScheduler struct {
+	jobs    []*CronJob
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
 	mu      sync.RWMutex
 }
 
-// NewSimpleScheduler creates a new simple scheduler
-func NewSimpleScheduler() *SimpleScheduler {
-	return &SimpleScheduler{
-		jobs: make([]*SimpleJob, 0),
+func NewJobScheduler() *JobScheduler {
+	return &JobScheduler{
+		jobs: make([]*CronJob, 0),
 	}
 }
 
-// RegisterJob registers a new job with interval
-func (s *SimpleScheduler) RegisterJob(name string, interval time.Duration, handler func() error) {
+func (s *JobScheduler) RegisterCronJob(name string, cronExpr string, handler func() error) error {
+	if cronExpr == "" {
+		return fmt.Errorf("cron expression cannot be empty")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	job := &SimpleJob{
+	job := &CronJob{
 		Name:     name,
-		Interval: interval,
+		CronExpr: cronExpr,
 		Handler:  handler,
 		enabled:  true,
-		lastRun:  time.Time{}, // Never run
+		lastRun:  time.Time{},
 	}
 
 	s.jobs = append(s.jobs, job)
-	log.Printf("Registered job: %s (interval: %v)", name, interval)
-}
-
-// RegisterDailyJob registers a new job that runs daily at a specific time
-func (s *SimpleScheduler) RegisterDailyJob(name string, timeStr string, handler func() error) error {
-	// Validate time format
-	if _, err := time.Parse("15:04", timeStr); err != nil {
-		return fmt.Errorf("invalid time format %s, expected HH:MM", timeStr)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	job := &SimpleJob{
-		Name:      name,
-		DailyTime: timeStr,
-		Handler:   handler,
-		enabled:   true,
-		lastRun:   time.Time{}, // Never run
-	}
-
-	s.jobs = append(s.jobs, job)
-	log.Printf("Registered daily job: %s (time: %s)", name, timeStr)
+	log.Printf("Registered cron job: %s (cron: %s)", name, cronExpr)
 	return nil
 }
 
-// Start begins the scheduler
-func (s *SimpleScheduler) Start(ctx context.Context) {
+func (s *JobScheduler) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -88,12 +66,10 @@ func (s *SimpleScheduler) Start(ctx context.Context) {
 
 	log.Printf("Starting simple job scheduler with %d jobs", len(s.jobs))
 
-	// Start monitoring goroutine
 	go s.run()
 }
 
-// Stop gracefully stops the scheduler
-func (s *SimpleScheduler) Stop() {
+func (s *JobScheduler) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -107,8 +83,7 @@ func (s *SimpleScheduler) Stop() {
 	log.Println("Job scheduler stopped")
 }
 
-// EnableJob enables a specific job
-func (s *SimpleScheduler) EnableJob(name string) {
+func (s *JobScheduler) EnableJob(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,8 +96,7 @@ func (s *SimpleScheduler) EnableJob(name string) {
 	}
 }
 
-// DisableJob disables a specific job
-func (s *SimpleScheduler) DisableJob(name string) {
+func (s *JobScheduler) DisableJob(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -135,26 +109,20 @@ func (s *SimpleScheduler) DisableJob(name string) {
 	}
 }
 
-// GetJobs returns all registered jobs info
-func (s *SimpleScheduler) GetJobs() []map[string]interface{} {
+func (s *JobScheduler) GetJobs() []map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]map[string]interface{}, len(s.jobs))
+	result := make([]map[string]any, len(s.jobs))
 	for i, job := range s.jobs {
-		jobInfo := map[string]interface{}{
+		jobInfo := map[string]any{
 			"name":     job.Name,
 			"enabled":  job.enabled,
 			"last_run": job.lastRun,
 		}
 
-		if job.DailyTime != "" {
-			jobInfo["daily_time"] = job.DailyTime
-			jobInfo["type"] = "daily"
-		} else {
-			jobInfo["interval"] = job.Interval.String()
-			jobInfo["type"] = "interval"
-		}
+		jobInfo["cron_expr"] = job.CronExpr
+		jobInfo["type"] = "cron"
 
 		result[i] = jobInfo
 	}
@@ -162,9 +130,8 @@ func (s *SimpleScheduler) GetJobs() []map[string]interface{} {
 	return result
 }
 
-// run is the main scheduler loop
-func (s *SimpleScheduler) run() {
-	ticker := time.NewTicker(10 * time.Second) // Check every 10 seconds
+func (s *JobScheduler) run() {
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -177,86 +144,117 @@ func (s *SimpleScheduler) run() {
 	}
 }
 
-// checkAndRunJobs checks which jobs need to run
-func (s *SimpleScheduler) checkAndRunJobs() {
+func (s *JobScheduler) checkAndRunJobs() {
 	s.mu.RLock()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
-	jobsToRun := make([]*SimpleJob, 0)
+	jobsToRun := make([]*CronJob, 0)
 
 	for _, job := range s.jobs {
 		if !job.enabled {
 			continue
 		}
 
-		shouldRun := false
-
-		if job.DailyTime != "" {
-			// Daily job - check if it's time to run today
-			shouldRun = s.shouldRunDailyJob(job, now)
-		} else if job.Interval > 0 {
-			// Interval job - check if enough time has passed
-			if job.lastRun.IsZero() || now.Sub(job.lastRun) >= job.Interval {
-				shouldRun = true
-			}
-		}
-
-		if shouldRun {
+		if s.shouldRunCronJob(job, now) {
 			jobsToRun = append(jobsToRun, job)
 		}
 	}
 	s.mu.RUnlock()
 
-	// Execute jobs
 	for _, job := range jobsToRun {
 		go s.executeJob(job)
 	}
 }
 
-// shouldRunDailyJob checks if a daily job should run
-func (s *SimpleScheduler) shouldRunDailyJob(job *SimpleJob, now time.Time) bool {
-	// Parse the target time
-	_, err := time.Parse("15:04", job.DailyTime)
-	if err != nil {
-		log.Printf("Invalid time format for job %s: %s", job.Name, job.DailyTime)
+func (s *JobScheduler) shouldRunCronJob(job *CronJob, now time.Time) bool {
+	if !isValidCron(job.CronExpr) {
 		return false
 	}
 
-	// Create today's target datetime
-	today := now.Format("2006-01-02")
-	todayTarget, err := time.Parse("2006-01-02 15:04", today+" "+job.DailyTime)
-	if err != nil {
-		return false
+	if job.lastRun.IsZero() {
+		return true
 	}
 
-	// Check if we've already run today
-	if !job.lastRun.IsZero() {
-		lastRunDate := job.lastRun.Format("2006-01-02")
-		todayDate := now.Format("2006-01-02")
-		if lastRunDate == todayDate {
-			// Already ran today
-			return false
-		}
-	}
-
-	// Check if current time is past the target time
-	return now.After(todayTarget)
+	return isCronMatch(job.CronExpr, now)
 }
 
-// executeJob runs a single job
-func (s *SimpleScheduler) executeJob(job *SimpleJob) {
+func (s *JobScheduler) executeJob(job *CronJob) {
 	log.Printf("Running job: %s", job.Name)
 	start := time.Now()
 
-	// Update last run time
 	s.mu.Lock()
 	job.lastRun = start
 	s.mu.Unlock()
 
-	// Execute job handler
 	if err := job.Handler(); err != nil {
 		log.Printf("Job %s failed: %v", job.Name, err)
 	} else {
 		duration := time.Since(start)
 		log.Printf("Job %s completed in %v", job.Name, duration)
 	}
+}
+
+func isCronMatch(cronExpression string, now ...time.Time) bool {
+	var currentTime time.Time
+	if len(now) > 0 {
+		currentTime = now[0]
+	} else {
+		currentTime = time.Now()
+	}
+
+	if !isValidCron(cronExpression) {
+		return false
+	}
+
+	parts := strings.Fields(strings.TrimSpace(cronExpression))
+
+	minute := currentTime.Minute()
+	hour := currentTime.Hour()
+	day := currentTime.Day()
+	month := int(currentTime.Month())
+	weekday := int(currentTime.Weekday())
+
+	return matchesField(parts[0], minute) &&
+		matchesField(parts[1], hour) &&
+		matchesField(parts[2], day) &&
+		matchesField(parts[3], month) &&
+		matchesField(parts[4], weekday)
+}
+
+func matchesField(field string, current int) bool {
+	if field == "*" {
+		return true
+	}
+
+	if strings.Contains(field, "/") {
+		parts := strings.Split(field, "/")
+		step, _ := strconv.Atoi(parts[1])
+		if parts[0] == "*" {
+			return current%step == 0
+		}
+		return matchesField(parts[0], current) && current%step == 0
+	}
+
+	if strings.Contains(field, ",") {
+		for _, part := range strings.Split(field, ",") {
+			if matchesField(strings.TrimSpace(part), current) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if strings.Contains(field, "-") {
+		parts := strings.Split(field, "-")
+		start, _ := strconv.Atoi(parts[0])
+		end, _ := strconv.Atoi(parts[1])
+		return current >= start && current <= end
+	}
+
+	value, _ := strconv.Atoi(field)
+	return value == current
+}
+
+func isValidCron(cronExpression string) bool {
+	parts := strings.Fields(strings.TrimSpace(cronExpression))
+	return len(parts) == 5
 }
