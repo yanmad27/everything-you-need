@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,13 +16,14 @@ import (
 func main() {
 	cfg := config.ConfigMod.Resolve()
 
-	fmt.Printf("=== %s ===\n", cfg.App.Name)
-	fmt.Printf("Environment: %s\n", cfg.App.Environment)
+	log.Printf("=== %s ===\n", cfg.App.Name)
+	log.Printf("Environment: %s\n", cfg.App.Environment)
+	log.Printf("\n")
 
 	priceService := pricetracker.PriceTrackerServiceMod.Resolve()
 	teleService := telenoti.TeleNotiServiceMod.Resolve()
 
-	scheduler := jobscheduler.NewSimpleScheduler()
+	scheduler := jobscheduler.NewJobScheduler()
 
 	registerJobs(scheduler, priceService, teleService, cfg)
 
