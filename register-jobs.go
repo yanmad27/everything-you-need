@@ -19,7 +19,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 
 	if teleService != nil && cfg.Telegram.ChannelID != "" {
 		jobName := "price-notification"
-		err := scheduler.RegisterCronJob(jobName, "0 7,13,19 * * *", func() error {
+		err := scheduler.RegisterCronJob(jobName, "0 11,12,13,14,15,16 * * *", func() error {
 			log.Printf("Sending price notification at %s...", now.Format("15:04 02/01/2006"))
 
 			var allPrices map[string][]pricetracker.Price
