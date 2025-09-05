@@ -131,7 +131,7 @@ func (s *JobScheduler) GetJobs() []map[string]any {
 }
 
 func (s *JobScheduler) run() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {

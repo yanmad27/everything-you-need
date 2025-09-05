@@ -19,7 +19,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 
 	if teleService != nil && cfg.Telegram.ChannelID != "" {
 		jobName := "price-notification"
-		err := scheduler.RegisterCronJob(jobName, "0 */1 * * *", func() error {
+		err := scheduler.RegisterCronJob(jobName, "0 7 * * *", func() error {
 			log.Printf("Sending price notification at %s...", now.Format("15:04 02/01/2006"))
 
 			var allPrices map[string][]pricetracker.Price
@@ -65,11 +65,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 				changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
 			}
 
-			message, changed := generatePriceNotification(allPrices, changes, nil)
-
-			if !changed || now.Hour() != 7 {
-				return nil
-			}
+			message := generatePriceNotification(allPrices, changes, nil)
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -95,23 +91,22 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 	}
 }
 
-func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) (string, bool) {
+func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		// Fallback to UTC+7 if timezone loading fails
 		loc = time.FixedZone("UTC+7", 7*60*60)
 	}
-	anyChange := false
 	now := time.Now().In(loc)
 	message := "📊 *Price Update*\n"
 	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
 
 	if len(allPrices) == 0 {
 		message += "No price data available"
-		return message, false
+		return message
 	}
 
-	keywords := []string{"9999", "tròn trơn", "sjc"}
+	keywords := []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum"}
 	for source, prices := range allPrices {
 		if len(prices) > 0 {
 			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
@@ -136,8 +131,7 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
 						sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
 
-						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) {
-							anyChange = true
+						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
 							if change.BuyChange > 0 {
 								buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
 							} else if change.BuyChange < 0 {
@@ -170,7 +164,7 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 	}
 
 	message += "🤖 _Automated update_"
-	return message, anyChange
+	return message
 }
 
 func formatType(typeStr string) string {
