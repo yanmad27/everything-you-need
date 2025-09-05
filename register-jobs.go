@@ -127,7 +127,11 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
 						change, hasChange := sourceChanges[price.Type]
 
-						priceText := fmt.Sprintf("• 💰%s: ", price.Currency)
+						currencyMap := map[string]string{
+							"VND": "💰",
+							"USD": "💵",
+						}
+						priceText := fmt.Sprintf("• %s: ", currencyMap[price.Currency])
 						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
 						sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
 
