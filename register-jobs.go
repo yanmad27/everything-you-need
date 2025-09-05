@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+var currencyMap = map[string]string{
+	"VND": "💰",
+	"USD": "💵",
+}
+
 func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telenoti.TeleNotiService, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
@@ -107,7 +112,19 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 	}
 
 	keywords := []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum"}
+
+	goldSources := make(map[string][]pricetracker.Price)
+	cryptoSources := make(map[string][]pricetracker.Price)
+
 	for source, prices := range allPrices {
+		if source == "CoinGecko" {
+			cryptoSources[source] = prices
+		} else {
+			goldSources[source] = prices
+		}
+	}
+
+	for source, prices := range goldSources {
 		if len(prices) > 0 {
 			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
 
@@ -127,11 +144,7 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 					if strings.Contains(strings.ToLower(price.Type), keyword) {
 						change, hasChange := sourceChanges[price.Type]
 
-						currencyMap := map[string]string{
-							"VND": "💰",
-							"USD": "💵",
-						}
-						priceText := fmt.Sprintf("• %s: ", currencyMap[price.Currency])
+						priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
 						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
 						sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
 
@@ -152,6 +165,49 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 
 						}
 						priceText += fmt.Sprintf("%s - %s", buyText, sellText)
+
+						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
+						break
+					}
+				}
+			}
+
+			message += "\n"
+		}
+	}
+
+	for source, prices := range cryptoSources {
+		if len(prices) > 0 {
+			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
+
+			sourceChanges := make(map[string]pricetracker.PriceChange)
+			if changes != nil {
+				if sourceChangesList, exists := changes[source]; exists {
+					for _, change := range sourceChangesList {
+						sourceChanges[change.Price.Type] = change
+					}
+				}
+			}
+
+			count := len(prices)
+			for i := 0; i < count; i++ {
+				price := prices[i]
+				for _, keyword := range keywords {
+					if strings.Contains(strings.ToLower(price.Type), keyword) {
+						change, hasChange := sourceChanges[price.Type]
+
+						priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
+						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
+
+						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
+							if change.BuyChange > 0 {
+								buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
+							} else if change.BuyChange < 0 {
+								buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
+							}
+
+						}
+						priceText += fmt.Sprintf("%s", buyText)
 
 						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
 						break
