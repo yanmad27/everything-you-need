@@ -1,0 +1,15 @@
+name: Test
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  test_noto:
+    run: |
+     curl -X POST 'https://api.telegram.org/bot***REMOVED***/sendMessage'
+      -H 'Content-Type: application/json'
+      -d '{
+        "chat_id": "-1002923319232",
+        "text": "Your message here"
+        }'
