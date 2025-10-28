@@ -2,7 +2,7 @@ name: Test
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened]
 
 jobs:
   test_noti:
