@@ -39,3 +39,13 @@ type AppConfig struct {
 	Environment string `mapstructure:"environment"`
 	LogLevel    string `mapstructure:"log_level"`
 }
+
+type UserManagementConfig struct {
+	Enabled           bool   `mapstructure:"enabled"`
+	HTTPPort          string `mapstructure:"http_port"`
+	JWTSecret         string `mapstructure:"jwt_secret"`
+	JWTExpirationHours int   `mapstructure:"jwt_expiration_hours"`
+	DefaultAdminUsername string `mapstructure:"default_admin_username"`
+	DefaultAdminEmail    string `mapstructure:"default_admin_email"`
+	DefaultAdminPassword string `mapstructure:"default_admin_password"`
+}

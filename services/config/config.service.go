@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	PriceSources PriceSourcesConfig `mapstructure:"price_sources"`
-	Telegram     TelegramConfig     `mapstructure:"telegram"`
-	App          AppConfig          `mapstructure:"app"`
+	PriceSources   PriceSourcesConfig   `mapstructure:"price_sources"`
+	Telegram       TelegramConfig       `mapstructure:"telegram"`
+	App            AppConfig            `mapstructure:"app"`
+	UserManagement UserManagementConfig `mapstructure:"user_management"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -63,4 +64,12 @@ func setDefaults() {
 	viper.SetDefault("telegram.bot_token", "")
 	viper.SetDefault("telegram.channel_id", "")
 	viper.SetDefault("telegram.timeout_seconds", 30)
+
+	viper.SetDefault("user_management.enabled", true)
+	viper.SetDefault("user_management.http_port", "8080")
+	viper.SetDefault("user_management.jwt_secret", "change-this-secret-in-production")
+	viper.SetDefault("user_management.jwt_expiration_hours", 24)
+	viper.SetDefault("user_management.default_admin_username", "admin")
+	viper.SetDefault("user_management.default_admin_email", "admin@example.com")
+	viper.SetDefault("user_management.default_admin_password", "admin123")
 }

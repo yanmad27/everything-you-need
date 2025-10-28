@@ -27,6 +27,16 @@ telegram:
   enabled: true
   bot_token: "8275670284:AAECfL45PycZ8tYNRIw-mVRuAqzP8Hqn3RQ"
   channel_id: "-1002923319232"
+# User Management (optional)
+user_management:
+  enabled: true
+  http_port: "8080"
+  jwt_secret: "change-this-secret-in-production"
+  jwt_expiration_hours: 24
+  default_admin_username: "admin"
+  default_admin_email: "admin@example.com"
+  default_admin_password: "admin123"
+
 # Environment variable examples:
 # APP_NAME="My Price Tracker"
 # APP_ENVIRONMENT="production"
@@ -35,3 +45,7 @@ telegram:
 # TELEGRAM_BOT_TOKEN="1234567890:ABCdef..."
 # TELEGRAM_CHANNEL_ID="@mychannel"
 # TELEGRAM_TIMEOUT_SECONDS="30"
+# USER_MANAGEMENT_ENABLED="true"
+# USER_MANAGEMENT_HTTP_PORT="8080"
+# USER_MANAGEMENT_JWT_SECRET="your-secret-key"
+# USER_MANAGEMENT_JWT_EXPIRATION_HOURS="24"
