@@ -12,10 +12,13 @@ jobs:
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
         run: |
-          MESSAGE="Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\nLabels: ${ISSUE_LABELS}\nURL: ${ISSUE_URL}"
+          LABELS=$(echo '${{ toJSON(github.event.issue.labels) }}' | jq -r '.[].name' | paste -sd "," -)
+          if [ -z "$LABELS" ]; then
+            LABELS="none"
+          fi
+          MESSAGE="Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\nLabels: ${LABELS}\nURL: ${ISSUE_URL}"
           curl -X POST 'https://api.telegram.org/bot8275670284:AAECfL45PycZ8tYNRIw-mVRuAqzP8Hqn3RQ/sendMessage' \
             -H 'Content-Type: application/json' \
             -d "{\"chat_id\": \"-1002923319232\",\"text\": \"${MESSAGE}\"}"
