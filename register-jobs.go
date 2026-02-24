@@ -48,17 +48,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 			}
 
 			if lastFetchErr != nil {
-				errorMessage := fmt.Sprintf("❌ *Price Fetch Error*\n🕐 %s\n\nFailed to fetch gold prices after %d attempts.\nError: %v\n\n🤖 _Automated error report_",
-					time.Now().In(time.FixedZone("UTC+7", 7*60*60)).Format("15:04 02/01/2006"),
-					maxFetchRetries,
-					lastFetchErr)
-
-				// Try to send error notification (without retry to avoid infinite loops)
-				if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, errorMessage); sendErr != nil {
-					log.Printf("Failed to send error notification: %v", sendErr)
-				}
-
-				return fmt.Errorf("failed to fetch prices after %d attempts: %w", maxFetchRetries, lastFetchErr)
+				log.Printf("Some sources failed after %d attempts: %v", maxFetchRetries, lastFetchErr)
 			}
 
 			lastHistory, err := historyService.GetLastPriceHistory()
@@ -70,7 +60,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 				changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
 			}
 
-			message := generatePriceNotification(allPrices, changes, nil)
+			message := generatePriceNotification(allPrices, changes, lastFetchErr)
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -96,7 +86,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 	}
 }
 
-func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {
+func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, _ error) string {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		// Fallback to UTC+7 if timezone loading fails
@@ -125,102 +115,104 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 	}
 
 	for source, prices := range goldSources {
-		if len(prices) > 0 {
-			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
-
-			sourceChanges := make(map[string]pricetracker.PriceChange)
-			if changes != nil {
-				if sourceChangesList, exists := changes[source]; exists {
-					for _, change := range sourceChangesList {
-						sourceChanges[change.Price.Type] = change
-					}
-				}
-			}
-
-			count := len(prices)
-			for i := 0; i < count; i++ {
-				price := prices[i]
-				for _, keyword := range keywords {
-					if strings.Contains(strings.ToLower(price.Type), keyword) {
-						change, hasChange := sourceChanges[price.Type]
-
-						priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
-						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
-						sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
-
-						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
-							if change.BuyChange > 0 {
-								buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
-							} else if change.BuyChange < 0 {
-								buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
-							}
-
-							if change.SellChange != 0 && change.SellChange != change.BuyChange {
-								if change.SellChange > 0 {
-									sellText += fmt.Sprintf("/📈+%.1f%% ", change.SellChange)
-								} else {
-									sellText += fmt.Sprintf("/📉%.1f%% ", change.SellChange)
-								}
-							}
-
-						}
-						priceText += fmt.Sprintf("%s - %s", buyText, sellText)
-
-						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
-						break
-					}
-				}
-			}
-
-			message += "\n"
+		if len(prices) == 0 {
+			message += fmt.Sprintf("*%s*\n• N/A\n\n", source)
+			continue
 		}
+
+		message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
+
+		sourceChanges := make(map[string]pricetracker.PriceChange)
+		if changes != nil {
+			if sourceChangesList, exists := changes[source]; exists {
+				for _, change := range sourceChangesList {
+					sourceChanges[change.Price.Type] = change
+				}
+			}
+		}
+
+		count := len(prices)
+		for i := 0; i < count; i++ {
+			price := prices[i]
+			for _, keyword := range keywords {
+				if strings.Contains(strings.ToLower(price.Type), keyword) {
+					change, hasChange := sourceChanges[price.Type]
+
+					priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
+					buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
+					sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
+
+					if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
+						if change.BuyChange > 0 {
+							buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
+						} else if change.BuyChange < 0 {
+							buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
+						}
+
+						if change.SellChange != 0 && change.SellChange != change.BuyChange {
+							if change.SellChange > 0 {
+								sellText += fmt.Sprintf("/📈+%.1f%% ", change.SellChange)
+							} else {
+								sellText += fmt.Sprintf("/📉%.1f%% ", change.SellChange)
+							}
+						}
+
+					}
+					priceText += fmt.Sprintf("%s - %s", buyText, sellText)
+
+					message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
+					break
+				}
+			}
+		}
+
+		message += "\n"
 	}
 
 	for source, prices := range cryptoSources {
-		if len(prices) > 0 {
-			message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
-
-			sourceChanges := make(map[string]pricetracker.PriceChange)
-			if changes != nil {
-				if sourceChangesList, exists := changes[source]; exists {
-					for _, change := range sourceChangesList {
-						sourceChanges[change.Price.Type] = change
-					}
-				}
-			}
-
-			count := len(prices)
-			for i := 0; i < count; i++ {
-				price := prices[i]
-				for _, keyword := range keywords {
-					if strings.Contains(strings.ToLower(price.Type), keyword) {
-						change, hasChange := sourceChanges[price.Type]
-
-						priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
-						buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
-
-						if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
-							if change.BuyChange > 0 {
-								buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
-							} else if change.BuyChange < 0 {
-								buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
-							}
-
-						}
-						priceText += fmt.Sprintf("%s", buyText)
-
-						message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
-						break
-					}
-				}
-			}
-
-			message += "\n"
+		if len(prices) == 0 {
+			message += fmt.Sprintf("*%s*\n• N/A\n\n", source)
+			continue
 		}
-	}
 
-	if err != nil {
-		message += fmt.Sprintf("\nError: %s\n", err.Error())
+		message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
+
+		sourceChanges := make(map[string]pricetracker.PriceChange)
+		if changes != nil {
+			if sourceChangesList, exists := changes[source]; exists {
+				for _, change := range sourceChangesList {
+					sourceChanges[change.Price.Type] = change
+				}
+			}
+		}
+
+		count := len(prices)
+		for i := 0; i < count; i++ {
+			price := prices[i]
+			for _, keyword := range keywords {
+				if strings.Contains(strings.ToLower(price.Type), keyword) {
+					change, hasChange := sourceChanges[price.Type]
+
+					priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
+					buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
+
+					if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
+						if change.BuyChange > 0 {
+							buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
+						} else if change.BuyChange < 0 {
+							buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
+						}
+
+					}
+					priceText += fmt.Sprintf("%s", buyText)
+
+					message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
+					break
+				}
+			}
+		}
+
+		message += "\n"
 	}
 
 	message += "🤖 _Automated update_"
