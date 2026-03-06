@@ -23,7 +23,7 @@ type BTMCResponse struct {
 func NewBTMCSource(apiUrl string) *BTMCSource {
 	return &BTMCSource{
 		apiUrl: apiUrl,
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
