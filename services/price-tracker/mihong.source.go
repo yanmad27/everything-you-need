@@ -151,10 +151,11 @@ func (m *MihongSource) GetPrices() ([]Price, error) {
 			sellPrice = mihongPrice.BuyingPrice
 		}
 
+		// Divide by 1000 to match Doji format (thousands VND)
 		prices = append(prices, Price{
 			Type:      typeName,
-			BuyPrice:  mihongPrice.BuyingPrice,
-			SellPrice: sellPrice,
+			BuyPrice:  mihongPrice.BuyingPrice / 1000,
+			SellPrice: sellPrice / 1000,
 			Currency:  "VND",
 		})
 	}

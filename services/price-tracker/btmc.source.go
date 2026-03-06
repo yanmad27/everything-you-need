@@ -49,6 +49,7 @@ func (v *BTMCSource) GetPrices() ([]Price, error) {
 	}
 
 	var prices []Price
+	seenNames := make(map[string]bool)
 	for _, data := range response.DataList.Data {
 		row, hasRow := data["@row"]
 		if !hasRow {
@@ -60,6 +61,11 @@ func (v *BTMCSource) GetPrices() ([]Price, error) {
 		if name == "" {
 			continue
 		}
+
+		if seenNames[name] {
+			continue
+		}
+		seenNames[name] = true
 
 		buyPriceStr := data["@pb"+suffix]
 		if buyPriceStr == "" {
@@ -82,10 +88,11 @@ func (v *BTMCSource) GetPrices() ([]Price, error) {
 			}
 		}
 
+		// Divide by 1000 to match Doji format (thousands VND)
 		prices = append(prices, Price{
 			Type:      name,
-			BuyPrice:  buyPrice,
-			SellPrice: sellPrice,
+			BuyPrice:  buyPrice / 1000,
+			SellPrice: sellPrice / 1000,
 			Currency:  "VND",
 		})
 	}
