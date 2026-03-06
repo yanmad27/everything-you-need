@@ -103,17 +103,21 @@ func (m *MihongSource) GetPrices() ([]Price, error) {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Try parsing as wrapped response first, then as plain array
+	var mihongPrices []MihongPrice
 	var mihongResp MihongResponse
-	if err := json.Unmarshal(body, &mihongResp); err != nil {
+	if err := json.Unmarshal(body, &mihongResp); err == nil && mihongResp.Success {
+		mihongPrices = mihongResp.Data
+	} else if err := json.Unmarshal(body, &mihongPrices); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
 
-	if !mihongResp.Success {
-		return nil, fmt.Errorf("API returned success=false")
+	if len(mihongPrices) == 0 {
+		return nil, fmt.Errorf("API returned empty data")
 	}
 
 	var prices []Price
-	for _, mihongPrice := range mihongResp.Data {
+	for _, mihongPrice := range mihongPrices {
 		// Create descriptive type name based on code
 		var typeName string
 		switch mihongPrice.Code {
