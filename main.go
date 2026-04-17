@@ -106,11 +106,12 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service) *http.Server 
 	}
 
 	dispatcher := func(ctx context.Context, update telebot.Update) {
-		if update.Message == nil || update.Message.Text == "" {
+		msg := update.AnyMessage()
+		if msg == nil || msg.Text == "" {
 			return
 		}
-		msg := toIncomingMessage(update)
-		if err := svc.HandleIncoming(ctx, msg); err != nil {
+		incoming := toIncomingMessage(msg)
+		if err := svc.HandleIncoming(ctx, incoming); err != nil {
 			log.Printf("webhook dispatch error: %v", err)
 		}
 	}
@@ -135,8 +136,7 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service) *http.Server 
 	return server
 }
 
-func toIncomingMessage(update telebot.Update) reminder.IncomingMessage {
-	msg := update.Message
+func toIncomingMessage(msg *telebot.Message) reminder.IncomingMessage {
 	userName := ""
 	userID := ""
 	if msg.From != nil {

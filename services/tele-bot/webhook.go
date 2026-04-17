@@ -9,8 +9,17 @@ import (
 
 // Update is the subset of Telegram's Update object we consume.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message,omitempty"`
+	UpdateID    int64    `json:"update_id"`
+	Message     *Message `json:"message,omitempty"`
+	ChannelPost *Message `json:"channel_post,omitempty"`
+}
+
+// AnyMessage returns whichever of message / channel_post is present.
+func (u *Update) AnyMessage() *Message {
+	if u.Message != nil {
+		return u.Message
+	}
+	return u.ChannelPost
 }
 
 type Message struct {
