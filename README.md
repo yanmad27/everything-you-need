@@ -160,29 +160,80 @@ You can override any configuration using environment variables:
 
 ## ⏰ Reminder Bot
 
-A Vietnamese natural-language reminder bot reads messages from the Telegram
-channel and schedules reminders. It understands phrases like:
+A Vietnamese natural-language reminder bot. Type a message into the Telegram
+channel and the bot parses the time + task, schedules it, and fires the
+reminder back into the channel when it's due.
 
-- `@bot 2h nữa nhắc tao ăn cơm`
-- `@bot 19h ngày mai nhắc tôi họp với Huy`
-- `@bot thứ 2 tới nhắc mình nộp báo cáo`
+### How to use
 
-Commands:
+Just post in the channel using everyday Vietnamese — the bot picks up anything
+containing **`nhắc tao`**, **`nhắc tôi`**, **`nhắc mình`**, **`nhắc t`**,
+**`nhắc ae`**, **`nhắc mọi người`**, or **`nhắc anh em`**.
+
+#### Creating reminders
+
+| What you type | What happens |
+|---|---|
+| `2h nữa nhắc tao ăn cơm` | Fires 2 hours from now with "ăn cơm" |
+| `30 phút nữa nhắc tôi gọi mẹ` | Fires in 30 minutes |
+| `19h ngày mai nhắc tôi họp với Huy` | Fires at 19:00 tomorrow |
+| `8h sáng mai nhắc mình đi khám` | Fires at 08:00 tomorrow |
+| `thứ 2 tới nhắc mình nộp báo cáo` | Fires next Monday (default 09:00) |
+| `lúc 20:30 nhắc ae đi đá bóng` | Fires at 20:30 today |
+| `1/5 nhắc mọi người họp team 10h` | Fires at 10:00 on 1 May |
+
+When the bot understands the request, it replies immediately with:
+
+```
+✅ Đã đặt nhắc #12: "ăn cơm" vào 19:30 17/04/2026
+```
+
+If the time is ambiguous or in the past, it replies with a reason:
+
+```
+❓ Mình không hiểu: Thời điểm mơ hồ, vui lòng nói rõ giờ/ngày. Thử lại nhé.
+```
+
+#### Firing
+
+When the reminder is due, the bot fires it in the channel as a **reply to
+your original message**, @-mentioning you:
+
+```
+⏰ Nhắc @doan: ăn cơm
+```
+
+Granularity is 1 minute. If the bot was down when it should have fired,
+the reminder is sent on the next minute tick with `(trễ N phút)` prefix.
+
+#### Listing and canceling
 
 | Command | Effect |
 |---|---|
-| `nhắc tao/tôi/mình …` | Create a reminder |
-| `/reminders` or `danh sách nhắc` | List pending reminders |
+| `/reminders` or `danh sách nhắc` | Show all pending reminders with IDs |
 | `/cancel <id>` or `hủy nhắc <id>` | Cancel a pending reminder |
 
-Reminders fire in the same channel as a reply to the original message,
-@-mentioning the author.
+Example session:
+
+```
+You:  2h nữa nhắc tao họp
+Bot:  ✅ Đã đặt nhắc #7: "họp" vào 19:30 17/04/2026
+
+You:  /reminders
+Bot:  📋 Nhắc nhở đang chờ:
+      • #7 — 19:30 17/04/2026 — họp
+      Hủy bằng: /cancel <id>
+
+You:  /cancel 7
+Bot:  🗑 Đã hủy nhắc #7.
+```
 
 ### One-time setup
 
 1. Set `reminder.enabled: true` in `config.yaml`.
 2. Put a Gemini API key in `reminder.gemini_api_key`
-   (get one free at https://aistudio.google.com/app/apikey).
+   (get one free at https://aistudio.google.com/app/apikey — make sure the
+   key's **Billing Tier** is **Free**, not **Unavailable**).
 3. Generate and save a webhook secret:
 
    ```bash
@@ -195,11 +246,17 @@ Reminders fire in the same channel as a reply to the original message,
    ```bash
    curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/setWebhook" \
         -d url=https://smee.io/2iKk7zcT8arhn5WB \
-        -d secret_token=$WEBHOOK_SECRET
+        -d secret_token=$WEBHOOK_SECRET \
+        -d 'allowed_updates=["message","channel_post"]'
    ```
 
+   `allowed_updates` must include `channel_post` for broadcast channels.
+5. Make sure the bot is an **admin** of the channel (so it can read messages
+   and post replies).
+
 The `smee-client` container in `docker-compose.yml` forwards webhook events
-from smee.io to the bot's `:8080/telegram-webhook` endpoint.
+from smee.io to the bot's `:8080/telegram-webhook` endpoint — no public
+HTTPS endpoint needed on the host.
 
 Reminders are stored in SQLite at `data/reminders.db` and persist across
 deploys (the `./data` directory is volume-mounted).
