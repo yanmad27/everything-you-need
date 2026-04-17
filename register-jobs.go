@@ -3,6 +3,7 @@ package main
 import (
 	"everything-you-need/m/services/config"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
+	"everything-you-need/m/services/lunar"
 	pricetracker "everything-you-need/m/services/price-tracker"
 	telenoti "everything-you-need/m/services/tele-noti"
 	"fmt"
@@ -76,6 +77,41 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		})
 		if err != nil {
 			log.Printf("Failed to register notification job for %s: %v", now.Format("15:04 02/01/2006"), err)
+		}
+	}
+
+	if teleService != nil && cfg.Telegram.ChannelID != "" {
+		lunarJobName := "lunar-notification"
+		err := scheduler.RegisterCronJob(lunarJobName, "0 7 * * *", func() error {
+			loc, tzErr := time.LoadLocation("Asia/Ho_Chi_Minh")
+			if tzErr != nil {
+				loc = time.FixedZone("UTC+7", 7*60*60)
+			}
+			today := time.Now().In(loc)
+
+			lunarDay, lunarMonth, lunarYear, leap := lunar.SolarToLunar(
+				today.Year(), int(today.Month()), today.Day(), lunar.VietnamTimeZone,
+			)
+			isLastDay := lunar.IsLastDayOfLunarMonth(today, lunar.VietnamTimeZone)
+			shouldNotify, label := lunar.IsNotifyDay(lunarDay, isLastDay)
+
+			log.Printf("Lunar check %s → %d/%d/%d (leap=%d, lastDay=%v) notify=%v (%s)",
+				today.Format("2006-01-02"), lunarDay, lunarMonth, lunarYear, leap, isLastDay, shouldNotify, label)
+
+			if !shouldNotify {
+				return nil
+			}
+
+			message := generateLunarNotification(today, lunarDay, lunarMonth, lunarYear, leap == 1, label)
+			if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message); sendErr != nil {
+				return fmt.Errorf("failed to send lunar notification: %w", sendErr)
+			}
+
+			log.Printf("Lunar notification sent for %s (%s)", today.Format("2006-01-02"), label)
+			return nil
+		})
+		if err != nil {
+			log.Printf("Failed to register lunar-notification job: %v", err)
 		}
 	}
 
@@ -222,6 +258,43 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 func formatType(typeStr string) string {
 	regex := regexp.MustCompile(`\(([^)]+)\)`)
 	return regex.ReplaceAllString(typeStr, "")
+}
+
+func generateLunarNotification(solar time.Time, lunarDay, lunarMonth, lunarYear int, leap bool, label string) string {
+	monthLabel := fmt.Sprintf("tháng %d", lunarMonth)
+	if leap {
+		monthLabel += " (nhuận)"
+	}
+
+	message := "🌙 *Lịch Âm*\n"
+	message += fmt.Sprintf("📅 Dương lịch: %s\n", solar.Format("02/01/2006"))
+	message += fmt.Sprintf("🗓 Âm lịch: %d/%d/%d%s\n\n", lunarDay, lunarMonth, lunarYear, leapSuffix(leap))
+	message += fmt.Sprintf("🔔 Nhắc nhở: *%s*\n", label)
+	message += fmt.Sprintf("_Hôm nay là %s, %s._\n", describeToday(lunarDay), monthLabel)
+	return message
+}
+
+func leapSuffix(leap bool) string {
+	if leap {
+		return " (nhuận)"
+	}
+	return ""
+}
+
+func describeToday(lunarDay int) string {
+	switch lunarDay {
+	case 1:
+		return "mùng 1"
+	case 14:
+		return "14 âm lịch"
+	case 15:
+		return "rằm"
+	case 13:
+		return "13 âm lịch"
+	case 29, 30:
+		return fmt.Sprintf("%d âm lịch (ngày cuối tháng)", lunarDay)
+	}
+	return fmt.Sprintf("%d âm lịch", lunarDay)
 }
 
 func formatPrice(price float64) string {
