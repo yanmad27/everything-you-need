@@ -209,7 +209,7 @@ deploys (the `./data` directory is volume-mounted).
 Deploy (or redeploy) the latest `main` to the production host:
 
 ```bash
-ssh hrm.gittunner
+ssh hrm.gitrunner
 cd ~/workspace/everything-you-need
 git pull
 docker compose up -d --build
