@@ -158,6 +158,17 @@ You can override any configuration using environment variables:
 2. Configuration file (`config.yaml`)
 3. Default values (lowest)
 
+## 🚢 Deployment
+
+Deploy (or redeploy) the latest `main` to the production host:
+
+```bash
+ssh hrm.gittunner
+cd ~/workspace/everything-you-need
+git pull
+docker compose up -d --build
+```
+
 ## 🤝 Contributing
 
 See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for contribution guidelines.
