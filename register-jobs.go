@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"everything-you-need/m/services/config"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/lunar"
 	pricetracker "everything-you-need/m/services/price-tracker"
-	telenoti "everything-you-need/m/services/tele-noti"
+	"everything-you-need/m/services/reminder"
+	telebot "everything-you-need/m/services/tele-bot"
 	"fmt"
 	"log"
 	"regexp"
@@ -19,7 +21,7 @@ var currencyMap = map[string]string{
 	"USD": "💵",
 }
 
-func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telenoti.TeleNotiService, cfg *config.Config) {
+func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 
@@ -112,6 +114,33 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		})
 		if err != nil {
 			log.Printf("Failed to register lunar-notification job: %v", err)
+		}
+	}
+
+	if reminderService != nil {
+		dispatchErr := scheduler.RegisterCronJob("reminder-dispatch", "* * * * *", func() error {
+			return reminderService.Sweep(context.Background(), time.Now().UTC())
+		})
+		if dispatchErr != nil {
+			log.Printf("Failed to register reminder-dispatch job: %v", dispatchErr)
+		}
+
+		retentionDays := cfg.Reminder.RetentionDays
+		if retentionDays <= 0 {
+			retentionDays = 30
+		}
+		purgeErr := scheduler.RegisterCronJob("reminder-purge", "30 3 * * *", func() error {
+			cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+			updatesCutoff := time.Now().UTC().Add(-14 * 24 * time.Hour)
+			rCount, uCount, err := reminderService.PurgeOld(context.Background(), cutoff, updatesCutoff)
+			if err != nil {
+				return fmt.Errorf("purge: %w", err)
+			}
+			log.Printf("Reminder purge: removed %d reminders, %d processed_updates", rCount, uCount)
+			return nil
+		})
+		if purgeErr != nil {
+			log.Printf("Failed to register reminder-purge job: %v", purgeErr)
 		}
 	}
 

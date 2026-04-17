@@ -158,6 +158,52 @@ You can override any configuration using environment variables:
 2. Configuration file (`config.yaml`)
 3. Default values (lowest)
 
+## ⏰ Reminder Bot
+
+A Vietnamese natural-language reminder bot reads messages from the Telegram
+channel and schedules reminders. It understands phrases like:
+
+- `@bot 2h nữa nhắc tao ăn cơm`
+- `@bot 19h ngày mai nhắc tôi họp với Huy`
+- `@bot thứ 2 tới nhắc mình nộp báo cáo`
+
+Commands:
+
+| Command | Effect |
+|---|---|
+| `nhắc tao/tôi/mình …` | Create a reminder |
+| `/reminders` or `danh sách nhắc` | List pending reminders |
+| `/cancel <id>` or `hủy nhắc <id>` | Cancel a pending reminder |
+
+Reminders fire in the same channel as a reply to the original message,
+@-mentioning the author.
+
+### One-time setup
+
+1. Set `reminder.enabled: true` in `config.yaml`.
+2. Put a Gemini API key in `reminder.gemini_api_key`
+   (get one free at https://aistudio.google.com/app/apikey).
+3. Generate and save a webhook secret:
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+   Put it in `telegram.webhook_secret`.
+4. Register the webhook with Telegram (once):
+
+   ```bash
+   curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/setWebhook" \
+        -d url=https://smee.io/2iKk7zcT8arhn5WB \
+        -d secret_token=$WEBHOOK_SECRET
+   ```
+
+The `smee-client` container in `docker-compose.yml` forwards webhook events
+from smee.io to the bot's `:8080/telegram-webhook` endpoint.
+
+Reminders are stored in SQLite at `data/reminders.db` and persist across
+deploys (the `./data` directory is volume-mounted).
+
 ## 🚢 Deployment
 
 Deploy (or redeploy) the latest `main` to the production host:

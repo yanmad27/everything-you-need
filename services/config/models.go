@@ -29,13 +29,29 @@ type CoinGeckoConfig struct {
 }
 
 type TelegramConfig struct {
-	Enabled   bool   `mapstructure:"enabled"`
-	BotToken  string `mapstructure:"bot_token"`
-	ChannelID string `mapstructure:"channel_id"`
+	Enabled        bool   `mapstructure:"enabled"`
+	BotToken       string `mapstructure:"bot_token"`
+	ChannelID      string `mapstructure:"channel_id"`
+	WebhookSecret  string `mapstructure:"webhook_secret"`
+	WebhookPath    string `mapstructure:"webhook_path"`
 }
 
 type AppConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`
 	LogLevel    string `mapstructure:"log_level"`
+}
+
+type ReminderConfig struct {
+	Enabled          bool   `mapstructure:"enabled"`
+	DBPath           string `mapstructure:"db_path"`
+	LLMProvider      string `mapstructure:"llm_provider"`
+	GeminiAPIKey     string `mapstructure:"gemini_api_key"`
+	GeminiModel      string `mapstructure:"gemini_model"`
+	RetentionDays    int    `mapstructure:"retention_days"`
+	MaxLookaheadDays int    `mapstructure:"max_lookahead_days"`
+}
+
+type ServerConfig struct {
+	ListenAddr string `mapstructure:"listen_addr"`
 }

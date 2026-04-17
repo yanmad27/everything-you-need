@@ -12,6 +12,8 @@ type Config struct {
 	PriceSources PriceSourcesConfig `mapstructure:"price_sources"`
 	Telegram     TelegramConfig     `mapstructure:"telegram"`
 	App          AppConfig          `mapstructure:"app"`
+	Reminder     ReminderConfig     `mapstructure:"reminder"`
+	Server       ServerConfig       `mapstructure:"server"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -63,4 +65,16 @@ func setDefaults() {
 	viper.SetDefault("telegram.bot_token", "")
 	viper.SetDefault("telegram.channel_id", "")
 	viper.SetDefault("telegram.timeout_seconds", 30)
+	viper.SetDefault("telegram.webhook_secret", "")
+	viper.SetDefault("telegram.webhook_path", "/telegram-webhook")
+
+	viper.SetDefault("reminder.enabled", false)
+	viper.SetDefault("reminder.db_path", "data/reminders.db")
+	viper.SetDefault("reminder.llm_provider", "gemini")
+	viper.SetDefault("reminder.gemini_api_key", "")
+	viper.SetDefault("reminder.gemini_model", "gemini-2.5-flash")
+	viper.SetDefault("reminder.retention_days", 30)
+	viper.SetDefault("reminder.max_lookahead_days", 365)
+
+	viper.SetDefault("server.listen_addr", ":8080")
 }

@@ -17,6 +17,24 @@ telegram:
   enabled: true
   bot_token: "your-telegram-bot-token"
   channel_id: "@your_channel_or_chat_id"
+  # Required for the reminder bot webhook. Generate with: openssl rand -hex 32
+  webhook_secret: ""
+  webhook_path: "/telegram-webhook"
+
+# Vietnamese natural-language reminder bot (optional)
+reminder:
+  enabled: false
+  db_path: "data/reminders.db"
+  llm_provider: "gemini"
+  gemini_api_key: ""
+  gemini_model: "gemini-2.5-flash"
+  retention_days: 30
+  max_lookahead_days: 365
+
+# HTTP server for Telegram webhook (only used when reminder.enabled = true)
+server:
+  listen_addr: ":8080"
+
 # Environment variable examples:
 # APP_NAME="My Price Tracker"
 # APP_ENVIRONMENT="production"
@@ -24,3 +42,6 @@ telegram:
 # TELEGRAM_ENABLED="true"
 # TELEGRAM_BOT_TOKEN="1234567890:ABCdef..."
 # TELEGRAM_CHANNEL_ID="@mychannel"
+# TELEGRAM_WEBHOOK_SECRET="<random-hex-string>"
+# REMINDER_ENABLED="true"
+# REMINDER_GEMINI_API_KEY="<your-gemini-api-key>"

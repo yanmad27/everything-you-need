@@ -1,3 +1,5 @@
 .claude
 logs
 .DS_Store
+data/*.db
+data/*.db-*
