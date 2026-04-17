@@ -132,6 +132,31 @@ func TestCreateFromText_ParserNotOK(t *testing.T) {
 	}
 }
 
+func TestHelp_RoutedFromSlashCommand(t *testing.T) {
+	ctx := context.Background()
+	parser := &stubParser{}
+	sender := &stubSender{}
+	svc := newTestService(t, parser, sender)
+
+	err := svc.HandleIncoming(ctx, IncomingMessage{
+		ChatID: "chat1", UserID: "42", UserName: "Doan", MessageID: 10,
+		Text: "/help",
+	})
+	if err != nil {
+		t.Fatalf("HandleIncoming: %v", err)
+	}
+	if parser.calls != 0 {
+		t.Errorf("parser must NOT be called for /help")
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("expected 1 help reply, got %d", len(sender.sent))
+	}
+	body := sender.sent[0].Text
+	if !strings.Contains(body, "nhắc tao") || !strings.Contains(body, "/reminders") || !strings.Contains(body, "/cancel") {
+		t.Errorf("help text missing required sections: %q", body)
+	}
+}
+
 func TestList_RoutedFromSlashCommand(t *testing.T) {
 	ctx := context.Background()
 	parser := &stubParser{}

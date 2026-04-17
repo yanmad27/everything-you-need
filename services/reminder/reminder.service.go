@@ -45,6 +45,8 @@ func (s *Service) HandleIncoming(ctx context.Context, msg IncomingMessage) error
 	text := strings.TrimSpace(msg.Text)
 
 	switch {
+	case matchHelpCommand(text):
+		return s.handleHelp(ctx, msg)
 	case matchListCommand(text):
 		return s.handleList(ctx, msg)
 	case matchCancelCommand(text):
@@ -53,6 +55,31 @@ func (s *Service) HandleIncoming(ctx context.Context, msg IncomingMessage) error
 		return s.handleCreate(ctx, msg)
 	}
 	return nil
+}
+
+const helpText = `🤖 *Bot Nhắc Nhở*
+
+*Tạo nhắc:* gõ tự nhiên bằng tiếng Việt, chứa "nhắc tao/tôi/mình/ae/mọi người"
+• ` + "`2h nữa nhắc tao ăn cơm`" + `
+• ` + "`19h mai nhắc tôi họp với Huy`" + `
+• ` + "`thứ 2 tới nhắc mình nộp báo cáo`" + `
+• ` + "`lúc 20:30 nhắc ae đi đá bóng`" + `
+
+*Lệnh:*
+• /reminders — danh sách nhắc đang chờ
+• /cancel <id> — hủy một nhắc (vd: ` + "`/cancel 3`" + `)
+• /help — hiện hướng dẫn này
+
+Nhắc sẽ bắn vào kênh đúng giờ, reply lại tin nhắn gốc của bạn.`
+
+func (s *Service) handleHelp(ctx context.Context, msg IncomingMessage) error {
+	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, helpText)
+}
+
+func matchHelpCommand(text string) bool {
+	lower := strings.ToLower(text)
+	return lower == "/help" || strings.HasPrefix(lower, "/help ") ||
+		strings.HasPrefix(lower, "/help@")
 }
 
 func (s *Service) handleCreate(ctx context.Context, msg IncomingMessage) error {
