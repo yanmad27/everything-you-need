@@ -84,7 +84,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 
 	if teleService != nil && cfg.Telegram.ChannelID != "" {
 		lunarJobName := "lunar-notification"
-		err := scheduler.RegisterCronJob(lunarJobName, "0 7 * * *", func() error {
+		err := scheduler.RegisterCronJob(lunarJobName, "0 9 * * *", func() error {
 			loc, tzErr := time.LoadLocation("Asia/Ho_Chi_Minh")
 			if tzErr != nil {
 				loc = time.FixedZone("UTC+7", 7*60*60)
