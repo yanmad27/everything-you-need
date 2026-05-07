@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"everything-you-need/m/services/lunar"
 )
 
 // Sender is the subset of the Telegram bot used by the reminder service.
@@ -51,6 +53,8 @@ func (s *Service) HandleIncoming(ctx context.Context, msg IncomingMessage) error
 		return s.handleList(ctx, msg)
 	case matchCancelCommand(text):
 		return s.handleCancel(ctx, msg, text)
+	case matchLunarCommand(text):
+		return s.handleLunar(ctx, msg)
 	case MatchesReminderKeyword(text):
 		return s.handleCreate(ctx, msg)
 	}
@@ -68,6 +72,7 @@ const helpText = `🤖 *Bot Nhắc Nhở*
 *Lệnh:*
 • /reminders — danh sách nhắc đang chờ
 • /cancel <id> — hủy một nhắc (vd: ` + "`/cancel 3`" + `)
+• ` + "`lịch âm`" + ` hoặc ` + "`âm lịch`" + ` — xem ngày âm lịch hôm nay
 • /help — hiện hướng dẫn này
 
 Nhắc sẽ bắn vào kênh đúng giờ, reply lại tin nhắn gốc của bạn.`
@@ -198,6 +203,32 @@ func formatFireMessage(r Reminder, now time.Time) string {
 		late = fmt.Sprintf("(trễ %d phút) ", int(delay.Minutes()))
 	}
 	return fmt.Sprintf("⏰ %sNhắc @%s: %s", late, mention, r.Task)
+}
+
+var lunarCommandAliases = map[string]struct{}{
+	"lich am": {}, "am lich": {},
+	"lịch âm": {}, "âm lịch": {},
+	"/lichit": {}, "/amlich": {},
+}
+
+func matchLunarCommand(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	_, ok := lunarCommandAliases[normalized]
+	return ok
+}
+
+func (s *Service) handleLunar(ctx context.Context, msg IncomingMessage) error {
+	today := s.now().In(vietnamLocation())
+	lunarDay, lunarMonth, lunarYear, leap := lunar.SolarToLunar(
+		today.Year(), int(today.Month()), today.Day(), lunar.VietnamTimeZone,
+	)
+	leapSuffix := ""
+	if leap == 1 {
+		leapSuffix = " (nhuận)"
+	}
+	text := fmt.Sprintf("🌙 *Lịch Âm*\n📅 Dương lịch: %s\n🗓 Âm lịch: %d/%d/%d%s",
+		today.Format("02/01/2006"), lunarDay, lunarMonth, lunarYear, leapSuffix)
+	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, text)
 }
 
 func matchListCommand(text string) bool {

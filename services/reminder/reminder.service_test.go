@@ -157,6 +157,34 @@ func TestHelp_RoutedFromSlashCommand(t *testing.T) {
 	}
 }
 
+func TestLunar_RoutedFromCommand(t *testing.T) {
+	ctx := context.Background()
+	parser := &stubParser{}
+	sender := &stubSender{}
+	svc := newTestService(t, parser, sender)
+
+	for _, phrase := range []string{"lich am", "am lich", "Lịch Âm", "  âm lịch  "} {
+		sender.sent = nil
+		err := svc.HandleIncoming(ctx, IncomingMessage{
+			ChatID: "chat1", UserID: "42", UserName: "Doan", MessageID: 99,
+			Text: phrase,
+		})
+		if err != nil {
+			t.Fatalf("HandleIncoming(%q): %v", phrase, err)
+		}
+		if parser.calls != 0 {
+			t.Errorf("parser must NOT be called for %q", phrase)
+		}
+		if len(sender.sent) != 1 {
+			t.Fatalf("expected 1 reply for %q, got %d", phrase, len(sender.sent))
+		}
+		body := sender.sent[0].Text
+		if !strings.Contains(body, "Lịch Âm") || !strings.Contains(body, "17/04/2026") {
+			t.Errorf("unexpected lunar body for %q: %q", phrase, body)
+		}
+	}
+}
+
 func TestList_RoutedFromSlashCommand(t *testing.T) {
 	ctx := context.Background()
 	parser := &stubParser{}
