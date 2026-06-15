@@ -117,6 +117,37 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		}
 	}
 
+	if teleService != nil && cfg.Telegram.ChannelID != "" {
+		chayHandler := func() error {
+			loc, tzErr := time.LoadLocation("Asia/Ho_Chi_Minh")
+			if tzErr != nil {
+				loc = time.FixedZone("UTC+7", 7*60*60)
+			}
+			today := time.Now().In(loc)
+
+			lunarDay, _, _, _ := lunar.SolarToLunar(
+				today.Year(), int(today.Month()), today.Day(), lunar.VietnamTimeZone,
+			)
+			isLastDay := lunar.IsLastDayOfLunarMonth(today, lunar.VietnamTimeZone)
+			if !lunar.IsEveOfMung1OrRam(lunarDay, isLastDay) {
+				return nil
+			}
+
+			if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, "Ngày mai nhớ ăn chay"); sendErr != nil {
+				return fmt.Errorf("failed to send chay reminder: %w", sendErr)
+			}
+			log.Printf("Chay reminder sent for %s (lunar day=%d, lastDay=%v)", today.Format("2006-01-02 15:04"), lunarDay, isLastDay)
+			return nil
+		}
+
+		if err := scheduler.RegisterCronJob("chay-reminder-day", "30 7,11,15 * * *", chayHandler); err != nil {
+			log.Printf("Failed to register chay-reminder-day job: %v", err)
+		}
+		if err := scheduler.RegisterCronJob("chay-reminder-evening", "0 19 * * *", chayHandler); err != nil {
+			log.Printf("Failed to register chay-reminder-evening job: %v", err)
+		}
+	}
+
 	if reminderService != nil {
 		dispatchErr := scheduler.RegisterCronJob("reminder-dispatch", "* * * * *", func() error {
 			return reminderService.Sweep(context.Background(), time.Now().UTC())

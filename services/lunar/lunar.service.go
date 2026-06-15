@@ -60,6 +60,18 @@ func IsLastDayOfLunarMonth(t time.Time, timeZone int) bool {
 	return todayMonth != nextMonth
 }
 
+// IsEveOfMung1OrRam reports whether the given lunar day is the day before
+// mùng 1 (29/30 + last day of month) or rằm (14).
+func IsEveOfMung1OrRam(lunarDay int, isLastDayOfMonth bool) bool {
+	if lunarDay == 14 {
+		return true
+	}
+	if isLastDayOfMonth && (lunarDay == 29 || lunarDay == 30) {
+		return true
+	}
+	return false
+}
+
 // IsNotifyDay decides whether the given lunar day (plus end-of-month signal)
 // should trigger a notification, and returns a short Vietnamese label describing why.
 // Trigger days: 29/30 (hôm trước mùng 1), 1, 13 (hôm trước 14), 14, 15 (rằm).

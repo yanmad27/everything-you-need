@@ -69,6 +69,33 @@ func TestIsNotifyDay(t *testing.T) {
 	}
 }
 
+func TestIsEveOfMung1OrRam(t *testing.T) {
+	cases := []struct {
+		name             string
+		lunarDay         int
+		isLastDayOfMonth bool
+		want             bool
+	}{
+		{"14 âm là eve rằm", 14, false, true},
+		{"29 cuối tháng là eve mùng 1", 29, true, true},
+		{"30 cuối tháng là eve mùng 1", 30, true, true},
+		{"29 không cuối tháng", 29, false, false},
+		{"13 không phải eve", 13, false, false},
+		{"15 rằm không phải eve", 15, false, false},
+		{"mùng 1 không phải eve", 1, false, false},
+		{"ngày 5 không phải eve", 5, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsEveOfMung1OrRam(tc.lunarDay, tc.isLastDayOfMonth)
+			if got != tc.want {
+				t.Errorf("IsEveOfMung1OrRam(%d, %v) = %v, want %v",
+					tc.lunarDay, tc.isLastDayOfMonth, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestIsLastDayOfLunarMonth(t *testing.T) {
 	// 2024-03-09 solar là 29/1 lunar và là ngày cuối tháng (2024-03-10 solar là 1/2 lunar)
 	loc := time.FixedZone("UTC+7", 7*60*60)
