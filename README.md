@@ -6,6 +6,8 @@ A comprehensive Go application featuring price tracking and notification service
 
 - **Price Tracker Service**: Track prices from multiple sources using factory pattern
 - **Telegram Notifications**: Send price updates and alerts to Telegram channels
+- **Gold Watch**: Every 5 minutes, alerts the channel when a tracked gold price (SJC/9999/tròn trơn) moves
+- **News Digest**: Daily 8PM bilingual (EN+VN) digest of the hottest AI/tech/VN stories, curated from RSS feeds and ranked by Gemini
 - **Extensible Architecture**: Easy to add new price sources and notification channels
 - **Real-time Data**: Fetch live prices from various APIs
 
@@ -271,6 +273,25 @@ cd ~/workspace/everything-you-need
 git pull
 docker compose up -d --build
 ```
+
+### Offline fallback (when the host can't reach GitHub / Docker Hub)
+
+The prod host has intermittent outbound connectivity. When `git pull` or the
+Docker base-image pulls time out, deploy without touching the network from the
+host:
+
+```bash
+# from a machine that has the commits + can build:
+git bundle create /tmp/eyn.bundle origin/main
+base64 < /tmp/eyn.bundle | ssh hrm.gitrunner 'base64 -d > /tmp/eyn.bundle && cd ~/workspace/everything-you-need && git fetch /tmp/eyn.bundle "refs/remotes/origin/main:refs/remotes/origin/main" && git merge --ff-only origin/main'
+
+# cross-compile + ship the binary, rebuild the image FROM the cached one:
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/main-linux .
+base64 < /tmp/main-linux | ssh hrm.gitrunner 'mkdir -p /tmp/eyn-patch && base64 -d > /tmp/eyn-patch/main && cd /tmp/eyn-patch && printf "FROM everything-you-need:latest\nCOPY main /root/main\n" > Dockerfile && docker build -t everything-you-need:latest .'
+ssh hrm.gitrunner 'cd ~/workspace/everything-you-need && docker compose up -d --no-build --force-recreate price-tracker'
+```
+
+(`config.yaml` on the host is volume-mounted and preserved across all of the above.)
 
 ## 🤝 Contributing
 

@@ -31,6 +31,25 @@ reminder:
   retention_days: 30
   max_lookahead_days: 365
 
+# Daily bilingual (EN+VN) news digest posted to the Telegram channel at 8PM ICT.
+# Sources are curated RSS feeds; Gemini ranks the hottest items and writes the
+# summaries. Reuses reminder.gemini_api_key when news.gemini_api_key is empty.
+news:
+  enabled: true
+  db_path: "data/news.db"
+  gemini_api_key: "" # falls back to reminder.gemini_api_key when empty
+  gemini_model: "gemini-2.5-flash"
+  max_items: 7
+  window_hours: 24
+  dedup_days: 7
+  feeds:
+    - "https://news.ycombinator.com/rss"
+    - "https://techcrunch.com/feed/"
+    - "https://www.theverge.com/rss/index.xml"
+    - "http://feeds.arstechnica.com/arstechnica/index"
+    - "https://vnexpress.net/rss/so-hoa.rss"
+    - "https://vnexpress.net/rss/tin-moi-nhat.rss"
+
 # HTTP server for Telegram webhook (only used when reminder.enabled = true)
 server:
   listen_addr: ":8080"

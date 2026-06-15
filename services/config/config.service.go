@@ -14,6 +14,7 @@ type Config struct {
 	App          AppConfig          `mapstructure:"app"`
 	Reminder     ReminderConfig     `mapstructure:"reminder"`
 	Server       ServerConfig       `mapstructure:"server"`
+	News         NewsConfig         `mapstructure:"news"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -77,4 +78,20 @@ func setDefaults() {
 	viper.SetDefault("reminder.max_lookahead_days", 365)
 
 	viper.SetDefault("server.listen_addr", ":8080")
+
+	viper.SetDefault("news.enabled", true)
+	viper.SetDefault("news.db_path", "data/news.db")
+	viper.SetDefault("news.gemini_api_key", "")
+	viper.SetDefault("news.gemini_model", "gemini-2.5-flash")
+	viper.SetDefault("news.max_items", 7)
+	viper.SetDefault("news.window_hours", 24)
+	viper.SetDefault("news.dedup_days", 7)
+	viper.SetDefault("news.feeds", []string{
+		"https://news.ycombinator.com/rss",
+		"https://techcrunch.com/feed/",
+		"https://www.theverge.com/rss/index.xml",
+		"http://feeds.arstechnica.com/arstechnica/index",
+		"https://vnexpress.net/rss/so-hoa.rss",
+		"https://vnexpress.net/rss/tin-moi-nhat.rss",
+	})
 }

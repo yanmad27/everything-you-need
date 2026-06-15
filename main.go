@@ -12,6 +12,7 @@ import (
 
 	"everything-you-need/m/services/config"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
+	"everything-you-need/m/services/news"
 	pricetracker "everything-you-need/m/services/price-tracker"
 	"everything-you-need/m/services/reminder"
 	telebot "everything-you-need/m/services/tele-bot"
@@ -32,8 +33,13 @@ func main() {
 		defer reminderStore.Close()
 	}
 
+	newsService, newsStore := buildNewsService(cfg, teleService)
+	if newsStore != nil {
+		defer newsStore.Close()
+	}
+
 	scheduler := jobscheduler.NewJobScheduler()
-	registerJobs(scheduler, priceService, teleService, reminderService, cfg)
+	registerJobs(scheduler, priceService, teleService, reminderService, newsService, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -84,6 +90,37 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 	parser := reminder.NewGeminiParser(cfg.Reminder.GeminiAPIKey, cfg.Reminder.GeminiModel, 0)
 	svc := reminder.NewService(store, parser, teleService, time.Now)
 	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.GeminiModel)
+	return svc, store
+}
+
+func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (*news.Service, *news.Store) {
+	if !cfg.News.Enabled {
+		log.Printf("News service disabled in config")
+		return nil, nil
+	}
+	if teleService == nil || cfg.Telegram.ChannelID == "" {
+		log.Printf("News service disabled: telegram service or channel not available")
+		return nil, nil
+	}
+
+	apiKey := cfg.News.GeminiAPIKey
+	if apiKey == "" {
+		apiKey = cfg.Reminder.GeminiAPIKey // reuse the reminder bot's key
+	}
+	if apiKey == "" {
+		log.Printf("News service disabled: no gemini api key (news.gemini_api_key / reminder.gemini_api_key empty)")
+		return nil, nil
+	}
+
+	store, err := news.OpenStore(cfg.News.DBPath)
+	if err != nil {
+		log.Printf("News store open failed: %v (news service disabled)", err)
+		return nil, nil
+	}
+
+	ranker := news.NewRanker(apiKey, cfg.News.GeminiModel, 0)
+	svc := news.NewService(store, ranker, cfg.News.Feeds, cfg.News.MaxItems, cfg.News.WindowHours, cfg.News.DedupDays, time.Now)
+	log.Printf("News service initialized (db=%s, feeds=%d, model=%s)", cfg.News.DBPath, len(cfg.News.Feeds), cfg.News.GeminiModel)
 	return svc, store
 }
 

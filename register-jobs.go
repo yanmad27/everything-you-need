@@ -5,6 +5,7 @@ import (
 	"everything-you-need/m/services/config"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/lunar"
+	"everything-you-need/m/services/news"
 	pricetracker "everything-you-need/m/services/price-tracker"
 	"everything-you-need/m/services/reminder"
 	telebot "everything-you-need/m/services/tele-bot"
@@ -21,7 +22,7 @@ var currencyMap = map[string]string{
 	"USD": "💵",
 }
 
-func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, cfg *config.Config) {
+func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 
@@ -195,6 +196,19 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		})
 		if err != nil {
 			log.Printf("Failed to register gold-watch job: %v", err)
+		}
+	}
+
+	if newsService != nil && teleService != nil && cfg.Telegram.ChannelID != "" {
+		channelID := cfg.Telegram.ChannelID
+		newsErr := scheduler.RegisterCronJob("news-digest", "0 20 * * *", func() error {
+			send := func(message string) error {
+				return teleService.SendToChannelWithMarkdown(channelID, message)
+			}
+			return newsService.RunDigest(context.Background(), send)
+		})
+		if newsErr != nil {
+			log.Printf("Failed to register news-digest job: %v", newsErr)
 		}
 	}
 
