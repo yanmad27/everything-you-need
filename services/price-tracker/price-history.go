@@ -38,6 +38,19 @@ func NewPriceHistoryService() *PriceHistoryService {
 	}
 }
 
+// NewPriceHistoryServiceWithFileName creates a history service backed by a
+// dedicated file under logs/, so independent jobs keep separate baselines.
+func NewPriceHistoryServiceWithFileName(fileName string) *PriceHistoryService {
+	logsDir := "logs"
+	if _, err := os.Stat(logsDir); os.IsNotExist(err) {
+		os.MkdirAll(logsDir, 0755)
+	}
+
+	return &PriceHistoryService{
+		historyFilePath: filepath.Join(logsDir, fileName),
+	}
+}
+
 func (p *PriceHistoryService) SavePriceHistory(prices map[string][]Price) error {
 	history := PriceHistory{
 		Timestamp: time.Now(),

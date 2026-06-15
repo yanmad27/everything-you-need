@@ -148,6 +148,56 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		}
 	}
 
+	if teleService != nil && cfg.Telegram.ChannelID != "" {
+		goldHistoryService := pricetracker.NewPriceHistoryServiceWithFileName("gold_watch_history.json")
+		err := scheduler.RegisterCronJob("gold-watch", "*/5 * * * *", func() error {
+			allPrices, fetchErr := priceService.GetAllPrices()
+			if fetchErr != nil {
+				log.Printf("gold-watch: some sources failed: %v", fetchErr)
+			}
+
+			goldPrices := make(map[string][]pricetracker.Price)
+			for source, prices := range allPrices {
+				if source == "CoinGecko" {
+					continue
+				}
+				goldPrices[source] = prices
+			}
+			if len(goldPrices) == 0 {
+				return nil
+			}
+
+			lastHistory, historyErr := goldHistoryService.GetLastPriceHistory()
+			if historyErr != nil {
+				log.Printf("gold-watch: failed to read history: %v", historyErr)
+			}
+
+			message := ""
+			hasChange := false
+			if lastHistory != nil {
+				goldChanges := goldHistoryService.ComparePrices(goldPrices, lastHistory.Prices)
+				message, hasChange = generateGoldWatchNotification(goldChanges)
+			}
+
+			if saveErr := goldHistoryService.SavePriceHistory(goldPrices); saveErr != nil {
+				log.Printf("gold-watch: failed to save history: %v", saveErr)
+			}
+
+			if !hasChange {
+				return nil
+			}
+
+			if sendErr := teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message); sendErr != nil {
+				return fmt.Errorf("failed to send gold watch notification: %w", sendErr)
+			}
+			log.Printf("gold-watch: change detected, notification sent")
+			return nil
+		})
+		if err != nil {
+			log.Printf("Failed to register gold-watch job: %v", err)
+		}
+	}
+
 	if reminderService != nil {
 		dispatchErr := scheduler.RegisterCronJob("reminder-dispatch", "* * * * *", func() error {
 			return reminderService.Sweep(context.Background(), time.Now().UTC())
@@ -313,6 +363,76 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 
 	message += "🤖 _Automated update_"
 	return message
+}
+
+// generateGoldWatchNotification builds an alert listing only the gold prices
+// that moved since the previous check. Returns the message and whether any
+// tracked gold price actually changed (false → caller stays silent).
+func generateGoldWatchNotification(changes map[string][]pricetracker.PriceChange) (string, bool) {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		loc = time.FixedZone("UTC+7", 7*60*60)
+	}
+	now := time.Now().In(loc)
+
+	keywords := []string{"9999", "tròn trơn", "sjc"}
+
+	hasChange := false
+	body := ""
+
+	for source, sourceChanges := range changes {
+		sourceLines := ""
+		for _, change := range sourceChanges {
+			if change.BuyChange == 0 && change.SellChange == 0 {
+				continue
+			}
+
+			price := change.Price
+			matched := false
+			for _, keyword := range keywords {
+				if strings.Contains(strings.ToLower(price.Type), keyword) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+
+			hasChange = true
+
+			buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
+			if change.BuyChange > 0 {
+				buyText += fmt.Sprintf(" 📈+%.1f%%", change.BuyChange)
+			} else if change.BuyChange < 0 {
+				buyText += fmt.Sprintf(" 📉%.1f%%", change.BuyChange)
+			}
+
+			sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
+			if change.SellChange > 0 {
+				sellText += fmt.Sprintf(" 📈+%.1f%%", change.SellChange)
+			} else if change.SellChange < 0 {
+				sellText += fmt.Sprintf(" 📉%.1f%%", change.SellChange)
+			}
+
+			sourceLines += fmt.Sprintf("• %s %s: %s - %s - %s\n",
+				currencyMap[price.Currency], price.Currency, buyText, sellText, formatType(price.Type))
+		}
+
+		if sourceLines != "" {
+			body += fmt.Sprintf("*%s*\n%s\n", source, sourceLines)
+		}
+	}
+
+	if !hasChange {
+		return "", false
+	}
+
+	message := "🟡 *Gold Price Change*\n"
+	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
+	message += body
+	message += "🤖 _Gold watch (5m)_"
+	return message, true
 }
 
 func formatType(typeStr string) string {
