@@ -45,9 +45,8 @@ type AppConfig struct {
 type ReminderConfig struct {
 	Enabled          bool   `mapstructure:"enabled"`
 	DBPath           string `mapstructure:"db_path"`
-	LLMProvider      string `mapstructure:"llm_provider"`
-	GeminiAPIKey     string `mapstructure:"gemini_api_key"`
-	GeminiModel      string `mapstructure:"gemini_model"`
+	OpenAIAPIKey     string `mapstructure:"openai_api_key"`
+	OpenAIModel      string `mapstructure:"openai_model"`
 	RetentionDays    int    `mapstructure:"retention_days"`
 	MaxLookaheadDays int    `mapstructure:"max_lookahead_days"`
 }
@@ -59,8 +58,8 @@ type ServerConfig struct {
 type NewsConfig struct {
 	Enabled      bool     `mapstructure:"enabled"`
 	DBPath       string   `mapstructure:"db_path"`
-	GeminiAPIKey string   `mapstructure:"gemini_api_key"`
-	GeminiModel  string   `mapstructure:"gemini_model"`
+	OpenAIAPIKey string   `mapstructure:"openai_api_key"`
+	OpenAIModel  string   `mapstructure:"openai_model"`
 	Feeds        []string `mapstructure:"feeds"`
 	MaxItems     int      `mapstructure:"max_items"`
 	WindowHours  int      `mapstructure:"window_hours"`

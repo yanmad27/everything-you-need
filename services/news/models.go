@@ -1,4 +1,4 @@
-// Package news fetches RSS feeds, ranks the day's hottest stories with Gemini,
+// Package news fetches RSS feeds, ranks the day's hottest stories with OpenAI,
 // and posts a bilingual (English + Vietnamese) digest to Telegram.
 package news
 
@@ -14,12 +14,12 @@ type FeedItem struct {
 	HasDate     bool
 }
 
-// RankedItem is one story selected and summarized by Gemini for the digest.
+// RankedItem is one story selected and summarized by OpenAI for the digest.
 type RankedItem struct {
 	URL               string `json:"-"`
 	EnglishTitle      string `json:"en_title"`
 	EnglishSummary    string `json:"en_summary"`
 	VietnameseTitle   string `json:"vi_title"`
 	VietnameseSummary string `json:"vi_summary"`
-	SourceIndex       int    `json:"index"` // index into the candidate slice sent to Gemini
+	SourceIndex       int    `json:"index"` // index into the candidate slice sent to OpenAI
 }

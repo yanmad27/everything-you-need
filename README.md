@@ -7,7 +7,7 @@ A comprehensive Go application featuring price tracking and notification service
 - **Price Tracker Service**: Track prices from multiple sources using factory pattern
 - **Telegram Notifications**: Send price updates and alerts to Telegram channels
 - **Gold Watch**: Every 5 minutes, alerts the channel when a tracked gold price (SJC/9999/tròn trơn) moves
-- **News Digest**: Daily 8PM bilingual (EN+VN) digest of the hottest AI/tech/VN stories, curated from RSS feeds and ranked by Gemini
+- **News Digest**: Daily 8PM bilingual (EN+VN) digest of the hottest AI/tech/VN stories, curated from RSS feeds and ranked by OpenAI
 - **Extensible Architecture**: Easy to add new price sources and notification channels
 - **Real-time Data**: Fetch live prices from various APIs
 
@@ -233,9 +233,8 @@ Bot:  🗑 Đã hủy nhắc #7.
 ### One-time setup
 
 1. Set `reminder.enabled: true` in `config.yaml`.
-2. Put a Gemini API key in `reminder.gemini_api_key`
-   (get one free at https://aistudio.google.com/app/apikey — make sure the
-   key's **Billing Tier** is **Free**, not **Unavailable**).
+2. Put an OpenAI API key in `reminder.openai_api_key`
+   (create one at https://platform.openai.com/api-keys).
 3. Generate and save a webhook secret:
 
    ```bash

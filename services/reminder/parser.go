@@ -32,7 +32,7 @@ func MatchesReminderKeyword(text string) bool {
 	return reminderKeywordRegex.MatchString(text)
 }
 
-const geminiSystemInstruction = `You are a strict parser. Given a Vietnamese reminder request and the current time (Asia/Ho_Chi_Minh), return ONLY JSON, no prose.
+const openAISystemInstruction = `You are a strict parser. Given a Vietnamese reminder request and the current time (Asia/Ho_Chi_Minh), return ONLY JSON, no prose.
 Output shape:
   {"ok": true,  "when": "<ISO 8601 with +07:00 offset>", "task": "<short Vietnamese string>"}
   {"ok": false, "reason": "<short Vietnamese explanation>"}
@@ -42,58 +42,51 @@ Rules:
 - "task" excludes the time phrase and the "nhắc tao/tôi/mình" prefix.
 - If the user's time is ambiguous or already past, return ok=false.`
 
-// buildGeminiRequest builds the JSON body sent to the Gemini generateContent endpoint.
-func buildGeminiRequest(now time.Time, text string) ([]byte, error) {
+// buildOpenAIRequest builds the JSON body sent to the OpenAI chat completions endpoint.
+func buildOpenAIRequest(model string, now time.Time, text string) ([]byte, error) {
 	userContent := fmt.Sprintf("NOW=%s\nMESSAGE=%s",
 		now.Format("2006-01-02T15:04:05-07:00"), text)
 
 	payload := map[string]any{
-		"system_instruction": map[string]any{
-			"parts": []map[string]string{{"text": geminiSystemInstruction}},
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": openAISystemInstruction},
+			{"role": "user", "content": userContent},
 		},
-		"contents": []map[string]any{{
-			"role":  "user",
-			"parts": []map[string]string{{"text": userContent}},
-		}},
-		"generationConfig": map[string]any{
-			"response_mime_type": "application/json",
-			"temperature":        0,
-		},
+		"response_format": map[string]string{"type": "json_object"},
 	}
 	return json.Marshal(payload)
 }
 
-type geminiAPIResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
+type openAIAPIResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
-type geminiInnerJSON struct {
+type openAIInnerJSON struct {
 	OK     bool   `json:"ok"`
 	When   string `json:"when"`
 	Task   string `json:"task"`
 	Reason string `json:"reason"`
 }
 
-// parseGeminiResponse decodes Gemini's outer envelope and then the inner JSON the model produced.
-func parseGeminiResponse(raw []byte) (ParseResult, error) {
-	var outer geminiAPIResponse
+// parseOpenAIResponse decodes OpenAI's outer envelope and then the inner JSON the model produced.
+func parseOpenAIResponse(raw []byte) (ParseResult, error) {
+	var outer openAIAPIResponse
 	if err := json.Unmarshal(raw, &outer); err != nil {
-		return ParseResult{}, fmt.Errorf("decode gemini outer: %w", err)
+		return ParseResult{}, fmt.Errorf("decode openai outer: %w", err)
 	}
-	if len(outer.Candidates) == 0 || len(outer.Candidates[0].Content.Parts) == 0 {
-		return ParseResult{}, fmt.Errorf("gemini returned no candidates")
+	if len(outer.Choices) == 0 || outer.Choices[0].Message.Content == "" {
+		return ParseResult{}, fmt.Errorf("openai returned no choices")
 	}
-	text := strings.TrimSpace(outer.Candidates[0].Content.Parts[0].Text)
+	text := strings.TrimSpace(outer.Choices[0].Message.Content)
 
-	var inner geminiInnerJSON
+	var inner openAIInnerJSON
 	if err := json.Unmarshal([]byte(text), &inner); err != nil {
-		return ParseResult{}, fmt.Errorf("decode gemini inner JSON %q: %w", text, err)
+		return ParseResult{}, fmt.Errorf("decode openai inner JSON %q: %w", text, err)
 	}
 
 	if !inner.OK {
@@ -111,55 +104,53 @@ func parseGeminiResponse(raw []byte) (ParseResult, error) {
 	return ParseResult{OK: true, When: when.UTC(), Task: strings.TrimSpace(inner.Task)}, nil
 }
 
-// GeminiParser calls Google's Generative Language API.
-type GeminiParser struct {
+// OpenAIParser calls OpenAI's chat completions API.
+type OpenAIParser struct {
 	apiKey string
 	model  string
 	client *http.Client
 }
 
-func NewGeminiParser(apiKey, model string, timeout time.Duration) *GeminiParser {
+func NewOpenAIParser(apiKey, model string, timeout time.Duration) *OpenAIParser {
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gpt-5"
 	}
 	if timeout == 0 {
-		timeout = 15 * time.Second
+		timeout = 30 * time.Second
 	}
-	return &GeminiParser{
+	return &OpenAIParser{
 		apiKey: apiKey,
 		model:  model,
 		client: &http.Client{Timeout: timeout},
 	}
 }
 
-func (g *GeminiParser) Parse(ctx context.Context, now time.Time, text string) (ParseResult, error) {
-	body, err := buildGeminiRequest(now, text)
+func (p *OpenAIParser) Parse(ctx context.Context, now time.Time, text string) (ParseResult, error) {
+	body, err := buildOpenAIRequest(p.model, now, text)
 	if err != nil {
 		return ParseResult{}, err
 	}
 
-	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		g.model, g.apiKey)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		"https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return ParseResult{}, fmt.Errorf("build gemini request: %w", err)
+		return ParseResult{}, fmt.Errorf("build openai request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 
-	resp, err := g.client.Do(req)
+	resp, err := p.client.Do(req)
 	if err != nil {
-		return ParseResult{}, fmt.Errorf("gemini request: %w", err)
+		return ParseResult{}, fmt.Errorf("openai request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ParseResult{}, fmt.Errorf("read gemini response: %w", err)
+		return ParseResult{}, fmt.Errorf("read openai response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ParseResult{}, fmt.Errorf("gemini status %d: %s", resp.StatusCode, string(raw))
+		return ParseResult{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, string(raw))
 	}
-	return parseGeminiResponse(raw)
+	return parseOpenAIResponse(raw)
 }

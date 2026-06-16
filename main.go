@@ -76,8 +76,8 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		log.Printf("Reminder service disabled: telegram service not available")
 		return nil, nil
 	}
-	if cfg.Reminder.GeminiAPIKey == "" {
-		log.Printf("Reminder service disabled: reminder.gemini_api_key is empty")
+	if cfg.Reminder.OpenAIAPIKey == "" {
+		log.Printf("Reminder service disabled: reminder.openai_api_key is empty")
 		return nil, nil
 	}
 
@@ -87,9 +87,9 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		return nil, nil
 	}
 
-	parser := reminder.NewGeminiParser(cfg.Reminder.GeminiAPIKey, cfg.Reminder.GeminiModel, 0)
+	parser := reminder.NewOpenAIParser(cfg.Reminder.OpenAIAPIKey, cfg.Reminder.OpenAIModel, 0)
 	svc := reminder.NewService(store, parser, teleService, time.Now)
-	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.GeminiModel)
+	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
 	return svc, store
 }
 
@@ -103,12 +103,12 @@ func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (
 		return nil, nil
 	}
 
-	apiKey := cfg.News.GeminiAPIKey
+	apiKey := cfg.News.OpenAIAPIKey
 	if apiKey == "" {
-		apiKey = cfg.Reminder.GeminiAPIKey // reuse the reminder bot's key
+		apiKey = cfg.Reminder.OpenAIAPIKey // reuse the reminder bot's key
 	}
 	if apiKey == "" {
-		log.Printf("News service disabled: no gemini api key (news.gemini_api_key / reminder.gemini_api_key empty)")
+		log.Printf("News service disabled: no openai api key (news.openai_api_key / reminder.openai_api_key empty)")
 		return nil, nil
 	}
 
@@ -118,9 +118,9 @@ func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (
 		return nil, nil
 	}
 
-	ranker := news.NewRanker(apiKey, cfg.News.GeminiModel, 0)
+	ranker := news.NewRanker(apiKey, cfg.News.OpenAIModel, 0)
 	svc := news.NewService(store, ranker, cfg.News.Feeds, cfg.News.MaxItems, cfg.News.WindowHours, cfg.News.DedupDays, time.Now)
-	log.Printf("News service initialized (db=%s, feeds=%d, model=%s)", cfg.News.DBPath, len(cfg.News.Feeds), cfg.News.GeminiModel)
+	log.Printf("News service initialized (db=%s, feeds=%d, model=%s)", cfg.News.DBPath, len(cfg.News.Feeds), cfg.News.OpenAIModel)
 	return svc, store
 }
 

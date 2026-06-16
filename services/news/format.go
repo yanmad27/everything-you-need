@@ -56,7 +56,7 @@ func FormatDigest(ranked []RankedItem, now time.Time, sourceCount int) string {
 	return truncate(builder.String(), telegramMaxLen)
 }
 
-// FormatFallback renders a plain titles-only digest when Gemini is unavailable.
+// FormatFallback renders a plain titles-only digest when OpenAI is unavailable.
 func FormatFallback(items []FeedItem, now time.Time) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "📰 *Tin mới (bản rút gọn)*\n🕐 %s\n\n", now.Format("15:04 02/01/2006"))

@@ -25,20 +25,19 @@ telegram:
 reminder:
   enabled: false
   db_path: "data/reminders.db"
-  llm_provider: "gemini"
-  gemini_api_key: ""
-  gemini_model: "gemini-2.5-flash"
+  openai_api_key: ""
+  openai_model: "gpt-5"
   retention_days: 30
   max_lookahead_days: 365
 
 # Daily bilingual (EN+VN) news digest posted to the Telegram channel at 8PM ICT.
-# Sources are curated RSS feeds; Gemini ranks the hottest items and writes the
-# summaries. Reuses reminder.gemini_api_key when news.gemini_api_key is empty.
+# Sources are curated RSS feeds; OpenAI ranks the hottest items and writes the
+# summaries. Reuses reminder.openai_api_key when news.openai_api_key is empty.
 news:
   enabled: true
   db_path: "data/news.db"
-  gemini_api_key: "" # falls back to reminder.gemini_api_key when empty
-  gemini_model: "gemini-2.5-flash"
+  openai_api_key: "" # falls back to reminder.openai_api_key when empty
+  openai_model: "gpt-5"
   max_items: 7
   window_hours: 24
   dedup_days: 7
@@ -63,4 +62,4 @@ server:
 # TELEGRAM_CHANNEL_ID="@mychannel"
 # TELEGRAM_WEBHOOK_SECRET="<random-hex-string>"
 # REMINDER_ENABLED="true"
-# REMINDER_GEMINI_API_KEY="<your-gemini-api-key>"
+# REMINDER_OPENAI_API_KEY="<your-openai-api-key>"

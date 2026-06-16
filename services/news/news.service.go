@@ -47,7 +47,7 @@ func NewService(store *Store, ranker *Ranker, feeds []string, maxItems, windowHo
 }
 
 // RunDigest performs the full pipeline: fetch → window → dedup → rank → send →
-// record. Best-effort: on Gemini failure it sends a titles-only fallback. The
+// record. Best-effort: on OpenAI failure it sends a titles-only fallback. The
 // rendering timezone is Asia/Ho_Chi_Minh.
 func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
@@ -87,7 +87,7 @@ func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 
 	candidates := unseen
 	if len(candidates) > 60 {
-		candidates = candidates[:60] // cap tokens sent to Gemini
+		candidates = candidates[:60] // cap tokens sent to OpenAI
 	}
 
 	message, posted := s.buildMessage(ctx, candidates, now, len(s.feeds))
@@ -112,7 +112,7 @@ func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 	return nil
 }
 
-// buildMessage tries Gemini ranking and falls back to a titles-only digest.
+// buildMessage tries OpenAI ranking and falls back to a titles-only digest.
 // Returns the message plus the FeedItems that were actually included (to record).
 func (s *Service) buildMessage(ctx context.Context, candidates []FeedItem, now time.Time, sourceCount int) (string, []FeedItem) {
 	ranked, err := s.rankWithRetry(ctx, candidates)

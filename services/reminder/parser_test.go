@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-func TestBuildGeminiRequestIncludesNowAndMessage(t *testing.T) {
+func TestBuildOpenAIRequestIncludesNowAndMessage(t *testing.T) {
 	now := time.Date(2026, 4, 17, 14, 32, 0, 0, time.FixedZone("UTC+7", 7*60*60))
-	body, err := buildGeminiRequest(now, "2h nữa nhắc tao ăn cơm")
+	body, err := buildOpenAIRequest("gpt-5", now, "2h nữa nhắc tao ăn cơm")
 	if err != nil {
-		t.Fatalf("buildGeminiRequest: %v", err)
+		t.Fatalf("buildOpenAIRequest: %v", err)
 	}
 
 	s := string(body)
@@ -20,24 +20,25 @@ func TestBuildGeminiRequestIncludesNowAndMessage(t *testing.T) {
 	if !strings.Contains(s, "ăn cơm") {
 		t.Errorf("request body missing MESSAGE: %s", s)
 	}
-	if !strings.Contains(s, `"response_mime_type":"application/json"`) {
-		t.Errorf("request must request JSON mime type: %s", s)
+	if !strings.Contains(s, `"type":"json_object"`) {
+		t.Errorf("request must request JSON object response format: %s", s)
+	}
+	if !strings.Contains(s, `"model":"gpt-5"`) {
+		t.Errorf("request must include model: %s", s)
 	}
 }
 
-func TestParseGeminiResponseSuccess(t *testing.T) {
-	// Simulated Gemini response body; the model's text is nested inside candidates[0].content.parts[0].text.
+func TestParseOpenAIResponseSuccess(t *testing.T) {
+	// Simulated OpenAI response body; the model's text is nested inside choices[0].message.content.
 	raw := []byte(`{
-		"candidates": [{
-			"content": {
-				"parts": [{"text": "{\"ok\": true, \"when\": \"2026-04-17T21:00:00+07:00\", \"task\": \"ăn cơm\"}"}]
-			}
+		"choices": [{
+			"message": {"content": "{\"ok\": true, \"when\": \"2026-04-17T21:00:00+07:00\", \"task\": \"ăn cơm\"}"}
 		}]
 	}`)
 
-	got, err := parseGeminiResponse(raw)
+	got, err := parseOpenAIResponse(raw)
 	if err != nil {
-		t.Fatalf("parseGeminiResponse: %v", err)
+		t.Fatalf("parseOpenAIResponse: %v", err)
 	}
 	if !got.OK {
 		t.Fatalf("OK: got false, want true (reason=%q)", got.Reason)
@@ -51,18 +52,16 @@ func TestParseGeminiResponseSuccess(t *testing.T) {
 	}
 }
 
-func TestParseGeminiResponseNotOK(t *testing.T) {
+func TestParseOpenAIResponseNotOK(t *testing.T) {
 	raw := []byte(`{
-		"candidates": [{
-			"content": {
-				"parts": [{"text": "{\"ok\": false, \"reason\": \"Thời điểm mơ hồ\"}"}]
-			}
+		"choices": [{
+			"message": {"content": "{\"ok\": false, \"reason\": \"Thời điểm mơ hồ\"}"}
 		}]
 	}`)
 
-	got, err := parseGeminiResponse(raw)
+	got, err := parseOpenAIResponse(raw)
 	if err != nil {
-		t.Fatalf("parseGeminiResponse: %v", err)
+		t.Fatalf("parseOpenAIResponse: %v", err)
 	}
 	if got.OK {
 		t.Fatalf("OK: got true, want false")
@@ -72,17 +71,17 @@ func TestParseGeminiResponseNotOK(t *testing.T) {
 	}
 }
 
-func TestParseGeminiResponseMalformed(t *testing.T) {
-	// No candidates → should error.
-	raw := []byte(`{"candidates": []}`)
-	if _, err := parseGeminiResponse(raw); err == nil {
-		t.Errorf("expected error for empty candidates")
+func TestParseOpenAIResponseMalformed(t *testing.T) {
+	// No choices → should error.
+	raw := []byte(`{"choices": []}`)
+	if _, err := parseOpenAIResponse(raw); err == nil {
+		t.Errorf("expected error for empty choices")
 	}
 
-	// Candidate text is not JSON → should error.
-	raw = []byte(`{"candidates":[{"content":{"parts":[{"text":"hello world"}]}}]}`)
-	if _, err := parseGeminiResponse(raw); err == nil {
-		t.Errorf("expected error for non-JSON candidate text")
+	// Message content is not JSON → should error.
+	raw = []byte(`{"choices":[{"message":{"content":"hello world"}}]}`)
+	if _, err := parseOpenAIResponse(raw); err == nil {
+		t.Errorf("expected error for non-JSON message content")
 	}
 }
 

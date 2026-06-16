@@ -71,9 +71,8 @@ func setDefaults() {
 
 	viper.SetDefault("reminder.enabled", false)
 	viper.SetDefault("reminder.db_path", "data/reminders.db")
-	viper.SetDefault("reminder.llm_provider", "gemini")
-	viper.SetDefault("reminder.gemini_api_key", "")
-	viper.SetDefault("reminder.gemini_model", "gemini-2.5-flash")
+	viper.SetDefault("reminder.openai_api_key", "")
+	viper.SetDefault("reminder.openai_model", "gpt-5")
 	viper.SetDefault("reminder.retention_days", 30)
 	viper.SetDefault("reminder.max_lookahead_days", 365)
 
@@ -81,8 +80,8 @@ func setDefaults() {
 
 	viper.SetDefault("news.enabled", true)
 	viper.SetDefault("news.db_path", "data/news.db")
-	viper.SetDefault("news.gemini_api_key", "")
-	viper.SetDefault("news.gemini_model", "gemini-2.5-flash")
+	viper.SetDefault("news.openai_api_key", "")
+	viper.SetDefault("news.openai_model", "gpt-5")
 	viper.SetDefault("news.max_items", 7)
 	viper.SetDefault("news.window_hours", 24)
 	viper.SetDefault("news.dedup_days", 7)

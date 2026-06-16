@@ -7,8 +7,8 @@ func TestParseRankResponse(t *testing.T) {
 		{Title: "First", URL: "https://a.com/1"},
 		{Title: "Second", URL: "https://b.com/2"},
 	}
-	// Gemini's outer envelope wrapping the JSON array it produced.
-	raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"[{\"index\":1,\"en_title\":\"Second EN\",\"en_summary\":\"sum\",\"vi_title\":\"Second VI\",\"vi_summary\":\"tom tat\"},{\"index\":0,\"en_title\":\"First EN\",\"en_summary\":\"\",\"vi_title\":\"\",\"vi_summary\":\"\"}]"}]}}]}`)
+	// OpenAI's outer envelope wrapping the JSON object it produced.
+	raw := []byte(`{"choices":[{"message":{"content":"{\"items\":[{\"index\":1,\"en_title\":\"Second EN\",\"en_summary\":\"sum\",\"vi_title\":\"Second VI\",\"vi_summary\":\"tom tat\"},{\"index\":0,\"en_title\":\"First EN\",\"en_summary\":\"\",\"vi_title\":\"\",\"vi_summary\":\"\"}]}"}}]}`)
 
 	ranked, err := parseRankResponse(raw, candidates)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestParseRankResponse(t *testing.T) {
 
 func TestParseRankResponseDropsBadIndex(t *testing.T) {
 	candidates := []FeedItem{{Title: "Only", URL: "https://a.com/1"}}
-	raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"[{\"index\":99,\"en_title\":\"Ghost\"},{\"index\":0,\"en_title\":\"Real\"}]"}]}}]}`)
+	raw := []byte(`{"choices":[{"message":{"content":"{\"items\":[{\"index\":99,\"en_title\":\"Ghost\"},{\"index\":0,\"en_title\":\"Real\"}]}"}}]}`)
 	ranked, err := parseRankResponse(raw, candidates)
 	if err != nil {
 		t.Fatalf("parseRankResponse: %v", err)
