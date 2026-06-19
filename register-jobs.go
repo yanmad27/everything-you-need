@@ -11,6 +11,7 @@ import (
 	telebot "everything-you-need/m/services/tele-bot"
 	"fmt"
 	"log"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ var currencyMap = map[string]string{
 	"VND": "💰",
 	"USD": "💵",
 }
+
+// goldWatchChangeThreshold: gold-watch only alerts when a buy or sell price
+// moved more than this percent since the last alert.
+const goldWatchChangeThreshold = 1.0
 
 func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
@@ -180,8 +185,13 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 				message, hasChange = generateGoldWatchNotification(goldChanges)
 			}
 
-			if saveErr := goldHistoryService.SavePriceHistory(goldPrices); saveErr != nil {
-				log.Printf("gold-watch: failed to save history: %v", saveErr)
+			// Persist baseline only on the first run or when an alert fires, so the
+			// next comparison is against the last ALERTED price. Sub-threshold drift
+			// keeps the old baseline, letting cumulative moves eventually trip 1%.
+			if lastHistory == nil || hasChange {
+				if saveErr := goldHistoryService.SavePriceHistory(goldPrices); saveErr != nil {
+					log.Printf("gold-watch: failed to save history: %v", saveErr)
+				}
 			}
 
 			if !hasChange {
@@ -397,7 +407,7 @@ func generateGoldWatchNotification(changes map[string][]pricetracker.PriceChange
 	for source, sourceChanges := range changes {
 		sourceLines := ""
 		for _, change := range sourceChanges {
-			if change.BuyChange == 0 && change.SellChange == 0 {
+			if math.Abs(change.BuyChange) <= goldWatchChangeThreshold && math.Abs(change.SellChange) <= goldWatchChangeThreshold {
 				continue
 			}
 
