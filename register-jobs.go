@@ -211,7 +211,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 
 	if newsService != nil && teleService != nil && cfg.Telegram.ChannelID != "" {
 		channelID := cfg.Telegram.ChannelID
-		newsErr := scheduler.RegisterCronJob("news-digest", "0 20 * * *", func() error {
+		newsErr := scheduler.RegisterCronJob("news-digest", "0 * * * *", func() error {
 			send := func(message string) error {
 				return teleService.SendToChannelWithMarkdown(channelID, message)
 			}
