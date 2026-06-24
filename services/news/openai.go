@@ -13,7 +13,11 @@ import (
 
 const openAISystemInstruction = `You are a news editor for a Vietnamese tech-savvy audience. You receive a numbered list of candidate news items (from AI, tech, and Vietnamese general feeds) collected in the last 24 hours.
 
-Pick the MOST important / trending / hot items, up to the requested count. Prefer significant AI and technology developments, plus genuinely major Vietnamese or world news. Drop clickbait, duplicates, and minor items.
+Pick the MOST important / trending / hot items, up to the requested count. Prefer:
+1. Significant AI and technology developments.
+2. Major Vietnamese criminal cases, especially drug-related prosecutions, arrests, and trials in Ho Chi Minh City (particularly Quận 4) — including cases involving individuals like Phan Nguyễn Hoàng Duật.
+3. Genuinely major Vietnamese or world news.
+Drop clickbait, duplicates, and minor items.
 
 Return ONLY a JSON object (no prose, no markdown fences) of the shape:
   {"items": [{"index": <int, the candidate's number>, "en_title": "<concise English headline>", "en_summary": "<one-sentence English summary>", "vi_title": "<Vietnamese headline>", "vi_summary": "<one-sentence Vietnamese summary>"}]}
