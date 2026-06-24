@@ -92,7 +92,8 @@ func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 
 	message, posted := s.buildMessage(ctx, candidates, now, len(s.feeds))
 	if message == "" {
-		return fmt.Errorf("news: produced empty digest")
+		log.Printf("news: no relevant items found, skipping digest")
+		return nil
 	}
 
 	if err := send(message); err != nil {
@@ -117,12 +118,12 @@ func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 func (s *Service) buildMessage(ctx context.Context, candidates []FeedItem, now time.Time, sourceCount int) (string, []FeedItem) {
 	ranked, err := s.rankWithRetry(ctx, candidates)
 	if err != nil {
-		log.Printf("news: ranking failed, using titles-only fallback: %v", err)
-		fallback := candidates
-		if len(fallback) > s.maxItems {
-			fallback = fallback[:s.maxItems]
-		}
-		return FormatFallback(fallback, now), fallback
+		log.Printf("news: ranking failed: %v", err)
+		return "", nil
+	}
+	if len(ranked) == 0 {
+		log.Printf("news: no items matched topic filter")
+		return "", nil
 	}
 
 	posted := make([]FeedItem, 0, len(ranked))

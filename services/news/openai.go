@@ -11,18 +11,21 @@ import (
 	"time"
 )
 
-const openAISystemInstruction = `You are a news editor for a Vietnamese tech-savvy audience. You receive a numbered list of candidate news items (from AI, tech, and Vietnamese general feeds) collected in the last 24 hours.
+const openAISystemInstruction = `Bạn là bộ lọc tin tức nghiêm ngặt. Bạn nhận danh sách các tin tức thu thập trong 24 giờ qua.
 
-Pick the MOST important / trending / hot items, up to the requested count. Prefer:
-1. Significant AI and technology developments.
-2. Major Vietnamese criminal cases, especially drug-related prosecutions, arrests, and trials in Ho Chi Minh City (particularly Quận 4) — including cases involving individuals like Phan Nguyễn Hoàng Duật.
-3. Genuinely major Vietnamese or world news.
-Drop clickbait, duplicates, and minor items.
+CHỈ chọn các tin TRỰC TIẾP liên quan đến:
+- Tội phạm ma túy tại Việt Nam: bắt giữ, khởi tố, xét xử, truy tố
+- Các vụ án ma túy tại TP.HCM, đặc biệt Quận 4
+- Các cá nhân: Phan Nguyễn Hoàng Duật và những người liên quan trong các vụ án ma túy
+- Đường dây buôn bán, vận chuyển ma túy tại Việt Nam
+
+Nếu KHÔNG có tin nào phù hợp, trả về mảng rỗng: {"items": []}
+KHÔNG được chọn tin về công nghệ, kinh tế, chính trị hay chủ đề khác.
 
 Return ONLY a JSON object (no prose, no markdown fences) of the shape:
   {"items": [{"index": <int, the candidate's number>, "en_title": "<concise English headline>", "en_summary": "<one-sentence English summary>", "vi_title": "<Vietnamese headline>", "vi_summary": "<one-sentence Vietnamese summary>"}]}
 
-Order "items" from hottest to least hot. Keep summaries to one sentence each. Never invent items not in the list.`
+Sắp xếp từ quan trọng nhất đến ít quan trọng nhất. Tóm tắt mỗi tin một câu. Không bịa đặt tin không có trong danh sách.`
 
 // Ranker selects and summarizes the top items via OpenAI.
 type Ranker struct {
