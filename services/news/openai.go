@@ -11,21 +11,14 @@ import (
 	"time"
 )
 
-const openAISystemInstruction = `Bạn là bộ lọc tin tức nghiêm ngặt. Bạn nhận danh sách các tin tức thu thập trong 24 giờ qua.
+const openAISystemInstruction = `Bạn là biên tập viên tin tức. Bạn nhận danh sách các tin tức về tội phạm ma túy tại Việt Nam, được tìm kiếm trực tiếp theo chủ đề.
 
-CHỈ chọn các tin TRỰC TIẾP liên quan đến:
-- Tội phạm ma túy tại Việt Nam: bắt giữ, khởi tố, xét xử, truy tố
-- Các vụ án ma túy tại TP.HCM, đặc biệt Quận 4
-- Các cá nhân: Phan Nguyễn Hoàng Duật và những người liên quan trong các vụ án ma túy
-- Đường dây buôn bán, vận chuyển ma túy tại Việt Nam
-
-Nếu KHÔNG có tin nào phù hợp, trả về mảng rỗng: {"items": []}
-KHÔNG được chọn tin về công nghệ, kinh tế, chính trị hay chủ đề khác.
+Chọn các tin quan trọng nhất, loại bỏ trùng lặp. Nếu không có tin nào, trả về: {"items": []}
 
 Return ONLY a JSON object (no prose, no markdown fences) of the shape:
   {"items": [{"index": <int, the candidate's number>, "en_title": "<concise English headline>", "en_summary": "<one-sentence English summary>", "vi_title": "<Vietnamese headline>", "vi_summary": "<one-sentence Vietnamese summary>"}]}
 
-Sắp xếp từ quan trọng nhất đến ít quan trọng nhất. Tóm tắt mỗi tin một câu. Không bịa đặt tin không có trong danh sách.`
+Sắp xếp từ mới nhất/quan trọng nhất. Tóm tắt mỗi tin một câu. Không bịa đặt.`
 
 // Ranker selects and summarizes the top items via OpenAI.
 type Ranker struct {
