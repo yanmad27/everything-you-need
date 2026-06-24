@@ -56,12 +56,14 @@ type ServerConfig struct {
 }
 
 type NewsConfig struct {
-	Enabled      bool     `mapstructure:"enabled"`
-	DBPath       string   `mapstructure:"db_path"`
-	OpenAIAPIKey string   `mapstructure:"openai_api_key"`
-	OpenAIModel  string   `mapstructure:"openai_model"`
-	Feeds        []string `mapstructure:"feeds"`
-	MaxItems     int      `mapstructure:"max_items"`
-	WindowHours  int      `mapstructure:"window_hours"`
-	DedupDays    int      `mapstructure:"dedup_days"`
+	Enabled        bool     `mapstructure:"enabled"`
+	DBPath         string   `mapstructure:"db_path"`
+	OpenAIAPIKey   string   `mapstructure:"openai_api_key"`
+	OpenAIModel    string   `mapstructure:"openai_model"`
+	Feeds          []string `mapstructure:"feeds"`
+	SearchQueries  []string `mapstructure:"search_queries"`
+	SerperAPIKey   string   `mapstructure:"serper_api_key"`
+	MaxItems       int      `mapstructure:"max_items"`
+	WindowHours    int      `mapstructure:"window_hours"`
+	DedupDays      int      `mapstructure:"dedup_days"`
 }

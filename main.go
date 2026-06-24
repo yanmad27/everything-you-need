@@ -119,7 +119,12 @@ func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (
 	}
 
 	ranker := news.NewRanker(apiKey, cfg.News.OpenAIModel, 0)
-	svc := news.NewService(store, ranker, cfg.News.Feeds, cfg.News.MaxItems, cfg.News.WindowHours, cfg.News.DedupDays, time.Now)
+	var searcher *news.Searcher
+	if cfg.News.SerperAPIKey != "" && len(cfg.News.SearchQueries) > 0 {
+		searcher = news.NewSearcher(cfg.News.SerperAPIKey, cfg.News.SearchQueries)
+		log.Printf("News searcher initialized (serper, queries=%d)", len(cfg.News.SearchQueries))
+	}
+	svc := news.NewService(store, ranker, searcher, cfg.News.Feeds, cfg.News.MaxItems, cfg.News.WindowHours, cfg.News.DedupDays, time.Now)
 	log.Printf("News service initialized (db=%s, feeds=%d, model=%s)", cfg.News.DBPath, len(cfg.News.Feeds), cfg.News.OpenAIModel)
 	return svc, store
 }

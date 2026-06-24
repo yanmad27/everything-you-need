@@ -12,6 +12,7 @@ import (
 type Service struct {
 	store       *Store
 	ranker      *Ranker
+	searcher    *Searcher
 	feeds       []string
 	maxItems    int
 	window      time.Duration
@@ -22,7 +23,7 @@ type Service struct {
 // SendFunc delivers the rendered digest message (markdown) to a destination.
 type SendFunc func(message string) error
 
-func NewService(store *Store, ranker *Ranker, feeds []string, maxItems, windowHours, dedupDays int, nowFunc func() time.Time) *Service {
+func NewService(store *Store, ranker *Ranker, searcher *Searcher, feeds []string, maxItems, windowHours, dedupDays int, nowFunc func() time.Time) *Service {
 	if maxItems <= 0 {
 		maxItems = 7
 	}
@@ -38,6 +39,7 @@ func NewService(store *Store, ranker *Ranker, feeds []string, maxItems, windowHo
 	return &Service{
 		store:       store,
 		ranker:      ranker,
+		searcher:    searcher,
 		feeds:       feeds,
 		maxItems:    maxItems,
 		window:      time.Duration(windowHours) * time.Hour,
@@ -60,6 +62,15 @@ func (s *Service) RunDigest(ctx context.Context, send SendFunc) error {
 	if len(failed) > 0 {
 		log.Printf("news: %d/%d feeds failed: %v", len(failed), len(s.feeds), failed)
 	}
+
+	if s.searcher != nil {
+		searchItems := s.searcher.FetchAll(ctx)
+		if len(searchItems) > 0 {
+			log.Printf("news: serper returned %d items", len(searchItems))
+			items = append(items, searchItems...)
+		}
+	}
+
 	if len(items) == 0 {
 		return fmt.Errorf("news: no items fetched from any feed")
 	}
