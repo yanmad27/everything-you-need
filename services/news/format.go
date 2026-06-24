@@ -36,15 +36,13 @@ func FormatDigest(ranked []RankedItem, now time.Time, sourceCount int) string {
 	fmt.Fprintf(&builder, "📰 *Tin nổi bật hôm nay*\n🕐 %s\n\n", now.Format("15:04 02/01/2006"))
 
 	for i, item := range ranked {
-		enTitle := escapeMarkdown(item.EnglishTitle)
-		fmt.Fprintf(&builder, "*%d. %s*\n", i+1, enTitle)
-		if item.EnglishSummary != "" {
-			fmt.Fprintf(&builder, "🇬🇧 %s\n", escapeMarkdown(item.EnglishSummary))
+		viTitle := escapeMarkdown(item.VietnameseTitle)
+		if viTitle == "" {
+			viTitle = escapeMarkdown(item.EnglishTitle)
 		}
-		if item.VietnameseTitle != "" || item.VietnameseSummary != "" {
-			viLine := strings.TrimSpace(escapeMarkdown(item.VietnameseTitle) + " — " + escapeMarkdown(item.VietnameseSummary))
-			viLine = strings.Trim(viLine, " —")
-			fmt.Fprintf(&builder, "🇻🇳 %s\n", viLine)
+		fmt.Fprintf(&builder, "*%d. %s*\n", i+1, viTitle)
+		if item.VietnameseSummary != "" {
+			fmt.Fprintf(&builder, "%s\n", escapeMarkdown(item.VietnameseSummary))
 		}
 		if item.URL != "" {
 			fmt.Fprintf(&builder, "🔗 %s\n", item.URL)
