@@ -45,30 +45,19 @@ news:
   openai_api_key: "" # -> NEWS_OPENAI_API_KEY
   openai_model: "gemini-flash-latest"
   serper_api_key: "" # -> NEWS_SERPER_API_KEY
-  search_queries:
-    - "ma túy quận 4 hồ chí minh"
-    - "Phan Nguyễn Hoàng Duật ma túy"
-    - "truy tố ma túy TP.HCM"
-    - "bắt giữ ma túy quận 4 2025"
-    - "xét xử tội phạm ma túy hồ chí minh"
+  # Filter off: general hottest AI/tech/VN news, no topic search.
+  search_queries: []
   max_items: 7
   window_hours: 24
   dedup_days: 7
   feeds:
-    - "https://news.google.com/rss/search?q=ma+túy+quận+4+hồ+chí+minh&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=Phan+Nguyễn+Hoàng+Duật&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=truy+tố+ma+túy+TP.HCM&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=tội+phạm+ma+túy+quận+4&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=bắt+giữ+ma+túy+TP+Hồ+Chí+Minh&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=khởi+tố+ma+túy+quận+4&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://news.google.com/rss/search?q=xét+xử+ma+túy+Hồ+Chí+Minh&hl=vi&gl=VN&ceid=VN:vi"
-    - "https://www.bing.com/news/search?q=ma+tuy+quan+4+ho+chi+minh&format=rss"
-    - "https://www.bing.com/news/search?q=Phan+Nguyen+Hoang+Duat+ma+tuy&format=rss"
-    - "https://www.bing.com/news/search?q=truy+to+ma+tuy+TPHCM&format=rss"
-    - "https://vnexpress.net/rss/phap-luat.rss"
-    - "https://tuoitre.vn/rss/phap-luat.rss"
-    - "https://thanhnien.vn/rss/phap-luat.rss"
-    - "https://cand.com.vn/rss/phap-luat.rss"
+    - "https://vnexpress.net/rss/tin-moi-nhat.rss"
+    - "https://vnexpress.net/rss/so-hoa.rss"
+    - "https://tuoitre.vn/rss/tin-moi-nhat.rss"
+    - "https://news.ycombinator.com/rss"
+    - "https://techcrunch.com/feed/"
+    - "https://www.theverge.com/rss/index.xml"
+    - "http://feeds.arstechnica.com/arstechnica/index"
 
 server:
   listen_addr: ":8080"
