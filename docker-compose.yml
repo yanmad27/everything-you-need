@@ -22,6 +22,9 @@ services:
       - eyn-logs:/root/logs
     expose:
       - "8080"
+    networks:
+      # Joins Dokploy's Traefik network so a domain can route to the webhook.
+      - dokploy-network
     healthcheck:
       test: ["CMD", "pgrep", "-f", "./main"]
       interval: 30s
@@ -34,17 +37,10 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  smee-client:
-    image: deltaprojects/smee-client
-    restart: unless-stopped
-    command:
-      - "-u"
-      - "https://smee.io/2iKk7zcT8arhn5WB"
-      - "-t"
-      - "http://price-tracker:8080/telegram-webhook"
-    depends_on:
-      - price-tracker
-
 volumes:
   eyn-data:
   eyn-logs:
+
+networks:
+  dokploy-network:
+    external: true

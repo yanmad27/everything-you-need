@@ -32,7 +32,7 @@ telegram:
   webhook_path: "/telegram-webhook"
 
 reminder:
-  enabled: false
+  enabled: true
   db_path: "data/reminders.db"
   openai_api_key: "" # -> REMINDER_OPENAI_API_KEY
   openai_model: "gpt-5"
