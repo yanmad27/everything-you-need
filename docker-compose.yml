@@ -4,15 +4,22 @@ services:
       context: .
       dockerfile: Dockerfile
     image: everything-you-need:latest
-    container_name: price-tracker-bot
     restart: unless-stopped
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    environment:
+      # Secrets supplied by Dokploy Compose env; override the blanks in config.yaml.
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET}
+      - NEWS_OPENAI_API_KEY=${NEWS_OPENAI_API_KEY}
+      - NEWS_SERPER_API_KEY=${NEWS_SERPER_API_KEY}
+      - REMINDER_OPENAI_API_KEY=${REMINDER_OPENAI_API_KEY}
+      - PRICE_SOURCES_DOJI_API_URL=${PRICE_SOURCES_DOJI_API_URL}
+      - PRICE_SOURCES_BTMC_API_URL=${PRICE_SOURCES_BTMC_API_URL}
     volumes:
-      - ./config.yaml:/root/config.yaml:ro
-      - ./logs:/root/logs
-      - ./data:/root/data
+      - eyn-data:/root/data
+      - eyn-logs:/root/logs
     expose:
       - "8080"
     healthcheck:
@@ -29,7 +36,6 @@ services:
 
   smee-client:
     image: deltaprojects/smee-client
-    container_name: smee-client
     restart: unless-stopped
     command:
       - "-u"
@@ -39,6 +45,6 @@ services:
     depends_on:
       - price-tracker
 
-networks:
-  default:
-    name: price-tracker-network
+volumes:
+  eyn-data:
+  eyn-logs:

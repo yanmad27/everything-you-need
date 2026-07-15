@@ -31,11 +31,14 @@ ENV TZ=Asia/Ho_Chi_Minh
 # Create app directory
 WORKDIR /root/
 
+# Ensure data/logs dirs exist (SQLite + price history); volumes mount over these
+RUN mkdir -p /root/data /root/logs
+
 # Copy the binary from builder stage
 COPY --from=builder /app/main .
 
-# Copy configuration files
-COPY --from=builder /app/config.yaml ./config.yaml
+# Copy baked non-secret config (secrets come from env vars at runtime)
+COPY --from=builder /app/config.docker.yaml ./config.yaml
 
 # Expose port (if needed for webhooks)
 EXPOSE 8080

@@ -1,0 +1,74 @@
+# Committed, non-secret config baked into the Docker image as config.yaml.
+# Secret fields are left blank on purpose and are supplied at runtime via
+# environment variables (Dokploy Compose env). Viper's AutomaticEnv overrides
+# these blanks, e.g. NEWS_SERPER_API_KEY -> news.serper_api_key.
+# The list values (feeds, search_queries) cannot be env vars, so they live here.
+
+app:
+  name: "Everything You Need"
+  environment: "production"
+  log_level: "info"
+
+price_sources:
+  doji:
+    enabled: true
+    api_url: "" # -> PRICE_SOURCES_DOJI_API_URL (embeds api key)
+  btmc:
+    enabled: true
+    api_url: "" # -> PRICE_SOURCES_BTMC_API_URL (embeds api key)
+  mihong:
+    enabled: true
+    base_url: "https://www.mihong.vn/vi/gia-vang-trong-nuoc"
+    api_url: "https://api.mihong.vn/v1/gold-prices?market=domestic"
+  coingecko:
+    enabled: true
+    api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin&vs_currencies=usd"
+
+telegram:
+  enabled: true
+  bot_token: "" # -> TELEGRAM_BOT_TOKEN
+  channel_id: "-1002923319232"
+  webhook_secret: "" # -> TELEGRAM_WEBHOOK_SECRET
+  webhook_path: "/telegram-webhook"
+
+reminder:
+  enabled: false
+  db_path: "data/reminders.db"
+  openai_api_key: "" # -> REMINDER_OPENAI_API_KEY
+  openai_model: "gpt-5"
+  retention_days: 30
+  max_lookahead_days: 365
+
+news:
+  enabled: true
+  db_path: "data/news.db"
+  openai_api_key: "" # -> NEWS_OPENAI_API_KEY
+  openai_model: "gpt-5"
+  serper_api_key: "" # -> NEWS_SERPER_API_KEY
+  search_queries:
+    - "ma túy quận 4 hồ chí minh"
+    - "Phan Nguyễn Hoàng Duật ma túy"
+    - "truy tố ma túy TP.HCM"
+    - "bắt giữ ma túy quận 4 2025"
+    - "xét xử tội phạm ma túy hồ chí minh"
+  max_items: 7
+  window_hours: 24
+  dedup_days: 7
+  feeds:
+    - "https://news.google.com/rss/search?q=ma+túy+quận+4+hồ+chí+minh&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=Phan+Nguyễn+Hoàng+Duật&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=truy+tố+ma+túy+TP.HCM&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=tội+phạm+ma+túy+quận+4&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=bắt+giữ+ma+túy+TP+Hồ+Chí+Minh&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=khởi+tố+ma+túy+quận+4&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://news.google.com/rss/search?q=xét+xử+ma+túy+Hồ+Chí+Minh&hl=vi&gl=VN&ceid=VN:vi"
+    - "https://www.bing.com/news/search?q=ma+tuy+quan+4+ho+chi+minh&format=rss"
+    - "https://www.bing.com/news/search?q=Phan+Nguyen+Hoang+Duat+ma+tuy&format=rss"
+    - "https://www.bing.com/news/search?q=truy+to+ma+tuy+TPHCM&format=rss"
+    - "https://vnexpress.net/rss/phap-luat.rss"
+    - "https://tuoitre.vn/rss/phap-luat.rss"
+    - "https://thanhnien.vn/rss/phap-luat.rss"
+    - "https://cand.com.vn/rss/phap-luat.rss"
+
+server:
+  listen_addr: ":8080"
