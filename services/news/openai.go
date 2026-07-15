@@ -29,7 +29,7 @@ type Ranker struct {
 
 func NewRanker(apiKey, model string, timeout time.Duration) *Ranker {
 	if model == "" {
-		model = "gpt-5"
+		model = "gemini-2.5-flash"
 	}
 	if timeout == 0 {
 		timeout = 60 * time.Second
@@ -54,7 +54,6 @@ func buildRankRequest(model string, items []FeedItem, maxItems int) ([]byte, err
 			{"role": "system", "content": openAISystemInstruction},
 			{"role": "user", "content": builder.String()},
 		},
-		"response_format": map[string]string{"type": "json_object"},
 	}
 	return json.Marshal(payload)
 }
@@ -79,7 +78,7 @@ func (r *Ranker) Rank(ctx context.Context, items []FeedItem, maxItems int) ([]Ra
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+		"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build openai request: %w", err)
 	}
@@ -102,6 +101,21 @@ func (r *Ranker) Rank(ctx context.Context, items []FeedItem, maxItems int) ([]Ra
 	return parseRankResponse(raw, items)
 }
 
+// extractJSONObject strips markdown fences / surrounding prose and returns the
+// JSON object substring, tolerating models that wrap their output.
+func extractJSONObject(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return strings.TrimSpace(s)
+}
+
 func parseRankResponse(raw []byte, candidates []FeedItem) ([]RankedItem, error) {
 	var outer openAIAPIResponse
 	if err := json.Unmarshal(raw, &outer); err != nil {
@@ -110,7 +124,7 @@ func parseRankResponse(raw []byte, candidates []FeedItem) ([]RankedItem, error) 
 	if len(outer.Choices) == 0 || outer.Choices[0].Message.Content == "" {
 		return nil, fmt.Errorf("openai returned no choices")
 	}
-	text := strings.TrimSpace(outer.Choices[0].Message.Content)
+	text := extractJSONObject(outer.Choices[0].Message.Content)
 
 	var wrapper struct {
 		Items []RankedItem `json:"items"`

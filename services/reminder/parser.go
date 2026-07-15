@@ -53,7 +53,6 @@ func buildOpenAIRequest(model string, now time.Time, text string) ([]byte, error
 			{"role": "system", "content": openAISystemInstruction},
 			{"role": "user", "content": userContent},
 		},
-		"response_format": map[string]string{"type": "json_object"},
 	}
 	return json.Marshal(payload)
 }
@@ -73,7 +72,22 @@ type openAIInnerJSON struct {
 	Reason string `json:"reason"`
 }
 
-// parseOpenAIResponse decodes OpenAI's outer envelope and then the inner JSON the model produced.
+// extractJSONObject strips markdown fences / surrounding prose and returns the
+// JSON object substring, tolerating models that wrap their output.
+func extractJSONObject(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return strings.TrimSpace(s)
+}
+
+// parseOpenAIResponse decodes the outer envelope and then the inner JSON the model produced.
 func parseOpenAIResponse(raw []byte) (ParseResult, error) {
 	var outer openAIAPIResponse
 	if err := json.Unmarshal(raw, &outer); err != nil {
@@ -82,7 +96,7 @@ func parseOpenAIResponse(raw []byte) (ParseResult, error) {
 	if len(outer.Choices) == 0 || outer.Choices[0].Message.Content == "" {
 		return ParseResult{}, fmt.Errorf("openai returned no choices")
 	}
-	text := strings.TrimSpace(outer.Choices[0].Message.Content)
+	text := extractJSONObject(outer.Choices[0].Message.Content)
 
 	var inner openAIInnerJSON
 	if err := json.Unmarshal([]byte(text), &inner); err != nil {
@@ -113,7 +127,7 @@ type OpenAIParser struct {
 
 func NewOpenAIParser(apiKey, model string, timeout time.Duration) *OpenAIParser {
 	if model == "" {
-		model = "gpt-5"
+		model = "gemini-2.5-flash"
 	}
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -132,7 +146,7 @@ func (p *OpenAIParser) Parse(ctx context.Context, now time.Time, text string) (P
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
+		"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return ParseResult{}, fmt.Errorf("build openai request: %w", err)
 	}

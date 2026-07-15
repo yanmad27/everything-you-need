@@ -35,7 +35,7 @@ reminder:
   enabled: true
   db_path: "data/reminders.db"
   openai_api_key: "" # -> REMINDER_OPENAI_API_KEY
-  openai_model: "gpt-5"
+  openai_model: "gemini-flash-latest"
   retention_days: 30
   max_lookahead_days: 365
 
@@ -43,7 +43,7 @@ news:
   enabled: true
   db_path: "data/news.db"
   openai_api_key: "" # -> NEWS_OPENAI_API_KEY
-  openai_model: "gpt-5"
+  openai_model: "gemini-flash-latest"
   serper_api_key: "" # -> NEWS_SERPER_API_KEY
   search_queries:
     - "ma túy quận 4 hồ chí minh"
