@@ -232,21 +232,22 @@ Bot:  🗑 Đã hủy nhắc #7.
 
 ### One-time setup
 
-1. Set `reminder.enabled: true` in `config.yaml`.
-2. Put an OpenAI API key in `reminder.openai_api_key`
+1. `reminder.enabled: true` is already set in `config.docker.yaml`.
+2. Provide an OpenAI API key via the `REMINDER_OPENAI_API_KEY` env var
    (create one at https://platform.openai.com/api-keys).
-3. Generate and save a webhook secret:
+3. Generate a webhook secret and set it via the `TELEGRAM_WEBHOOK_SECRET`
+   env var:
 
    ```bash
    openssl rand -hex 32
    ```
 
-   Put it in `telegram.webhook_secret`.
-4. Register the webhook with Telegram (once):
+4. Register the webhook with Telegram (once), pointing at the app's public
+   Dokploy domain:
 
    ```bash
    curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/setWebhook" \
-        -d url=https://smee.io/2iKk7zcT8arhn5WB \
+        -d url=https://eyn.rsrm.dev/telegram-webhook \
         -d secret_token=$WEBHOOK_SECRET \
         -d 'allowed_updates=["message","channel_post"]'
    ```
@@ -255,12 +256,13 @@ Bot:  🗑 Đã hủy nhắc #7.
 5. Make sure the bot is an **admin** of the channel (so it can read messages
    and post replies).
 
-The `smee-client` container in `docker-compose.yml` forwards webhook events
-from smee.io to the bot's `:8080/telegram-webhook` endpoint — no public
-HTTPS endpoint needed on the host.
+Telegram delivers updates straight to the app over HTTPS at
+`https://eyn.rsrm.dev/telegram-webhook` (Traefik → `price-tracker:8080`);
+the app validates the `X-Telegram-Bot-Api-Secret-Token` header against
+`telegram.webhook_secret`.
 
 Reminders are stored in SQLite at `data/reminders.db` and persist across
-deploys (the `./data` directory is volume-mounted).
+deploys (the `eyn-data` volume).
 
 ## 🚢 Deployment
 
