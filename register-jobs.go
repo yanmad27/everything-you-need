@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/lunar"
 	"everything-you-need/m/services/news"
@@ -27,7 +28,7 @@ var currencyMap = map[string]string{
 // moved more than this percent since the last alert.
 const goldWatchChangeThreshold = 1.0
 
-func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, cfg *config.Config) {
+func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, dueDateService *duedate.Service, cfg *config.Config) {
 	historyService := pricetracker.NewPriceHistoryService()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 
@@ -219,6 +220,19 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 		})
 		if newsErr != nil {
 			log.Printf("Failed to register news-digest job: %v", newsErr)
+		}
+	}
+
+	if dueDateService != nil && teleService != nil && cfg.Telegram.ChannelID != "" {
+		channelID := cfg.Telegram.ChannelID
+		dueErr := scheduler.RegisterCronJob("duedate-reminder", "0 8 * * *", func() error {
+			send := func(message string) error {
+				return teleService.SendToChannel(channelID, message)
+			}
+			return dueDateService.RunDigest(context.Background(), send)
+		})
+		if dueErr != nil {
+			log.Printf("Failed to register duedate-reminder job: %v", dueErr)
 		}
 	}
 

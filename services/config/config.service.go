@@ -15,6 +15,7 @@ type Config struct {
 	Reminder     ReminderConfig     `mapstructure:"reminder"`
 	Server       ServerConfig       `mapstructure:"server"`
 	News         NewsConfig         `mapstructure:"news"`
+	DueDate      DueDateConfig      `mapstructure:"duedate"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -85,6 +86,10 @@ func setDefaults() {
 	viper.SetDefault("news.max_items", 7)
 	viper.SetDefault("news.window_hours", 24)
 	viper.SetDefault("news.dedup_days", 7)
+	viper.SetDefault("duedate.enabled", false)
+	viper.SetDefault("duedate.csv_url", "")
+	viper.SetDefault("duedate.state_path", "data/duedate_sent.txt")
+
 	viper.SetDefault("news.feeds", []string{
 		"https://news.ycombinator.com/rss",
 		"https://techcrunch.com/feed/",

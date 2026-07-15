@@ -55,6 +55,12 @@ type ServerConfig struct {
 	ListenAddr string `mapstructure:"listen_addr"`
 }
 
+type DueDateConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	CSVURL    string `mapstructure:"csv_url"`
+	StatePath string `mapstructure:"state_path"`
+}
+
 type NewsConfig struct {
 	Enabled        bool     `mapstructure:"enabled"`
 	DBPath         string   `mapstructure:"db_path"`

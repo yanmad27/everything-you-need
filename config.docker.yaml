@@ -72,3 +72,11 @@ news:
 
 server:
   listen_addr: ":8080"
+
+# Daily 08:00 ICT scan of the wedding MASTER PLAN sheet's Due Date column.
+# Posts a Telegram digest for tasks due in 1 month / 2 weeks / 1 week / 3 days /
+# 1 day / today. Skips rows with Status = Done.
+duedate:
+  enabled: true
+  csv_url: "https://docs.google.com/spreadsheets/d/1PutenOr1SZNTCc89K-ZJx5bEmlhJ3lrHbTytshohxv0/export?format=csv&gid=624467204"
+  state_path: "data/duedate_sent.txt"

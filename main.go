@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/news"
 	pricetracker "everything-you-need/m/services/price-tracker"
@@ -38,8 +39,10 @@ func main() {
 		defer newsStore.Close()
 	}
 
+	dueDateService := buildDueDateService(cfg)
+
 	scheduler := jobscheduler.NewJobScheduler()
-	registerJobs(scheduler, priceService, teleService, reminderService, newsService, cfg)
+	registerJobs(scheduler, priceService, teleService, reminderService, newsService, dueDateService, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -127,6 +130,19 @@ func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (
 	svc := news.NewService(store, ranker, searcher, cfg.News.Feeds, cfg.News.MaxItems, cfg.News.WindowHours, cfg.News.DedupDays, time.Now)
 	log.Printf("News service initialized (db=%s, feeds=%d, model=%s)", cfg.News.DBPath, len(cfg.News.Feeds), cfg.News.OpenAIModel)
 	return svc, store
+}
+
+func buildDueDateService(cfg *config.Config) *duedate.Service {
+	if !cfg.DueDate.Enabled {
+		log.Printf("Due-date reminder service disabled in config")
+		return nil
+	}
+	if cfg.DueDate.CSVURL == "" {
+		log.Printf("Due-date reminder service disabled: duedate.csv_url is empty")
+		return nil
+	}
+	log.Printf("Due-date reminder service initialized (state=%s)", cfg.DueDate.StatePath)
+	return duedate.NewService(cfg.DueDate.CSVURL, cfg.DueDate.StatePath, time.Now)
 }
 
 func startWebhookServer(cfg *config.Config, svc *reminder.Service) *http.Server {
