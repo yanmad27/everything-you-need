@@ -38,9 +38,10 @@ func TestDockerConfigEnvOverride(t *testing.T) {
 	if cfg.PriceSources.BTMC.APIURL != "http://btmc.example/from-env" {
 		t.Errorf("btmc api_url: want env override, got %q", cfg.PriceSources.BTMC.APIURL)
 	}
-	// Lists must come from the file (cannot be env vars).
-	if len(cfg.News.Feeds) == 0 || len(cfg.News.SearchQueries) == 0 {
-		t.Errorf("feeds=%d search_queries=%d, want both from file", len(cfg.News.Feeds), len(cfg.News.SearchQueries))
+	// Feed list must come from the file (cannot be env vars). search_queries is
+	// intentionally empty now (topic filter off).
+	if len(cfg.News.Feeds) == 0 {
+		t.Errorf("feeds=%d, want the general feed list from file", len(cfg.News.Feeds))
 	}
 	// Non-secret file value preserved.
 	if cfg.Telegram.ChannelID != "-1002923319232" {

@@ -18,7 +18,7 @@ func TestFormatDigest(t *testing.T) {
 		},
 	}
 	msg := FormatDigest(ranked, now, 6)
-	for _, want := range []string{"Tin nổi bật", "OpenAI ships model", "🇬🇧", "🇻🇳", "https://techcrunch.com/x", "6 nguồn"} {
+	for _, want := range []string{"Tin nổi bật", "OpenAI ra mắt mô hình", "Bản phát hành lớn.", "https://techcrunch.com/x", "6 nguồn"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("digest missing %q\n%s", want, msg)
 		}

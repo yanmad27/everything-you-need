@@ -62,6 +62,13 @@ news:
 server:
   listen_addr: ":8080"
 
+# Chat with the bot ("Trợ lý Pink") — messages starting with a wake word
+# (pink / trợ lý / troly) go to Gemini. api_key falls back to the reminder key.
+chat:
+  enabled: true
+  api_key: "" # -> CHAT_OPENAI_API_KEY (falls back to reminder.openai_api_key)
+  model: "gemini-flash-latest"
+
 # Daily 08:00 ICT scan of the wedding MASTER PLAN sheet's Due Date column.
 # Posts a Telegram digest for tasks due in 1 month / 2 weeks / 1 week / 3 days /
 # 1 day / today. Skips rows with Status = Done.

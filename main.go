@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
@@ -40,6 +41,7 @@ func main() {
 	}
 
 	dueDateService := buildDueDateService(cfg)
+	chatService := buildChatService(cfg, teleService)
 
 	scheduler := jobscheduler.NewJobScheduler()
 	registerJobs(scheduler, priceService, teleService, reminderService, newsService, dueDateService, cfg)
@@ -47,7 +49,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	webhookServer := startWebhookServer(cfg, reminderService)
+	webhookServer := startWebhookServer(cfg, reminderService, chatService)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -145,8 +147,32 @@ func buildDueDateService(cfg *config.Config) *duedate.Service {
 	return duedate.NewService(cfg.DueDate.CSVURL, cfg.DueDate.StatePath, time.Now)
 }
 
-func startWebhookServer(cfg *config.Config, svc *reminder.Service) *http.Server {
-	if svc == nil {
+func buildChatService(cfg *config.Config, teleService *telebot.TeleBotService) *chat.Service {
+	if !cfg.Chat.Enabled {
+		log.Printf("Chat service disabled in config")
+		return nil
+	}
+	if teleService == nil {
+		log.Printf("Chat service disabled: telegram service not available")
+		return nil
+	}
+	apiKey := cfg.Chat.APIKey
+	if apiKey == "" {
+		apiKey = cfg.Reminder.OpenAIAPIKey // reuse the reminder bot's LLM key
+	}
+	if apiKey == "" {
+		apiKey = cfg.News.OpenAIAPIKey
+	}
+	if apiKey == "" {
+		log.Printf("Chat service disabled: no LLM api key (chat/reminder/news api key empty)")
+		return nil
+	}
+	log.Printf("Chat service initialized (model=%s)", cfg.Chat.Model)
+	return chat.NewService(apiKey, cfg.Chat.Model, teleService)
+}
+
+func startWebhookServer(cfg *config.Config, svc *reminder.Service, chatSvc *chat.Service) *http.Server {
+	if svc == nil && chatSvc == nil {
 		return nil
 	}
 	if cfg.Telegram.WebhookSecret == "" {
@@ -169,8 +195,21 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service) *http.Server 
 			return
 		}
 		incoming := toIncomingMessage(msg)
-		if err := svc.HandleIncoming(ctx, incoming); err != nil {
-			log.Printf("webhook dispatch error: %v", err)
+
+		// Reminders take priority; chat handles wake-word messages that aren't
+		// reminder commands.
+		if svc != nil && svc.Matches(incoming.Text) {
+			if err := svc.HandleIncoming(ctx, incoming); err != nil {
+				log.Printf("webhook dispatch error: %v", err)
+			}
+			return
+		}
+		if chatSvc != nil {
+			if _, ok := chat.SplitWake(incoming.Text); ok {
+				if err := chatSvc.Handle(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
+					log.Printf("chat dispatch error: %v", err)
+				}
+			}
 		}
 	}
 

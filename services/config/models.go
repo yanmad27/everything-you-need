@@ -61,6 +61,12 @@ type DueDateConfig struct {
 	StatePath string `mapstructure:"state_path"`
 }
 
+type ChatConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	APIKey  string `mapstructure:"api_key"`
+	Model   string `mapstructure:"model"`
+}
+
 type NewsConfig struct {
 	Enabled        bool     `mapstructure:"enabled"`
 	DBPath         string   `mapstructure:"db_path"`

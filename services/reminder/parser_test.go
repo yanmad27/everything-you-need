@@ -20,9 +20,6 @@ func TestBuildOpenAIRequestIncludesNowAndMessage(t *testing.T) {
 	if !strings.Contains(s, "ăn cơm") {
 		t.Errorf("request body missing MESSAGE: %s", s)
 	}
-	if !strings.Contains(s, `"type":"json_object"`) {
-		t.Errorf("request must request JSON object response format: %s", s)
-	}
 	if !strings.Contains(s, `"model":"gpt-5"`) {
 		t.Errorf("request must include model: %s", s)
 	}

@@ -16,6 +16,7 @@ type Config struct {
 	Server       ServerConfig       `mapstructure:"server"`
 	News         NewsConfig         `mapstructure:"news"`
 	DueDate      DueDateConfig      `mapstructure:"duedate"`
+	Chat         ChatConfig         `mapstructure:"chat"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -89,6 +90,10 @@ func setDefaults() {
 	viper.SetDefault("duedate.enabled", false)
 	viper.SetDefault("duedate.csv_url", "")
 	viper.SetDefault("duedate.state_path", "data/duedate_sent.txt")
+
+	viper.SetDefault("chat.enabled", true)
+	viper.SetDefault("chat.api_key", "")
+	viper.SetDefault("chat.model", "gemini-flash-latest")
 
 	viper.SetDefault("news.feeds", []string{
 		"https://news.ycombinator.com/rss",

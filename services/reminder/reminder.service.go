@@ -42,6 +42,14 @@ func NewService(store *Store, parser Parser, sender Sender, now func() time.Time
 	return &Service{store: store, parser: parser, sender: sender, now: now}
 }
 
+// Matches reports whether the text is a reminder command/keyword this service
+// would act on. Used to give reminders priority over the chat handler.
+func (s *Service) Matches(text string) bool {
+	t := strings.TrimSpace(text)
+	return matchHelpCommand(t) || matchListCommand(t) || matchCancelCommand(t) ||
+		matchLunarCommand(t) || MatchesReminderKeyword(t)
+}
+
 // HandleIncoming routes a message to the right internal handler.
 func (s *Service) HandleIncoming(ctx context.Context, msg IncomingMessage) error {
 	text := strings.TrimSpace(msg.Text)
