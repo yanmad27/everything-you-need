@@ -264,33 +264,36 @@ deploys (the `./data` directory is volume-mounted).
 
 ## 🚢 Deployment
 
-Deploy (or redeploy) the latest `main` to the production host:
+Runs on a [Dokploy](https://dokploy.com) instance as a Docker Compose service,
+built from the `main` branch. **Auto-deploy is on** — pushing to `main`
+rebuilds and redeploys automatically. To redeploy by hand, hit **Deploy** on the
+Compose service in the Dokploy dashboard.
 
-```bash
-ssh hrm.gitrunner
-cd ~/workspace/everything-you-need
-git pull
-docker compose up -d --build
-```
+### How config & secrets work
 
-### Offline fallback (when the host can't reach GitHub / Docker Hub)
+The image bakes in `config.docker.yaml` (renamed to `config.yaml` inside the
+container) — this holds all **non-secret** config, including the list values
+(`news.feeds`, `news.search_queries`) that can't be expressed as env vars.
 
-The prod host has intermittent outbound connectivity. When `git pull` or the
-Docker base-image pulls time out, deploy without touching the network from the
-host:
+**Secrets are supplied as Dokploy Compose environment variables** and override
+the blanked fields at runtime via Viper's `AutomaticEnv`. Set these in the
+Dokploy Compose → Environment tab:
 
-```bash
-# from a machine that has the commits + can build:
-git bundle create /tmp/eyn.bundle origin/main
-base64 < /tmp/eyn.bundle | ssh hrm.gitrunner 'base64 -d > /tmp/eyn.bundle && cd ~/workspace/everything-you-need && git fetch /tmp/eyn.bundle "refs/remotes/origin/main:refs/remotes/origin/main" && git merge --ff-only origin/main'
+| Env var | Overrides |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | `telegram.bot_token` |
+| `TELEGRAM_WEBHOOK_SECRET` | `telegram.webhook_secret` |
+| `NEWS_OPENAI_API_KEY` | `news.openai_api_key` |
+| `NEWS_SERPER_API_KEY` | `news.serper_api_key` |
+| `REMINDER_OPENAI_API_KEY` | `reminder.openai_api_key` |
+| `PRICE_SOURCES_DOJI_API_URL` | `price_sources.doji.api_url` |
+| `PRICE_SOURCES_BTMC_API_URL` | `price_sources.btmc.api_url` |
 
-# cross-compile + ship the binary, rebuild the image FROM the cached one:
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/main-linux .
-base64 < /tmp/main-linux | ssh hrm.gitrunner 'mkdir -p /tmp/eyn-patch && base64 -d > /tmp/eyn-patch/main && cd /tmp/eyn-patch && printf "FROM everything-you-need:latest\nCOPY main /root/main\n" > Dockerfile && docker build -t everything-you-need:latest .'
-ssh hrm.gitrunner 'cd ~/workspace/everything-you-need && docker compose up -d --no-build --force-recreate price-tracker'
-```
+SQLite databases (`data/*.db`) persist in the named volume `eyn-data` across
+redeploys.
 
-(`config.yaml` on the host is volume-mounted and preserved across all of the above.)
+> The repo is private, so Dokploy clones it through a GitHub App installed on
+> the account with access to `yanmad27/everything-you-need`.
 
 ## 🤝 Contributing
 
