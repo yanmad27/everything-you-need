@@ -16,8 +16,10 @@ var (
 	urlRe     = regexp.MustCompile(`https?://[^\s<>"]+`)
 	scriptRe  = regexp.MustCompile(`(?is)<(script|style|noscript)[^>]*>.*?</(script|style|noscript)>`)
 	tagRe     = regexp.MustCompile(`(?s)<[^>]+>`)
-	fetchHTTP = &http.Client{Timeout: 12 * time.Second}
+	fetchHTTP = &http.Client{Timeout: 30 * time.Second}
 )
+
+const browserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 
 // maxPageChars caps how much page text is fed to the model (keeps token cost sane).
 const maxPageChars = 12000
@@ -44,12 +46,26 @@ func augmentWithURLs(ctx context.Context, prompt string) string {
 	return b.String()
 }
 
+// fetchPageText prefers the r.jina.ai reader (fetches from its own infra, so it
+// bypasses WAF/IP blocks and renders JS, returning clean LLM-ready text). Falls
+// back to a direct fetch if the reader is unavailable.
 func fetchPageText(ctx context.Context, rawURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if text, err := getText(ctx, "https://r.jina.ai/"+rawURL, false); err == nil {
+		return text, nil
+	} else {
+		log.Printf("chat: reader %s: %v (trying direct)", rawURL, err)
+	}
+	return getText(ctx, rawURL, true)
+}
+
+// getText GETs a URL and returns readable text. stripHTML runs the tag stripper
+// (needed for a direct fetch; the reader already returns markdown).
+func getText(ctx context.Context, url string, stripHTML bool) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", browserUA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "vi,en;q=0.9")
 	resp, err := fetchHTTP.Do(req)
@@ -64,7 +80,15 @@ func fetchPageText(ctx context.Context, rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s := htmlToText(string(raw))
+	s := string(raw)
+	if stripHTML {
+		s = htmlToText(s)
+	} else {
+		s = strings.TrimSpace(s) // reader returns clean markdown; keep its structure
+		if len(s) > maxPageChars {
+			s = strings.ToValidUTF8(s[:maxPageChars], "")
+		}
+	}
 	if s == "" {
 		return "", fmt.Errorf("no readable text")
 	}
