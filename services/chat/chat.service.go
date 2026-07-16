@@ -32,6 +32,15 @@ func SplitWake(text string) (rest string, ok bool) {
 	return strings.TrimSpace(text[loc[1]:]), true
 }
 
+// clearRe matches a whole-message request to reset the conversation (anchored so
+// "quên mật khẩu thì sao" stays a normal question).
+var clearRe = regexp.MustCompile(`(?i)^(/?clear( context)?|/?reset( context)?|quên đi|quên hết( ngữ cảnh)?|x(óa|oá|oa) (ngữ cảnh|lịch sử)|new chat|làm mới|bắt đầu lại)$`)
+
+// IsClearCommand reports whether the (wake-word-stripped) prompt asks to reset.
+func IsClearCommand(prompt string) bool {
+	return clearRe.MatchString(strings.TrimSpace(prompt))
+}
+
 // Sender delivers a reply back to the chat.
 type Sender interface {
 	SendReply(ctx context.Context, chatID string, replyToMessageID int64, text string) error
@@ -63,6 +72,12 @@ func (s *Service) Handle(ctx context.Context, chatID string, replyToMsgID int64,
 	}
 	if prompt == "" {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! 🩷 Bạn cần gì nào?")
+	}
+	if IsClearCommand(prompt) {
+		s.mu.Lock()
+		delete(s.history, chatID)
+		s.mu.Unlock()
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, "🧹 Đã xoá ngữ cảnh. Mình bắt đầu lại từ đầu nhé!")
 	}
 
 	reply, err := s.complete(ctx, chatID, prompt)

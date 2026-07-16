@@ -29,3 +29,18 @@ func TestSplitWake(t *testing.T) {
 		}
 	}
 }
+
+func TestIsClearCommand(t *testing.T) {
+	clear := []string{"clear", "/clear", "reset", "clear context", "quên đi", "quên hết", "xoá ngữ cảnh", "xóa lịch sử", "new chat", "làm mới", "bắt đầu lại"}
+	for _, s := range clear {
+		if !IsClearCommand(s) {
+			t.Errorf("IsClearCommand(%q) = false, want true", s)
+		}
+	}
+	notClear := []string{"quên mật khẩu thì sao", "2+2 bằng mấy", "reset lại router thế nào", "clearance là gì", ""}
+	for _, s := range notClear {
+		if IsClearCommand(s) {
+			t.Errorf("IsClearCommand(%q) = true, want false", s)
+		}
+	}
+}
