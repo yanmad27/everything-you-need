@@ -14,7 +14,11 @@ func TestSplitWake(t *testing.T) {
 		{"Trợ Lý giúp tôi với", "giúp tôi với", true},
 		{"troly: 1+1 bằng mấy", "1+1 bằng mấy", true},
 		{"pink", "", true},
-		{"pinky ơi", "", false},   // not a wake word
+		{"hi pink", "hi", true},                             // wake word at the end
+		{"nay là thứ mấy pink", "nay là thứ mấy", true},     // at the end
+		{"nay là thứ mấy pink?", "nay là thứ mấy", true},    // end + punctuation
+		{"ê pink giúp tao với", "ê giúp tao với", true},     // middle
+		{"pinky ơi", "", false},                             // not a wake word
 		{"2h nữa nhắc tao ăn cơm", "", false},
 		{"chào mọi người", "", false},
 	}

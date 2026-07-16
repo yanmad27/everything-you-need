@@ -18,18 +18,19 @@ Vui vẻ nhưng đi thẳng vào vấn đề. Không bịa đặt; nếu không 
 // maxHistory caps how many past messages (user+assistant) are kept per chat.
 const maxHistory = 10
 
-// wakeRe matches a leading wake word ("pink" / "trợ lý" / "troly") followed by a
-// separator or end of string, so "pinky" won't trigger.
-var wakeRe = regexp.MustCompile(`(?i)^\s*(pink|trợ\s*l[ýí]|tro\s*ly|troly)(\s+|[,.:;!?…-]+|$)`)
+// wakeRe matches a standalone wake word ("pink" / "trợ lý" / "troly") anywhere in
+// the message (start, middle, or end) — bounded by separators so "pinky" or
+// "pinkish" won't trigger.
+var wakeRe = regexp.MustCompile(`(?i)(^|[\s,.:;!?…-]+)(pink|trợ\s*l[ýí]|tro\s*ly|troly)($|[\s,.:;!?…-]+)`)
 
-// SplitWake reports whether text is addressed to the bot and returns the message
-// with the wake word stripped.
+// SplitWake reports whether text is addressed to the bot (wake word anywhere) and
+// returns the message with the wake word removed and whitespace collapsed.
 func SplitWake(text string) (rest string, ok bool) {
-	loc := wakeRe.FindStringIndex(text)
-	if loc == nil {
+	if !wakeRe.MatchString(text) {
 		return "", false
 	}
-	return strings.TrimSpace(text[loc[1]:]), true
+	stripped := wakeRe.ReplaceAllString(text, " ")
+	return strings.Join(strings.Fields(stripped), " "), true
 }
 
 // clearRe matches a whole-message request to reset the conversation (anchored so
