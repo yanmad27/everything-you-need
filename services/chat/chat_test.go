@@ -48,3 +48,12 @@ func TestIsClearCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestHTMLToText(t *testing.T) {
+	in := `<html><head><style>.x{color:red}</style><script>var a=1;</script></head>` +
+		`<body><h1>Bảo hiểm thai sản</h1><p>Quyền lợi &amp; chi phí:</p><ul><li>Khám thai</li></ul></body></html>`
+	got := htmlToText(in)
+	if want := "Bảo hiểm thai sản Quyền lợi & chi phí: Khám thai"; got != want {
+		t.Errorf("htmlToText = %q, want %q", got, want)
+	}
+}

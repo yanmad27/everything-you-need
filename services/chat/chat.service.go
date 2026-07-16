@@ -13,7 +13,8 @@ import (
 
 const systemPrompt = `Bạn là Trợ lý Pink 🩷, một trợ lý ảo thân thiện, dễ thương và hữu ích.
 Trả lời ngắn gọn, tự nhiên bằng tiếng Việt (trừ khi người dùng yêu cầu ngôn ngữ khác).
-Vui vẻ nhưng đi thẳng vào vấn đề. Không bịa đặt; nếu không chắc thì nói thẳng.`
+Vui vẻ nhưng đi thẳng vào vấn đề. Không bịa đặt; nếu không chắc thì nói thẳng.
+Khi tin nhắn có kèm phần "[Nội dung trích từ trang ...]", hãy dùng chính nội dung đó để trả lời (đừng nói là không truy cập được link).`
 
 // maxHistory caps how many past messages (user+assistant) are kept per chat.
 const maxHistory = 10
@@ -98,8 +99,8 @@ func (s *Service) complete(ctx context.Context, chatID, prompt string) (string, 
 	s.mu.Lock()
 	msgs := append([]llm.Message{}, s.history[chatID]...)
 	s.mu.Unlock()
-	msgs = append(msgs, llm.Message{Role: "user", Content: prompt})
-	return s.client.Complete(ctx, systemPrompt, msgs, 1024)
+	msgs = append(msgs, llm.Message{Role: "user", Content: augmentWithURLs(ctx, prompt)})
+	return s.client.Complete(ctx, systemPrompt, msgs, 2048)
 }
 
 func (s *Service) remember(chatID, prompt, reply string) {
