@@ -35,7 +35,7 @@ reminder:
   enabled: true
   db_path: "data/reminders.db"
   openai_api_key: "" # -> REMINDER_OPENAI_API_KEY
-  openai_model: "gemini-flash-latest"
+  openai_model: "claude-haiku-4-5"
   retention_days: 30
   max_lookahead_days: 365
 
@@ -43,7 +43,7 @@ news:
   enabled: true
   db_path: "data/news.db"
   openai_api_key: "" # -> NEWS_OPENAI_API_KEY
-  openai_model: "gemini-flash-latest"
+  openai_model: "claude-haiku-4-5"
   serper_api_key: "" # -> NEWS_SERPER_API_KEY
   # Filter off: general hottest AI/tech/VN news, no topic search.
   search_queries: []
@@ -63,11 +63,11 @@ server:
   listen_addr: ":8080"
 
 # Chat with the bot ("Trợ lý Pink") — messages starting with a wake word
-# (pink / trợ lý / troly) go to Gemini. api_key falls back to the reminder key.
+# (pink / trợ lý / troly) go to the LLM. api_key falls back to the reminder key.
 chat:
   enabled: true
   api_key: "" # -> CHAT_OPENAI_API_KEY (falls back to reminder.openai_api_key)
-  model: "gemini-flash-latest"
+  model: "claude-haiku-4-5"
 
 # Daily 08:00 ICT scan of the wedding MASTER PLAN sheet's Due Date column.
 # Posts a Telegram digest for tasks due in 1 month / 2 weeks / 1 week / 3 days /

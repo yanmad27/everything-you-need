@@ -1,17 +1,16 @@
 package news
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
+
+	"everything-you-need/m/services/llm"
 )
 
-const openAISystemInstruction = `Bạn là biên tập viên tin tức. Bạn nhận danh sách tin tổng hợp (AI, công nghệ, và tin Việt Nam).
+const systemInstruction = `Bạn là biên tập viên tin tức. Bạn nhận danh sách tin tổng hợp (AI, công nghệ, và tin Việt Nam).
 
 Chọn các tin NỔI BẬT và quan trọng nhất trong ngày, loại bỏ trùng lặp và tin câu view. Nếu không có tin nào đáng chú ý, trả về: {"items": []}
 
@@ -20,24 +19,16 @@ Return ONLY a JSON object (no prose, no markdown fences) of the shape:
 
 Sắp xếp từ quan trọng/nổi bật nhất. Tóm tắt mỗi tin một câu bằng tiếng Việt. Không bịa đặt.`
 
-// Ranker selects and summarizes the top items via OpenAI.
+// Ranker selects and summarizes the top news items via the Anthropic Messages API.
 type Ranker struct {
-	apiKey string
-	model  string
-	client *http.Client
+	client *llm.Client
 }
 
-func NewRanker(apiKey, model string, timeout time.Duration) *Ranker {
-	if model == "" {
-		model = "gemini-2.5-flash"
-	}
-	if timeout == 0 {
-		timeout = 60 * time.Second
-	}
-	return &Ranker{apiKey: apiKey, model: model, client: &http.Client{Timeout: timeout}}
+func NewRanker(token, model string, timeout time.Duration) *Ranker {
+	return &Ranker{client: llm.NewClient(token, model, timeout)}
 }
 
-func buildRankRequest(model string, items []FeedItem, maxItems int) ([]byte, error) {
+func buildRankPrompt(items []FeedItem, maxItems int) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Pick up to %d items.\n\nCANDIDATES:\n", maxItems)
 	for i, item := range items {
@@ -47,84 +38,25 @@ func buildRankRequest(model string, items []FeedItem, maxItems int) ([]byte, err
 		}
 		fmt.Fprintf(&builder, "[%d] (%s) %s\n%s\n\n", i, item.Source, item.Title, desc)
 	}
-
-	payload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": openAISystemInstruction},
-			{"role": "user", "content": builder.String()},
-		},
-	}
-	return json.Marshal(payload)
+	return builder.String()
 }
 
-type openAIAPIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-// Rank sends candidates to OpenAI and returns the selected, summarized items
+// Rank sends candidates to the model and returns the selected, summarized items
 // with their URLs resolved from the original candidate slice.
 func (r *Ranker) Rank(ctx context.Context, items []FeedItem, maxItems int) ([]RankedItem, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("no candidates to rank")
 	}
-	body, err := buildRankRequest(r.model, items, maxItems)
+	out, err := r.client.Complete(ctx, systemInstruction,
+		[]llm.Message{{Role: "user", Content: buildRankPrompt(items, maxItems)}}, 2048)
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("build openai request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+r.apiKey)
-
-	resp, err := r.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openai request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read openai response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai status %d: %s", resp.StatusCode, string(raw))
-	}
-	return parseRankResponse(raw, items)
+	return parseRankJSON(out, items)
 }
 
-// extractJSONObject strips markdown fences / surrounding prose and returns the
-// JSON object substring, tolerating models that wrap their output.
-func extractJSONObject(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start >= 0 && end > start {
-		return s[start : end+1]
-	}
-	return strings.TrimSpace(s)
-}
-
-func parseRankResponse(raw []byte, candidates []FeedItem) ([]RankedItem, error) {
-	var outer openAIAPIResponse
-	if err := json.Unmarshal(raw, &outer); err != nil {
-		return nil, fmt.Errorf("decode openai outer: %w", err)
-	}
-	if len(outer.Choices) == 0 || outer.Choices[0].Message.Content == "" {
-		return nil, fmt.Errorf("openai returned no choices")
-	}
-	text := extractJSONObject(outer.Choices[0].Message.Content)
+func parseRankJSON(modelText string, candidates []FeedItem) ([]RankedItem, error) {
+	text := extractJSONObject(modelText)
 
 	var wrapper struct {
 		Items []RankedItem `json:"items"`
@@ -148,4 +80,19 @@ func parseRankResponse(raw []byte, candidates []FeedItem) ([]RankedItem, error) 
 		return nil, fmt.Errorf("no valid ranked items after mapping")
 	}
 	return out, nil
+}
+
+// extractJSONObject strips markdown fences / surrounding prose and returns the
+// JSON object substring, tolerating models that wrap their output.
+func extractJSONObject(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return strings.TrimSpace(s)
 }

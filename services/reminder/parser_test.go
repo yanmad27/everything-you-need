@@ -1,41 +1,14 @@
 package reminder
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestBuildOpenAIRequestIncludesNowAndMessage(t *testing.T) {
-	now := time.Date(2026, 4, 17, 14, 32, 0, 0, time.FixedZone("UTC+7", 7*60*60))
-	body, err := buildOpenAIRequest("gpt-5", now, "2h nữa nhắc tao ăn cơm")
+func TestParseReminderJSONSuccess(t *testing.T) {
+	got, err := parseReminderJSON(`{"ok": true, "when": "2026-04-17T21:00:00+07:00", "task": "ăn cơm"}`)
 	if err != nil {
-		t.Fatalf("buildOpenAIRequest: %v", err)
-	}
-
-	s := string(body)
-	if !strings.Contains(s, "2026-04-17T14:32:00+07:00") {
-		t.Errorf("request body missing NOW: %s", s)
-	}
-	if !strings.Contains(s, "ăn cơm") {
-		t.Errorf("request body missing MESSAGE: %s", s)
-	}
-	if !strings.Contains(s, `"model":"gpt-5"`) {
-		t.Errorf("request must include model: %s", s)
-	}
-}
-
-func TestParseOpenAIResponseSuccess(t *testing.T) {
-	// Simulated OpenAI response body; the model's text is nested inside choices[0].message.content.
-	raw := []byte(`{
-		"choices": [{
-			"message": {"content": "{\"ok\": true, \"when\": \"2026-04-17T21:00:00+07:00\", \"task\": \"ăn cơm\"}"}
-		}]
-	}`)
-
-	got, err := parseOpenAIResponse(raw)
-	if err != nil {
-		t.Fatalf("parseOpenAIResponse: %v", err)
+		t.Fatalf("parseReminderJSON: %v", err)
 	}
 	if !got.OK {
 		t.Fatalf("OK: got false, want true (reason=%q)", got.Reason)
@@ -49,16 +22,21 @@ func TestParseOpenAIResponseSuccess(t *testing.T) {
 	}
 }
 
-func TestParseOpenAIResponseNotOK(t *testing.T) {
-	raw := []byte(`{
-		"choices": [{
-			"message": {"content": "{\"ok\": false, \"reason\": \"Thời điểm mơ hồ\"}"}
-		}]
-	}`)
-
-	got, err := parseOpenAIResponse(raw)
+func TestParseReminderJSONHandlesFences(t *testing.T) {
+	// Model wraps the JSON in a markdown fence — extractJSONObject must strip it.
+	got, err := parseReminderJSON("```json\n{\"ok\": true, \"when\": \"2026-04-17T21:00:00+07:00\", \"task\": \"họp\"}\n```")
 	if err != nil {
-		t.Fatalf("parseOpenAIResponse: %v", err)
+		t.Fatalf("parseReminderJSON: %v", err)
+	}
+	if !got.OK || got.Task != "họp" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestParseReminderJSONNotOK(t *testing.T) {
+	got, err := parseReminderJSON(`{"ok": false, "reason": "Thời điểm mơ hồ"}`)
+	if err != nil {
+		t.Fatalf("parseReminderJSON: %v", err)
 	}
 	if got.OK {
 		t.Fatalf("OK: got true, want false")
@@ -68,17 +46,9 @@ func TestParseOpenAIResponseNotOK(t *testing.T) {
 	}
 }
 
-func TestParseOpenAIResponseMalformed(t *testing.T) {
-	// No choices → should error.
-	raw := []byte(`{"choices": []}`)
-	if _, err := parseOpenAIResponse(raw); err == nil {
-		t.Errorf("expected error for empty choices")
-	}
-
-	// Message content is not JSON → should error.
-	raw = []byte(`{"choices":[{"message":{"content":"hello world"}}]}`)
-	if _, err := parseOpenAIResponse(raw); err == nil {
-		t.Errorf("expected error for non-JSON message content")
+func TestParseReminderJSONMalformed(t *testing.T) {
+	if _, err := parseReminderJSON("hello world"); err == nil {
+		t.Errorf("expected error for non-JSON content")
 	}
 }
 

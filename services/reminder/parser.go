@@ -1,15 +1,14 @@
 package reminder
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"everything-you-need/m/services/llm"
 )
 
 // ParseResult is the normalized output of the NL parser.
@@ -32,7 +31,7 @@ func MatchesReminderKeyword(text string) bool {
 	return reminderKeywordRegex.MatchString(text)
 }
 
-const openAISystemInstruction = `You are a strict parser. Given a Vietnamese reminder request and the current time (Asia/Ho_Chi_Minh), return ONLY JSON, no prose.
+const systemInstruction = `You are a strict parser. Given a Vietnamese reminder request and the current time (Asia/Ho_Chi_Minh), return ONLY JSON, no prose.
 Output shape:
   {"ok": true,  "when": "<ISO 8601 with +07:00 offset>", "task": "<short Vietnamese string>"}
   {"ok": false, "reason": "<short Vietnamese explanation>"}
@@ -42,30 +41,7 @@ Rules:
 - "task" excludes the time phrase and the "nhắc tao/tôi/mình" prefix.
 - If the user's time is ambiguous or already past, return ok=false.`
 
-// buildOpenAIRequest builds the JSON body sent to the OpenAI chat completions endpoint.
-func buildOpenAIRequest(model string, now time.Time, text string) ([]byte, error) {
-	userContent := fmt.Sprintf("NOW=%s\nMESSAGE=%s",
-		now.Format("2006-01-02T15:04:05-07:00"), text)
-
-	payload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": openAISystemInstruction},
-			{"role": "user", "content": userContent},
-		},
-	}
-	return json.Marshal(payload)
-}
-
-type openAIAPIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
-type openAIInnerJSON struct {
+type reminderJSON struct {
 	OK     bool   `json:"ok"`
 	When   string `json:"when"`
 	Task   string `json:"task"`
@@ -87,20 +63,12 @@ func extractJSONObject(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// parseOpenAIResponse decodes the outer envelope and then the inner JSON the model produced.
-func parseOpenAIResponse(raw []byte) (ParseResult, error) {
-	var outer openAIAPIResponse
-	if err := json.Unmarshal(raw, &outer); err != nil {
-		return ParseResult{}, fmt.Errorf("decode openai outer: %w", err)
-	}
-	if len(outer.Choices) == 0 || outer.Choices[0].Message.Content == "" {
-		return ParseResult{}, fmt.Errorf("openai returned no choices")
-	}
-	text := extractJSONObject(outer.Choices[0].Message.Content)
-
-	var inner openAIInnerJSON
+// parseReminderJSON decodes the JSON object the model produced.
+func parseReminderJSON(modelText string) (ParseResult, error) {
+	text := extractJSONObject(modelText)
+	var inner reminderJSON
 	if err := json.Unmarshal([]byte(text), &inner); err != nil {
-		return ParseResult{}, fmt.Errorf("decode openai inner JSON %q: %w", text, err)
+		return ParseResult{}, fmt.Errorf("decode reminder JSON %q: %w", text, err)
 	}
 
 	if !inner.OK {
@@ -118,53 +86,23 @@ func parseOpenAIResponse(raw []byte) (ParseResult, error) {
 	return ParseResult{OK: true, When: when.UTC(), Task: strings.TrimSpace(inner.Task)}, nil
 }
 
-// OpenAIParser calls OpenAI's chat completions API.
-type OpenAIParser struct {
-	apiKey string
-	model  string
-	client *http.Client
+// LLMParser resolves reminder requests via the Anthropic Messages API.
+type LLMParser struct {
+	client *llm.Client
 }
 
-func NewOpenAIParser(apiKey, model string, timeout time.Duration) *OpenAIParser {
-	if model == "" {
-		model = "gemini-2.5-flash"
-	}
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-	return &OpenAIParser{
-		apiKey: apiKey,
-		model:  model,
-		client: &http.Client{Timeout: timeout},
-	}
+func NewOpenAIParser(token, model string, timeout time.Duration) *LLMParser {
+	return &LLMParser{client: llm.NewClient(token, model, timeout)}
 }
 
-func (p *OpenAIParser) Parse(ctx context.Context, now time.Time, text string) (ParseResult, error) {
-	body, err := buildOpenAIRequest(p.model, now, text)
+func (p *LLMParser) Parse(ctx context.Context, now time.Time, text string) (ParseResult, error) {
+	userContent := fmt.Sprintf("NOW=%s\nMESSAGE=%s",
+		now.Format("2006-01-02T15:04:05-07:00"), text)
+
+	out, err := p.client.Complete(ctx, systemInstruction,
+		[]llm.Message{{Role: "user", Content: userContent}}, 1024)
 	if err != nil {
 		return ParseResult{}, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return ParseResult{}, fmt.Errorf("build openai request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return ParseResult{}, fmt.Errorf("openai request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ParseResult{}, fmt.Errorf("read openai response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return ParseResult{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, string(raw))
-	}
-	return parseOpenAIResponse(raw)
+	return parseReminderJSON(out)
 }

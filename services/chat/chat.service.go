@@ -1,20 +1,15 @@
 package chat
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-)
 
-const geminiChatURL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+	"everything-you-need/m/services/llm"
+)
 
 const systemPrompt = `Bạn là Trợ lý Pink 🩷, một trợ lý ảo thân thiện, dễ thương và hữu ích.
 Trả lời ngắn gọn, tự nhiên bằng tiếng Việt (trừ khi người dùng yêu cầu ngôn ngữ khác).
@@ -42,32 +37,20 @@ type Sender interface {
 	SendReply(ctx context.Context, chatID string, replyToMessageID int64, text string) error
 }
 
-type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// Service answers wake-word messages via Gemini, keeping short per-chat history
+// Service answers wake-word messages via the LLM, keeping short per-chat history
 // in memory (reset on restart).
 type Service struct {
-	apiKey  string
-	model   string
+	client  *llm.Client
 	sender  Sender
-	client  *http.Client
 	mu      sync.Mutex
-	history map[string][]message
+	history map[string][]llm.Message
 }
 
-func NewService(apiKey, model string, sender Sender) *Service {
-	if model == "" {
-		model = "gemini-flash-latest"
-	}
+func NewService(token, model string, sender Sender) *Service {
 	return &Service{
-		apiKey:  apiKey,
-		model:   model,
+		client:  llm.NewClient(token, model, 30*time.Second),
 		sender:  sender,
-		client:  &http.Client{Timeout: 30 * time.Second},
-		history: make(map[string][]message),
+		history: make(map[string][]llm.Message),
 	}
 }
 
@@ -96,53 +79,19 @@ func (s *Service) Handle(ctx context.Context, chatID string, replyToMsgID int64,
 }
 
 func (s *Service) complete(ctx context.Context, chatID, prompt string) (string, error) {
-	msgs := []message{{Role: "system", Content: systemPrompt}}
 	s.mu.Lock()
-	msgs = append(msgs, s.history[chatID]...)
+	msgs := append([]llm.Message{}, s.history[chatID]...)
 	s.mu.Unlock()
-	msgs = append(msgs, message{Role: "user", Content: prompt})
-
-	body, err := json.Marshal(map[string]any{"model": s.model, "messages": msgs})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", geminiChatURL, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gemini status %d: %s", resp.StatusCode, string(raw))
-	}
-
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("decode gemini response: %w", err)
-	}
-	if len(out.Choices) == 0 || strings.TrimSpace(out.Choices[0].Message.Content) == "" {
-		return "", fmt.Errorf("gemini returned no content")
-	}
-	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+	msgs = append(msgs, llm.Message{Role: "user", Content: prompt})
+	return s.client.Complete(ctx, systemPrompt, msgs, 1024)
 }
 
 func (s *Service) remember(chatID, prompt, reply string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	h := append(s.history[chatID], message{Role: "user", Content: prompt}, message{Role: "assistant", Content: reply})
+	h := append(s.history[chatID],
+		llm.Message{Role: "user", Content: prompt},
+		llm.Message{Role: "assistant", Content: reply})
 	if len(h) > maxHistory {
 		h = h[len(h)-maxHistory:]
 	}

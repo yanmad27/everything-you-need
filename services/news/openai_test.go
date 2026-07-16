@@ -2,17 +2,16 @@ package news
 
 import "testing"
 
-func TestParseRankResponse(t *testing.T) {
+func TestParseRankJSON(t *testing.T) {
 	candidates := []FeedItem{
 		{Title: "First", URL: "https://a.com/1"},
 		{Title: "Second", URL: "https://b.com/2"},
 	}
-	// OpenAI's outer envelope wrapping the JSON object it produced.
-	raw := []byte(`{"choices":[{"message":{"content":"{\"items\":[{\"index\":1,\"en_title\":\"Second EN\",\"en_summary\":\"sum\",\"vi_title\":\"Second VI\",\"vi_summary\":\"tom tat\"},{\"index\":0,\"en_title\":\"First EN\",\"en_summary\":\"\",\"vi_title\":\"\",\"vi_summary\":\"\"}]}"}}]}`)
+	text := `{"items":[{"index":1,"en_title":"Second EN","en_summary":"sum","vi_title":"Second VI","vi_summary":"tom tat"},{"index":0,"en_title":"First EN","en_summary":"","vi_title":"","vi_summary":""}]}`
 
-	ranked, err := parseRankResponse(raw, candidates)
+	ranked, err := parseRankJSON(text, candidates)
 	if err != nil {
-		t.Fatalf("parseRankResponse: %v", err)
+		t.Fatalf("parseRankJSON: %v", err)
 	}
 	if len(ranked) != 2 {
 		t.Fatalf("expected 2 ranked, got %d", len(ranked))
@@ -29,12 +28,24 @@ func TestParseRankResponse(t *testing.T) {
 	}
 }
 
-func TestParseRankResponseDropsBadIndex(t *testing.T) {
+func TestParseRankJSONHandlesFences(t *testing.T) {
 	candidates := []FeedItem{{Title: "Only", URL: "https://a.com/1"}}
-	raw := []byte(`{"choices":[{"message":{"content":"{\"items\":[{\"index\":99,\"en_title\":\"Ghost\"},{\"index\":0,\"en_title\":\"Real\"}]}"}}]}`)
-	ranked, err := parseRankResponse(raw, candidates)
+	text := "```json\n{\"items\":[{\"index\":0,\"vi_title\":\"Tin\"}]}\n```"
+	ranked, err := parseRankJSON(text, candidates)
 	if err != nil {
-		t.Fatalf("parseRankResponse: %v", err)
+		t.Fatalf("parseRankJSON: %v", err)
+	}
+	if len(ranked) != 1 || ranked[0].URL != "https://a.com/1" {
+		t.Fatalf("got %+v", ranked)
+	}
+}
+
+func TestParseRankJSONDropsBadIndex(t *testing.T) {
+	candidates := []FeedItem{{Title: "Only", URL: "https://a.com/1"}}
+	text := `{"items":[{"index":99,"en_title":"Ghost"},{"index":0,"en_title":"Real"}]}`
+	ranked, err := parseRankJSON(text, candidates)
+	if err != nil {
+		t.Fatalf("parseRankJSON: %v", err)
 	}
 	if len(ranked) != 1 || ranked[0].EnglishTitle != "Real" {
 		t.Fatalf("expected only the valid-index item, got %+v", ranked)
