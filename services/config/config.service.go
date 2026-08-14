@@ -56,7 +56,7 @@ func setDefaults() {
 	viper.SetDefault("app.log_level", "info")
 
 	viper.SetDefault("price_sources.doji.enabled", true)
-	viper.SetDefault("price_sources.doji.api_key", "")
+	viper.SetDefault("price_sources.doji.api_url", "https://banggia.doji.vn/api/TablePrice/GetTablePrice")
 
 	viper.SetDefault("price_sources.vietgold.enabled", false)
 	viper.SetDefault("price_sources.vietgold.api_url", "")

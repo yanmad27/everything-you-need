@@ -57,31 +57,41 @@ type PriceService struct {
 ## 📊 Available Sources
 
 ### Doji Source
-- **Description**: Vietnamese gold price provider
-- **API**: `http://giavang.doji.vn/api/giavang/`
+- **Description**: Vietnamese gold and silver price provider
+- **API**: `https://banggia.doji.vn/api/TablePrice/GetTablePrice` (backs https://banggia.doji.vn/gold-price)
 - **Usage**:
   ```go
-  dojiSource := pricetracker.NewDojiSource("your-doji-api-key")
+  dojiSource := pricetracker.NewDojiSource("") // empty → DefaultDojiAPIURL
   ```
 
-**Response Format:**
+The old `giavang.doji.vn` XML API was retired (HTTP 503) and replaced by this endpoint.
+
+**Response Format:** the endpoint returns an encrypted envelope; `data` is
+`base64(iv[16] || AES-256-CBC ciphertext)`, PKCS#7 padded. The key is published in
+the site's own JS bundle, so it is obfuscation rather than authentication.
+
 ```json
-{
-    "status": "success",
-    "data": [
-        {
-            "id": 1,
-            "type": "SJC 1L",
-            "name": "Vàng SJC 1 lượng",
-            "company": "SJC",
-            "buy": "82,000,000",
-            "sell": "84,200,000",
-            "unit": "chỉ",
-            "updated_at": "2023-12-01 10:30:00"
-        }
-    ]
-}
+{ "status": true, "data": "UP3G1VYtOUUEhiji5Pka7b..." }
 ```
+
+Decrypted, it is a flat array of price rows:
+
+```json
+[
+    {
+        "materialCode": "01",
+        "materialName": "VÀNG MIẾNG SJC",
+        "priceDojiBuyIn": 14030,
+        "priceDojiSellOut": 14330,
+        "type": "G",
+        "isActive": true,
+        "updateDate": "2026-08-14T05:08:22.6611968Z"
+    }
+]
+```
+
+`type` is `G` for gold (quoted per chỉ) or `S` for silver (per lượng); both are in
+thousands of VND, matching the other sources. Rows with `isActive: false` are skipped.
 
 ## 💻 Usage Examples
 

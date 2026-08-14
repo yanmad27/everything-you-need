@@ -288,8 +288,12 @@ Dokploy Compose → Environment tab:
 | `NEWS_OPENAI_API_KEY` | `news.openai_api_key` |
 | `NEWS_SERPER_API_KEY` | `news.serper_api_key` |
 | `REMINDER_OPENAI_API_KEY` | `reminder.openai_api_key` |
-| `PRICE_SOURCES_DOJI_API_URL` | `price_sources.doji.api_url` |
 | `PRICE_SOURCES_BTMC_API_URL` | `price_sources.btmc.api_url` |
+
+Doji is **not** in this table: since it moved to `banggia.doji.vn` it needs no API
+key, so its URL lives in `config.docker.yaml` and is no longer passed through the
+Compose environment. A leftover `PRICE_SOURCES_DOJI_API_URL` in the Dokploy
+dashboard is now inert, but is worth deleting to avoid confusion.
 
 SQLite databases (`data/*.db`) persist in the named volume `eyn-data` across
 redeploys.

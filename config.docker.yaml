@@ -12,7 +12,7 @@ app:
 price_sources:
   doji:
     enabled: true
-    api_url: "" # -> PRICE_SOURCES_DOJI_API_URL (embeds api key)
+    api_url: "https://banggia.doji.vn/api/TablePrice/GetTablePrice"
   btmc:
     enabled: true
     api_url: "" # -> PRICE_SOURCES_BTMC_API_URL (embeds api key)

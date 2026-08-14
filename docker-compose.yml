@@ -15,7 +15,8 @@ services:
       - NEWS_OPENAI_API_KEY=${NEWS_OPENAI_API_KEY}
       - NEWS_SERPER_API_KEY=${NEWS_SERPER_API_KEY}
       - REMINDER_OPENAI_API_KEY=${REMINDER_OPENAI_API_KEY}
-      - PRICE_SOURCES_DOJI_API_URL=${PRICE_SOURCES_DOJI_API_URL}
+      # Doji needs no key since the banggia.doji.vn migration; its URL is baked
+      # into config.yaml so a stale dashboard var can't override it.
       - PRICE_SOURCES_BTMC_API_URL=${PRICE_SOURCES_BTMC_API_URL}
     volumes:
       - eyn-data:/root/data

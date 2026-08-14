@@ -41,7 +41,7 @@ app:
 price_sources:
   doji:
     enabled: true                      # Enable/disable Doji source
-    api_key: "your-doji-api-key"      # Doji API key
+    api_url: "https://banggia.doji.vn/api/TablePrice/GetTablePrice"  # No API key needed
 
 # Telegram notification settings
 telegram:
@@ -73,7 +73,7 @@ Environment variables use uppercase with underscores and follow this pattern:
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `PRICE_SOURCES_DOJI_ENABLED` | bool | true | Enable Doji price source |
-| `PRICE_SOURCES_DOJI_API_KEY` | string | "" | Doji API key (required if enabled) |
+| `PRICE_SOURCES_DOJI_API_URL` | string | `https://banggia.doji.vn/api/TablePrice/GetTablePrice` | Doji price table endpoint |
 
 ### Telegram Settings
 

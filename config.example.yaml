@@ -10,7 +10,8 @@ app:
 price_sources:
   doji:
     enabled: true
-    api_key: "your-doji-api-key-here"
+    # Price table behind https://banggia.doji.vn/gold-price (no API key needed).
+    api_url: "https://banggia.doji.vn/api/TablePrice/GetTablePrice"
 
 # Telegram notifications (optional)
 telegram:
