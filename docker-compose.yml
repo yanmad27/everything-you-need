@@ -1,9 +1,7 @@
 services:
   price-tracker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: everything-you-need:latest
+    image: ghcr.io/yanmad27/everything-you-need:latest
+    pull_policy: always
     restart: unless-stopped
     dns:
       - 8.8.8.8
