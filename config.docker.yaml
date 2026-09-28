@@ -18,8 +18,8 @@ price_sources:
     api_url: "" # -> PRICE_SOURCES_BTMC_API_URL (embeds api key)
   mihong:
     enabled: true
-    base_url: "https://www.mihong.vn/vi/gia-vang-trong-nuoc"
-    api_url: "https://api.mihong.vn/v1/gold-prices?market=domestic"
+    base_url: "https://mihong.com/gia-vang-trong-nuoc"
+    api_url: "https://api.mihong.com/v1/gold-prices?market=domestic"
   coingecko:
     enabled: true
     api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin&vs_currencies=usd"
