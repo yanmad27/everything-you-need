@@ -41,4 +41,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Dokploy pull & redeploy
-        run: curl -fsSL -X POST "${{ secrets.DOKPLOY_DEPLOY_WEBHOOK }}"
+        run: |
+          curl -fsSL -X POST "https://apps.rsrm.dev/api/compose.deploy" \
+            -H "x-api-key: ${{ secrets.DOKPLOY_API_KEY }}" \
+            -H "content-type: application/json" \
+            -d '{"composeId":"wieqc4K2MORuCCwzekuOg"}'
