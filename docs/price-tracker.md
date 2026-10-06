@@ -56,6 +56,15 @@ type PriceService struct {
 
 ## 📊 Available Sources
 
+### Kim Khoa Cam Ranh Source
+- **Description**: Gold prices of Kim Khoa (Cam Ranh), scraped from the HTML price table
+- **Page**: `https://tuanquangdong.com/gia-vang/kim-khoa-cam-ranh/`
+- **Filter**: only gold products with purity ≥ 97% (999.9, 9999, 999, 98, 97); lower purities and silver are dropped; a sell price of 0 on the page means not quoted and is reported as 0
+- **Usage**:
+  ```go
+  kimKhoaSource := pricetracker.NewKimKhoaSource("") // empty → DefaultKimKhoaURL
+  ```
+
 ### Doji Source
 - **Description**: Vietnamese gold and silver price provider
 - **API**: `https://banggia.doji.vn/api/TablePrice/GetTablePrice` (backs https://banggia.doji.vn/gold-price)

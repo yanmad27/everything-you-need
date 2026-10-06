@@ -319,7 +319,8 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 		for i := 0; i < count; i++ {
 			price := prices[i]
 			for _, keyword := range keywords {
-				if strings.Contains(strings.ToLower(price.Type), keyword) {
+				// Kim Khoa rows are already filtered by purity at the source.
+				if source == pricetracker.KimKhoaSourceName || strings.Contains(strings.ToLower(price.Type), keyword) {
 					change, hasChange := sourceChanges[price.Type]
 
 					priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
@@ -426,7 +427,8 @@ func generateGoldWatchNotification(changes map[string][]pricetracker.PriceChange
 			}
 
 			price := change.Price
-			matched := false
+			// Kim Khoa rows are already filtered by purity at the source.
+			matched := source == pricetracker.KimKhoaSourceName
 			for _, keyword := range keywords {
 				if strings.Contains(strings.ToLower(price.Type), keyword) {
 					matched = true

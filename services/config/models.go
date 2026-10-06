@@ -4,6 +4,7 @@ type PriceSourcesConfig struct {
 	Doji      DojiConfig      `mapstructure:"doji"`
 	BTMC      BTMCConfig      `mapstructure:"btmc"`
 	Mihong    MihongConfig    `mapstructure:"mihong"`
+	KimKhoa   KimKhoaConfig   `mapstructure:"kimkhoa"`
 	CoinGecko CoinGeckoConfig `mapstructure:"coingecko"`
 }
 
@@ -21,6 +22,11 @@ type MihongConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	BaseURL string `mapstructure:"base_url"`
 	APIURL  string `mapstructure:"api_url"`
+}
+
+type KimKhoaConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	URL     string `mapstructure:"url"`
 }
 
 type CoinGeckoConfig struct {

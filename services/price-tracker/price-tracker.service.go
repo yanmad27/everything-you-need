@@ -40,6 +40,12 @@ func NewPriceTrackerService(config *config.Config) *PriceTrackerService {
 		log.Println(" - Added Mi Hồng source for gold prices")
 	}
 
+	if config.PriceSources.KimKhoa.Enabled {
+		kimKhoaSource := NewKimKhoaSource(config.PriceSources.KimKhoa.URL)
+		service.AddSource(kimKhoaSource)
+		log.Println(" - Added Kim Khoa Cam Ranh source for gold prices")
+	}
+
 	if config.PriceSources.CoinGecko.Enabled {
 		coinGeckoSource := NewCoinGeckoSource(config.PriceSources.CoinGecko.APIURL)
 		service.AddSource(coinGeckoSource)
