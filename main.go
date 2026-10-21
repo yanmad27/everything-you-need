@@ -13,6 +13,7 @@ import (
 
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/convo"
 	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/llm"
@@ -56,7 +57,13 @@ func main() {
 		if _, zOn := reminderPlatforms(cfg, teleService != nil, true, zaloCompleter != nil); zOn {
 			zaloRem = reminderService
 		}
-		enableZaloTools(zaloChat, zaloCompleter, buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem))
+		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
+		if convoStore := buildConvoStore(cfg); convoStore != nil {
+			defer convoStore.Close()
+			zaloTools.Recorder = convoStore
+			zaloTools.Model = cfg.LLMOpenAI.Model
+		}
+		enableZaloTools(zaloChat, zaloCompleter, zaloTools)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -367,6 +374,7 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 // dispatchZaloWith also routes image messages to chat (never to the reminder
 // regex service). fetchImage downloads msg.Photo; nil ignores images.
 func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
+	ctx = chat.WithMeta(ctx, chat.Meta{ChatType: msg.Chat.ChatType})
 	if msg.Kind == "image" {
 		dispatchZaloImage(ctx, chatSvc, botNames, msg, fetchImage)
 		return
@@ -426,4 +434,21 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 		log.Printf("chat dispatch error (zalo image): %v", err)
 	}
 	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
+}
+
+// buildConvoStore opens the Zalo conversation store; a failure disables
+// recording only (the bot keeps working).
+func buildConvoStore(cfg *config.Config) *convo.Store {
+	c := cfg.Convo
+	if !c.Enabled {
+		return nil
+	}
+	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
+		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K})
+	if err != nil {
+		log.Printf("Convo store open failed: %v (conversation recording disabled)", err)
+		return nil
+	}
+	log.Printf("Convo store initialized (db=%s, retention_days=%d)", c.DBPath, c.RetentionDays)
+	return st
 }

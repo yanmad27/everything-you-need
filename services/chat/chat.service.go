@@ -170,10 +170,13 @@ func (s *Service) remember(chatID, prompt, reply string) {
 // respondWithTools is the Zalo path: rate limit, bounded tool loop, markdown
 // reply. History keeps only the text turns.
 func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
+	ctx = newTurn(ctx)
+	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "text", Text: prompt})
 	if ok, notice := s.limiter.allow(chatID); !ok {
 		log.Printf("chat: rate limited chat=%s notice=%t", maskChat(chatID), notice)
 		if notice {
-			return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé 🩷")
+			s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgRateLimit, ErrTag: "rate_limited"})
+			return s.sender.SendReply(ctx, chatID, replyToMsgID, msgRateLimit)
 		}
 		return nil
 	}
@@ -181,18 +184,34 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {
 		log.Printf("chat: completion error (tools): %s chat=%s", errTag(err), maskChat(chatID))
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgBusy, ErrTag: failTag(err)})
 		rc, cancel := replyCtx(ctx)
 		defer cancel()
-		return s.sender.SendReply(rc, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
+		return s.sender.SendReply(rc, chatID, replyToMsgID, msgBusy)
 	}
 	rc, cancel := replyCtx(ctx)
 	defer cancel()
 	if err := s.sendTools(rc, chatID, replyToMsgID, reply); err != nil {
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply, ErrTag: "send_failed"})
 		return err
 	}
+	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply})
 	s.remember(chatID, prompt, reply)
 	s.noteUserText(chatID, userID, prompt)
 	return nil
+}
+
+const (
+	msgRateLimit = "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé 🩷"
+	msgBusy      = "⚠️ Pink hơi bận, thử lại sau chút nhé."
+)
+
+// failTag is a fixed tag for a failed turn: errTag, or "empty_reply".
+func failTag(err error) string {
+	if err == nil {
+		return "empty_reply"
+	}
+	return errTag(err)
 }
 
 func (s *Service) sendTools(ctx context.Context, chatID string, replyToMsgID int64, reply string) error {

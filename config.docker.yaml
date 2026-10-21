@@ -57,6 +57,14 @@ reminder:
   retention_days: 30
   max_lookahead_days: 365
 
+# Zalo conversation store for the admin UI (messages, tool calls, usage). Zalo only.
+convo:
+  enabled: true # -> CONVO_ENABLED
+  db_path: "data/convo.db" # -> CONVO_DB_PATH
+  retention_days: 90 # -> CONVO_RETENTION_DAYS
+  price_prompt_per_1k: 0 # -> CONVO_PRICE_PROMPT_PER_1K (0 = show tokens only)
+  price_completion_per_1k: 0 # -> CONVO_PRICE_COMPLETION_PER_1K
+
 news:
   enabled: true
   db_path: "data/news.db"

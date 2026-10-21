@@ -86,6 +86,15 @@ type DueDateConfig struct {
 	StatePath string `mapstructure:"state_path"`
 }
 
+// ConvoConfig controls the Zalo conversation store used by the admin UI.
+type ConvoConfig struct {
+	Enabled              bool    `mapstructure:"enabled"`
+	DBPath               string  `mapstructure:"db_path"`
+	RetentionDays        int     `mapstructure:"retention_days"`
+	PricePromptPer1K     float64 `mapstructure:"price_prompt_per_1k"`
+	PriceCompletionPer1K float64 `mapstructure:"price_completion_per_1k"`
+}
+
 type ChatConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	APIKey  string `mapstructure:"api_key"`

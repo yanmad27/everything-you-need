@@ -16,9 +16,12 @@ import (
 )
 
 // MessageEvent / ToolEvent feed an optional recorder (e.g. an admin store).
-// They never carry message text, arguments or results.
+// MessageEvent is the per-turn LLM usage; ToolEvent additionally carries the raw
+// arguments/result so a recorder can summarise them (recorders must not keep
+// them verbatim).
 type MessageEvent struct {
 	Platform, ChatID                      string
+	UserID, TurnID, Model                 string
 	Rounds                                int
 	PromptTokens, CompletionTokens, Total int
 	Duration                              time.Duration
@@ -27,6 +30,8 @@ type MessageEvent struct {
 
 type ToolEvent struct {
 	Platform, ChatID, Name string
+	UserID, TurnID         string
+	Args, Result           string // raw; the recorder summarises
 	Duration               time.Duration
 	Outcome                string // ok | error | timeout | blocked
 }
@@ -228,6 +233,7 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 		s.record(func() {
 			tl.Recorder.RecordMessage(ctx, MessageEvent{Platform: tl.Platform, ChatID: chatID, Rounds: rounds,
 				PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, Total: usage.TotalTokens,
+				UserID: userID, TurnID: turnIDFrom(ctx), Model: tl.Model,
 				Duration: tl.Now().Sub(started), Failed: err != nil})
 		})
 		return text, err
@@ -340,7 +346,7 @@ func wrapResult(name, body string, max int) string {
 	return fmt.Sprintf("<tool_result name=%q>\n%s\n</tool_result>", name, body)
 }
 
-func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolImpl, call llm.ToolCall) string {
+func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolImpl, call llm.ToolCall) (ret string) {
 	tl := s.tools
 	start := time.Now()
 	outcome := "ok"
@@ -348,7 +354,8 @@ func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolIm
 		d := time.Since(start)
 		log.Printf("chat tool: name=%s dur=%dms outcome=%s chat=%s", safeName(call.Name), d.Milliseconds(), outcome, maskChat(t.chatID))
 		s.record(func() {
-			tl.Recorder.RecordToolCall(ctx, ToolEvent{Platform: tl.Platform, ChatID: t.chatID, Name: safeName(call.Name), Duration: d, Outcome: outcome})
+			tl.Recorder.RecordToolCall(ctx, ToolEvent{Platform: tl.Platform, ChatID: t.chatID, Name: safeName(call.Name),
+				UserID: t.userID, TurnID: turnIDFrom(ctx), Args: call.Arguments, Result: ret, Duration: d, Outcome: outcome})
 		})
 	}()
 

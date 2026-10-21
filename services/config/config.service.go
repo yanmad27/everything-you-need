@@ -19,6 +19,7 @@ type Config struct {
 	News         NewsConfig         `mapstructure:"news"`
 	DueDate      DueDateConfig      `mapstructure:"duedate"`
 	Chat         ChatConfig         `mapstructure:"chat"`
+	Convo        ConvoConfig        `mapstructure:"convo"`
 }
 
 var ConfigMod = submodule.Make[*Config](LoadConfig)
@@ -102,6 +103,12 @@ func setDefaults() {
 	viper.SetDefault("duedate.enabled", false)
 	viper.SetDefault("duedate.csv_url", "")
 	viper.SetDefault("duedate.state_path", "data/duedate_sent.txt")
+
+	viper.SetDefault("convo.enabled", true)
+	viper.SetDefault("convo.db_path", "data/convo.db")
+	viper.SetDefault("convo.retention_days", 90)
+	viper.SetDefault("convo.price_prompt_per_1k", 0.0)
+	viper.SetDefault("convo.price_completion_per_1k", 0.0)
 
 	viper.SetDefault("chat.enabled", true)
 	viper.SetDefault("chat.api_key", "")
