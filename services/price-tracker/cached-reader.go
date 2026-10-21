@@ -3,6 +3,7 @@ package pricetracker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -98,7 +99,16 @@ func (c *CachedPriceReader) Get(ctx context.Context, source string) ([]Price, ti
 }
 
 func (c *CachedPriceReader) run(source string, f *inflightFetch) {
-	prices, err := c.fetch(source)
+	var prices []Price
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				prices, err = nil, fmt.Errorf("price fetch panic: %v", r)
+			}
+		}()
+		prices, err = c.fetch(source)
+	}()
 	at := c.now()
 	c.mu.Lock()
 	f.prices, f.at, f.err = prices, at, err

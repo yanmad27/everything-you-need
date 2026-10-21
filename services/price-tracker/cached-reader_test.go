@@ -96,3 +96,19 @@ func TestCachedReaderContextCancel(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestCachedReaderPanicRecovered(t *testing.T) {
+	var n int32
+	c := newCachedPriceReader([]string{"A"}, func(string) ([]Price, error) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			panic("kaboom")
+		}
+		return []Price{{}}, nil
+	}, time.Minute)
+	if _, _, err := c.Get(context.Background(), "A"); err == nil {
+		t.Fatal("want error from panic")
+	}
+	if _, _, err := c.Get(context.Background(), "A"); err != nil {
+		t.Fatalf("pending not cleared: %v", err)
+	}
+}

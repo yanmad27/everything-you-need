@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -66,5 +68,70 @@ func TestCreateForValidationCapScoping(t *testing.T) {
 	}
 	if l, _ := svc.ListFor(ctx, "zalo", "c1"); len(l) != 49 {
 		t.Errorf("after cancel list=%d", len(l))
+	}
+}
+
+func TestCancelForStrictScopeAllPlatforms(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t, &stubParser{}, &stubSender{})
+	future := svc.now().Add(time.Hour)
+	id, err := svc.CreateFor(ctx, "telegram", "c1", "u", "n", "x", future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CancelFor(ctx, "telegram", "other", id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-chat telegram cancel err=%v", err)
+	}
+	if err := svc.CancelFor(ctx, "telegram", "c1", 9999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing err=%v", err)
+	}
+	if l, _ := svc.ListFor(ctx, "telegram", "c1"); len(l) != 1 {
+		t.Fatalf("reminder was cancelled: %d", len(l))
+	}
+	if err := svc.CancelFor(ctx, "telegram", "c1", id); err != nil {
+		t.Errorf("own cancel err=%v", err)
+	}
+}
+
+func TestCreateForConcurrentCapPlatformHorizonNormalize(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t, &stubParser{}, &stubSender{})
+	future := svc.now().Add(time.Hour)
+	var wg sync.WaitGroup
+	var ok, many int32
+	for i := 0; i < 80; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.CreateFor(ctx, "zalo", "c", "u", "n", "t", future)
+			switch {
+			case err == nil:
+				atomic.AddInt32(&ok, 1)
+			case errors.Is(err, ErrTooMany):
+				atomic.AddInt32(&many, 1)
+			default:
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if ok != 50 || many != 30 {
+		t.Fatalf("ok=%d many=%d", ok, many)
+	}
+	if _, err := svc.CreateFor(ctx, "slack", "c", "u", "n", "t", future); err == nil {
+		t.Error("bad platform accepted")
+	}
+	if _, err := svc.CreateFor(ctx, "telegram", "c", "u", "n", "t", svc.now().Add(400*24*time.Hour)); err == nil {
+		t.Error(">1y accepted")
+	}
+	id, err := svc.CreateFor(ctx, "telegram", "c", "u", "n", " a\nb\r\n c ", future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := svc.ListFor(ctx, "telegram", "c")
+	for _, r := range l {
+		if r.ID == id && r.Task != "a b c" {
+			t.Errorf("task=%q", r.Task)
+		}
 	}
 }

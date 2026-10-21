@@ -80,10 +80,13 @@ func (w *WebSearcher) do(ctx context.Context, path, q string, n int) ([]WebResul
 		return nil, fmt.Errorf("serper request: %w", w.redact(err))
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
 		// Never echo the response body: it may carry request details.
 		return nil, fmt.Errorf("serper status %d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("serper read: %w", w.redact(err))
 	}
 	var parsed serperWebResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -103,9 +106,18 @@ func (w *WebSearcher) do(ctx context.Context, path, q string, n int) ([]WebResul
 	return out, nil
 }
 
-// redact strips the API key from an error message.
+// redactedError carries a key-free message while preserving the cause chain.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redact strips the API key from an error message, keeping errors.Is/As working.
 func (w *WebSearcher) redact(err error) error {
-	return errors.New(strings.ReplaceAll(err.Error(), w.apiKey, "[redacted]"))
+	return &redactedError{msg: strings.ReplaceAll(err.Error(), w.apiKey, "[redacted]"), err: err}
 }
 
 // RecentPosted returns the most recently posted digest items (title + URL).

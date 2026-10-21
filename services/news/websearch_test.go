@@ -3,6 +3,7 @@ package news
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,5 +82,25 @@ func TestRecentPosted(t *testing.T) {
 	}
 	if got, _ := s.RecentPosted(ctx, 10); len(got) != 2 {
 		t.Fatalf("got=%d", len(got))
+	}
+}
+
+func TestWebSearcherErrorChain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer srv.Close()
+	w := NewWebSearcher("secret-key")
+	w.baseURL = srv.URL
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := w.Search(ctx, "q", 1)
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "secret-key") {
+		t.Fatalf("err=%v", err)
+	}
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	if _, err := w.Search(ctx2, "q", 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
 	}
 }
