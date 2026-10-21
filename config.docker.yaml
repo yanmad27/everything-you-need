@@ -46,7 +46,7 @@ zalo:
 llm_openai:
   base_url: "" # -> LLM_OPENAI_BASE_URL
   api_key: "" # -> LLM_OPENAI_API_KEY
-  model: "codex-auto-review" # -> LLM_OPENAI_MODEL
+  model: "gpt-6-sol" # -> LLM_OPENAI_MODEL
 
 reminder:
   enabled: true

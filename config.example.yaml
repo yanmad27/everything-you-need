@@ -38,7 +38,7 @@ zalo:
 llm_openai:
   base_url: "https://your-openai-compatible-host"   # /v1/chat/completions is appended
   api_key: "your-api-key"
-  model: "codex-auto-review"
+  model: "gpt-6-sol"
 
 # Vietnamese natural-language reminder bot (optional)
 reminder:
@@ -82,7 +82,7 @@ server:
 # TELEGRAM_WEBHOOK_SECRET="<random-hex-string>"
 # LLM_OPENAI_BASE_URL="https://your-openai-compatible-host"
 # LLM_OPENAI_API_KEY="<api-key>"
-# LLM_OPENAI_MODEL="codex-auto-review"
+# LLM_OPENAI_MODEL="gpt-6-sol"
 # ZALO_ENABLED="true"
 # ZALO_BOT_TOKEN="<zalo-bot-token>"
 # ZALO_WEBHOOK_SECRET="<random-hex-string>"

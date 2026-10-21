@@ -53,7 +53,7 @@ func TestZaloUsesOpenAICompatTelegramUsesAnthropic(t *testing.T) {
 	cfg := &config.Config{
 		Chat:      config.ChatConfig{Enabled: true, Model: "claude-x"},
 		Reminder:  config.ReminderConfig{Enabled: true, OpenAIAPIKey: "anthropic-test-key", DBPath: filepath.Join(t.TempDir(), "r.db")},
-		LLMOpenAI: config.LLMOpenAIConfig{BaseURL: oa.URL, APIKey: "sk-test", Model: "codex-auto-review"},
+		LLMOpenAI: config.LLMOpenAIConfig{BaseURL: oa.URL, APIKey: "sk-test", Model: "gpt-6-sol"},
 	}
 	zl, tg := &captureSender{}, &captureSender{}
 	completer := buildZaloCompleter(cfg)

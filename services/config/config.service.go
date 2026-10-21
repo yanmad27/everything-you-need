@@ -80,7 +80,7 @@ func setDefaults() {
 
 	viper.SetDefault("llm_openai.base_url", "")
 	viper.SetDefault("llm_openai.api_key", "")
-	viper.SetDefault("llm_openai.model", "codex-auto-review")
+	viper.SetDefault("llm_openai.model", "gpt-6-sol")
 
 	viper.SetDefault("reminder.enabled", false)
 	viper.SetDefault("reminder.db_path", "data/reminders.db")

@@ -42,7 +42,7 @@ Telegram, news and the default reminder parser keep using Anthropic Claude.
 |---|---|---|
 | `LLM_OPENAI_BASE_URL` | `llm_openai.base_url` | `""` (provider off) |
 | `LLM_OPENAI_API_KEY` | `llm_openai.api_key` | `""` (secret) |
-| `LLM_OPENAI_MODEL` | `llm_openai.model` | `codex-auto-review` |
+| `LLM_OPENAI_MODEL` | `llm_openai.model` | `gpt-6-sol` |
 
 (If the server rejects `max_tokens`, the client retries once with `max_completion_tokens`.)
 
@@ -129,6 +129,5 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<TOKEN>/setWebhook" \
   and earlier chunks may be sent again.
 - **No per-chat rate limit:** if Zalo ever delivered all group messages, the bot
   would answer all of them with no throttling (see "Wake word and groups").
-- **Default model:** `llm_openai.model` defaults to `codex-auto-review` (the only
-  model with "codex" in its id on the tested endpoint). Set `LLM_OPENAI_MODEL`
+- **Default model:** `llm_openai.model` defaults to `gpt-6-sol` (verified via `GET /v1/models` and a live completion on https://cpa.lowbit.link). Set `LLM_OPENAI_MODEL`
   explicitly to pin another one; there is no startup warning for the default.
