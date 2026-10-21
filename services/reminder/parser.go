@@ -88,7 +88,12 @@ func parseReminderJSON(modelText string) (ParseResult, error) {
 
 // LLMParser resolves reminder requests via the Anthropic Messages API.
 type LLMParser struct {
-	client *llm.Client
+	client llm.Completer
+}
+
+// NewLLMParser builds a parser on any LLM backend.
+func NewLLMParser(client llm.Completer) *LLMParser {
+	return &LLMParser{client: client}
 }
 
 func NewOpenAIParser(token, model string, timeout time.Duration) *LLMParser {

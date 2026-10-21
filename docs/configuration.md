@@ -75,6 +75,19 @@ Environment variables use uppercase with underscores and follow this pattern:
 | `PRICE_SOURCES_DOJI_ENABLED` | bool | true | Enable Doji price source |
 | `PRICE_SOURCES_DOJI_API_URL` | string | `https://banggia.doji.vn/api/TablePrice/GetTablePrice` | Doji price table endpoint |
 
+### Zalo Settings
+
+See [Zalo Service](zalo-service.md).
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ZALO_ENABLED` | bool | false | Enable the Zalo bot |
+| `ZALO_BOT_TOKEN` | string | "" | Zalo Bot Platform token (secret) |
+| `ZALO_WEBHOOK_SECRET` | string | "" | Secret echoed in `X-Bot-Api-Secret-Token` |
+| `LLM_OPENAI_BASE_URL` | string | "" | OpenAI-compatible endpoint for Zalo AI (optional) |
+| `LLM_OPENAI_API_KEY` | string | "" | Its API key (secret) |
+| `LLM_OPENAI_MODEL` | string | gpt-6-sol | Model id |
+
 ### Telegram Settings
 
 | Variable | Type | Default | Description |
@@ -323,4 +336,5 @@ APP_NAME="Test Override" go run main.go config.go
 - [Viper Documentation](https://github.com/spf13/viper)
 - [Main README](../README.md)
 - [Telegram Service Setup](telegram-service.md)
+- [Zalo Service Setup](zalo-service.md)
 - [Price Tracker Configuration](price-tracker.md)

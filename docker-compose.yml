@@ -13,6 +13,16 @@ services:
       - NEWS_OPENAI_API_KEY=${NEWS_OPENAI_API_KEY}
       - NEWS_SERPER_API_KEY=${NEWS_SERPER_API_KEY}
       - REMINDER_OPENAI_API_KEY=${REMINDER_OPENAI_API_KEY}
+      # Zalo bot (off unless ZALO_ENABLED=true). Empty values fall back to the
+      # config.yaml / built-in defaults (empty env vars are treated as unset).
+      - ZALO_ENABLED=${ZALO_ENABLED:-false}
+      - ZALO_BOT_TOKEN=${ZALO_BOT_TOKEN}
+      - ZALO_WEBHOOK_SECRET=${ZALO_WEBHOOK_SECRET}
+      - ZALO_WEBHOOK_PATH=${ZALO_WEBHOOK_PATH:-/zalo-webhook}
+      # OpenAI-compatible LLM for the Zalo bot only (optional).
+      - LLM_OPENAI_BASE_URL=${LLM_OPENAI_BASE_URL}
+      - LLM_OPENAI_API_KEY=${LLM_OPENAI_API_KEY}
+      - LLM_OPENAI_MODEL=${LLM_OPENAI_MODEL}
       # Doji needs no key since the banggia.doji.vn migration; its URL is baked
       # into config.yaml so a stale dashboard var can't override it.
       - PRICE_SOURCES_BTMC_API_URL=${PRICE_SOURCES_BTMC_API_URL}

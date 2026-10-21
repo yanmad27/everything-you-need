@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -19,19 +20,26 @@ var (
 // maxAttempts is the retry ceiling used by ListPending.
 const maxAttempts = 3
 
+// Platform identifiers for where a chat lives.
+const (
+	PlatformTelegram = "telegram"
+	PlatformZalo     = "zalo"
+)
+
 type Reminder struct {
-	ID             int64
-	ChatID         string
-	UserID         string
-	UserName       string
-	OriginalMsg    string
-	OriginalMsgID  int64
-	Task           string
-	FireAt         time.Time
-	CreatedAt      time.Time
-	FiredAt        *time.Time
-	CanceledAt     *time.Time
-	Attempts       int
+	ID            int64
+	Platform      string
+	ChatID        string
+	UserID        string
+	UserName      string
+	OriginalMsg   string
+	OriginalMsgID int64
+	Task          string
+	FireAt        time.Time
+	CreatedAt     time.Time
+	FiredAt       *time.Time
+	CanceledAt    *time.Time
+	Attempts      int
 }
 
 type Store struct {
@@ -83,15 +91,38 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	return addPlatformColumn(db)
+}
+
+// addPlatformColumn adds reminders.platform to databases created before
+// multi-platform support. Existing rows become 'telegram'. Idempotent.
+func addPlatformColumn(db *sql.DB) error {
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('reminders') WHERE name = 'platform'`,
+	).Scan(&n); err != nil {
+		return fmt.Errorf("migrate: inspect reminders: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	if _, err := db.Exec(
+		`ALTER TABLE reminders ADD COLUMN platform TEXT NOT NULL DEFAULT 'telegram'`,
+	); err != nil {
+		return fmt.Errorf("migrate: add platform column: %w", err)
+	}
 	return nil
 }
 
 func (s *Store) Create(ctx context.Context, r Reminder) (int64, error) {
+	if r.Platform == "" {
+		r.Platform = PlatformTelegram
+	}
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO reminders
-		  (chat_id, user_id, user_name, original_msg, original_msg_id, task, fire_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		r.ChatID, r.UserID, r.UserName, r.OriginalMsg, r.OriginalMsgID, r.Task, r.FireAt.UTC(),
+		  (platform, chat_id, user_id, user_name, original_msg, original_msg_id, task, fire_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Platform, r.ChatID, r.UserID, r.UserName, r.OriginalMsg, r.OriginalMsgID, r.Task, r.FireAt.UTC(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert reminder: %w", err)
@@ -116,13 +147,30 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Reminder, error) {
 }
 
 func (s *Store) ListPending(ctx context.Context, now time.Time, limit int) ([]Reminder, error) {
-	rows, err := s.db.QueryContext(ctx, selectReminderBase+`
+	return s.ListPendingForPlatforms(ctx, now, limit, nil)
+}
+
+// ListPendingForPlatforms is ListPending restricted to the given platforms
+// (nil/empty = all), so rows of an unconfigured platform cannot crowd out
+// deliverable ones under LIMIT.
+func (s *Store) ListPendingForPlatforms(ctx context.Context, now time.Time, limit int, platforms []string) ([]Reminder, error) {
+	query := selectReminderBase + `
 		WHERE fired_at IS NULL
 		  AND canceled_at IS NULL
 		  AND attempts < ?
-		  AND fire_at <= ?
+		  AND fire_at <= ?`
+	args := []any{maxAttempts, now.UTC()}
+	if len(platforms) > 0 {
+		query += ` AND platform IN (?` + strings.Repeat(`,?`, len(platforms)-1) + `)`
+		for _, p := range platforms {
+			args = append(args, p)
+		}
+	}
+	query += `
 		ORDER BY fire_at ASC
-		LIMIT ?`, maxAttempts, now.UTC(), limit)
+		LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query pending: %w", err)
 	}
@@ -130,12 +178,19 @@ func (s *Store) ListPending(ctx context.Context, now time.Time, limit int) ([]Re
 	return scanReminders(rows)
 }
 
+// ListForChat lists active Telegram reminders for a chat.
 func (s *Store) ListForChat(ctx context.Context, chatID string) ([]Reminder, error) {
+	return s.ListForPlatformChat(ctx, PlatformTelegram, chatID)
+}
+
+// ListForPlatformChat lists active reminders scoped to one platform + chat.
+func (s *Store) ListForPlatformChat(ctx context.Context, platform, chatID string) ([]Reminder, error) {
 	rows, err := s.db.QueryContext(ctx, selectReminderBase+`
-		WHERE chat_id = ?
+		WHERE platform = ?
+		  AND chat_id = ?
 		  AND fired_at IS NULL
 		  AND canceled_at IS NULL
-		ORDER BY fire_at ASC`, chatID)
+		ORDER BY fire_at ASC`, platform, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("query chat: %w", err)
 	}
@@ -143,11 +198,27 @@ func (s *Store) ListForChat(ctx context.Context, chatID string) ([]Reminder, err
 	return scanReminders(rows)
 }
 
-func (s *Store) Cancel(ctx context.Context, id int64, _ string) error {
+// CancelForChat cancels a reminder by id. Telegram keeps its historical
+// semantics (any chat may cancel any telegram reminder); other platforms may
+// only cancel reminders of their own chat. A reminder of another platform
+// (or another chat, for non-Telegram) reports ErrNotFound.
+func (s *Store) CancelForChat(ctx context.Context, platform, chatID string, id int64) error {
 	existing, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
+	if existing.Platform != platform {
+		return ErrNotFound
+	}
+	if platform != PlatformTelegram && existing.ChatID != chatID {
+		return ErrNotFound
+	}
+	return s.cancelExisting(ctx, existing)
+}
+
+func (s *Store) cancelExisting(ctx context.Context, existing *Reminder) error {
+	id := existing.ID
+	var err error
 	if existing.FiredAt != nil {
 		return ErrAlreadyFired
 	}
@@ -236,7 +307,7 @@ func (s *Store) PurgeOld(ctx context.Context, remindersCutoff, updatesCutoff tim
 }
 
 const selectReminderBase = `
-	SELECT id, chat_id, user_id, user_name, original_msg, original_msg_id,
+	SELECT id, platform, chat_id, user_id, user_name, original_msg, original_msg_id,
 	       task, fire_at, created_at, fired_at, canceled_at, attempts
 	FROM reminders`
 
@@ -249,7 +320,7 @@ func scanReminder(row rowScanner) (*Reminder, error) {
 	var fireAt, createdAt time.Time
 	var firedAt, canceledAt sql.NullTime
 	err := row.Scan(
-		&r.ID, &r.ChatID, &r.UserID, &r.UserName, &r.OriginalMsg, &r.OriginalMsgID,
+		&r.ID, &r.Platform, &r.ChatID, &r.UserID, &r.UserName, &r.OriginalMsg, &r.OriginalMsgID,
 		&r.Task, &fireAt, &createdAt, &firedAt, &canceledAt, &r.Attempts,
 	)
 	if err != nil {

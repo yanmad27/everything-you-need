@@ -34,6 +34,20 @@ telegram:
   webhook_secret: "" # -> TELEGRAM_WEBHOOK_SECRET
   webhook_path: "/telegram-webhook"
 
+# Zalo Bot Platform (optional; same reminder + chat features as Telegram)
+zalo:
+  enabled: false # set true via ZALO_ENABLED
+  bot_token: "" # -> ZALO_BOT_TOKEN
+  webhook_secret: "" # -> ZALO_WEBHOOK_SECRET
+  webhook_path: "/zalo-webhook"
+
+# OpenAI-compatible LLM used ONLY by the Zalo bot (chat + reminder parsing).
+# Unused unless base_url and api_key are both set; Telegram stays on Claude.
+llm_openai:
+  base_url: "" # -> LLM_OPENAI_BASE_URL
+  api_key: "" # -> LLM_OPENAI_API_KEY
+  model: "gpt-6-sol" # -> LLM_OPENAI_MODEL
+
 reminder:
   enabled: true
   db_path: "data/reminders.db"

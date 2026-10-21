@@ -18,8 +18,9 @@ type Sender interface {
 	SendMessage(ctx context.Context, chatID, text string) error
 }
 
-// IncomingMessage is the normalized inbound message from Telegram.
+// IncomingMessage is the normalized inbound message from a chat platform.
 type IncomingMessage struct {
+	Platform  string // PlatformTelegram (default when empty) or PlatformZalo
 	ChatID    string
 	UserID    string
 	UserName  string
@@ -29,10 +30,68 @@ type IncomingMessage struct {
 
 // Service wires Store + Parser + Sender into the bot command handler.
 type Service struct {
-	store  *Store
-	parser Parser
-	sender Sender
-	now    func() time.Time
+	store   *Store
+	parser  Parser
+	sender  Sender // default (Telegram) sender
+	extra   map[string]Sender
+	parsers map[string]Parser // per-platform overrides of parser
+	now     func() time.Time
+}
+
+// WithSender registers the sender used for a non-default platform.
+func (s *Service) WithSender(platform string, sender Sender) *Service {
+	if s.extra == nil {
+		s.extra = map[string]Sender{}
+	}
+	s.extra[platform] = sender
+	return s
+}
+
+// WithParser sets a platform-specific parser (e.g. a different LLM backend).
+func (s *Service) WithParser(platform string, p Parser) *Service {
+	if s.parsers == nil {
+		s.parsers = map[string]Parser{}
+	}
+	s.parsers[platform] = p
+	return s
+}
+
+func (s *Service) parserFor(platform string) Parser {
+	if p, ok := s.parsers[platform]; ok && p != nil {
+		return p
+	}
+	return s.parser
+}
+
+// configuredPlatforms lists the platforms that have a sender.
+func (s *Service) configuredPlatforms() []string {
+	var out []string
+	if s.sender != nil {
+		out = append(out, PlatformTelegram)
+	}
+	for p, snd := range s.extra {
+		if snd != nil && p != PlatformTelegram {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// senderFor returns the sender for a platform, or nil if none is configured.
+func (s *Service) senderFor(platform string) Sender {
+	if platform == "" || platform == PlatformTelegram {
+		return s.sender
+	}
+	return s.extra[platform]
+}
+
+// reply sends a reply to the incoming message on its own platform.
+func (s *Service) reply(ctx context.Context, msg IncomingMessage, text string) error {
+	snd := s.senderFor(msg.Platform)
+	if snd == nil {
+		return fmt.Errorf("no sender configured for platform %q", msg.Platform)
+	}
+	return snd.SendReply(ctx, msg.ChatID, msg.MessageID, text)
 }
 
 func NewService(store *Store, parser Parser, sender Sender, now func() time.Time) *Service {
@@ -86,7 +145,7 @@ const helpText = `🤖 *Bot Nhắc Nhở*
 Nhắc sẽ bắn vào kênh đúng giờ, reply lại tin nhắn gốc của bạn.`
 
 func (s *Service) handleHelp(ctx context.Context, msg IncomingMessage) error {
-	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, helpText)
+	return s.reply(ctx, msg, helpText)
 }
 
 func matchHelpCommand(text string) bool {
@@ -96,47 +155,44 @@ func matchHelpCommand(text string) bool {
 }
 
 func (s *Service) handleCreate(ctx context.Context, msg IncomingMessage) error {
-	result, err := s.parser.Parse(ctx, s.now(), msg.Text)
+	result, err := s.parserFor(msg.Platform).Parse(ctx, s.now(), msg.Text)
 	if err != nil {
 		log.Printf("reminder parser error: %v", err)
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"⚠️ Mình đang bận, thử lại sau 1 phút nhé.")
+		return s.reply(ctx, msg, "⚠️ Mình đang bận, thử lại sau 1 phút nhé.")
 	}
 	if !result.OK {
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"❓ Mình không hiểu: "+result.Reason+". Thử lại nhé.")
+		return s.reply(ctx, msg, "❓ Mình không hiểu: "+result.Reason+". Thử lại nhé.")
 	}
 
 	reminder := Reminder{
-		ChatID:         msg.ChatID,
-		UserID:         msg.UserID,
-		UserName:       msg.UserName,
-		OriginalMsg:    msg.Text,
-		OriginalMsgID:  msg.MessageID,
-		Task:           result.Task,
-		FireAt:         result.When,
+		Platform:      msg.Platform,
+		ChatID:        msg.ChatID,
+		UserID:        msg.UserID,
+		UserName:      msg.UserName,
+		OriginalMsg:   msg.Text,
+		OriginalMsgID: msg.MessageID,
+		Task:          result.Task,
+		FireAt:        result.When,
 	}
 	id, err := s.store.Create(ctx, reminder)
 	if err != nil {
 		log.Printf("reminder create error: %v", err)
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"⚠️ Không lưu được nhắc nhở, thử lại sau nhé.")
+		return s.reply(ctx, msg, "⚠️ Không lưu được nhắc nhở, thử lại sau nhé.")
 	}
 
 	fireAtLocal := result.When.In(vietnamLocation())
 	ack := fmt.Sprintf("✅ Đã đặt nhắc #%d: \"%s\" vào %s",
 		id, result.Task, fireAtLocal.Format("15:04 02/01/2006"))
-	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, ack)
+	return s.reply(ctx, msg, ack)
 }
 
 func (s *Service) handleList(ctx context.Context, msg IncomingMessage) error {
-	list, err := s.store.ListForChat(ctx, msg.ChatID)
+	list, err := s.store.ListForPlatformChat(ctx, platformOrDefault(msg.Platform), msg.ChatID)
 	if err != nil {
 		return err
 	}
 	if len(list) == 0 {
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"📭 Không có nhắc nhở nào đang chờ.")
+		return s.reply(ctx, msg, "📭 Không có nhắc nhở nào đang chờ.")
 	}
 
 	var sb strings.Builder
@@ -147,30 +203,25 @@ func (s *Service) handleList(ctx context.Context, msg IncomingMessage) error {
 			r.ID, fireAtLocal.Format("15:04 02/01/2006"), r.Task)
 	}
 	sb.WriteString("\nHủy bằng: /cancel <id>")
-	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, sb.String())
+	return s.reply(ctx, msg, sb.String())
 }
 
 func (s *Service) handleCancel(ctx context.Context, msg IncomingMessage, text string) error {
 	id, err := extractCancelID(text)
 	if err != nil {
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"❓ Dùng: /cancel <id> hoặc: hủy nhắc <id>")
+		return s.reply(ctx, msg, "❓ Dùng: /cancel <id> hoặc: hủy nhắc <id>")
 	}
-	err = s.store.Cancel(ctx, id, msg.UserID)
+	err = s.store.CancelForChat(ctx, platformOrDefault(msg.Platform), msg.ChatID, id)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			fmt.Sprintf("❓ Không tìm thấy nhắc #%d.", id))
+		return s.reply(ctx, msg, fmt.Sprintf("❓ Không tìm thấy nhắc #%d.", id))
 	case errors.Is(err, ErrAlreadyFired):
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			fmt.Sprintf("⏰ Nhắc #%d đã chạy rồi.", id))
+		return s.reply(ctx, msg, fmt.Sprintf("⏰ Nhắc #%d đã chạy rồi.", id))
 	case err != nil:
 		log.Printf("cancel reminder error: %v", err)
-		return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-			"⚠️ Không hủy được, thử lại sau nhé.")
+		return s.reply(ctx, msg, "⚠️ Không hủy được, thử lại sau nhé.")
 	}
-	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID,
-		fmt.Sprintf("🗑 Đã hủy nhắc #%d.", id))
+	return s.reply(ctx, msg, fmt.Sprintf("🗑 Đã hủy nhắc #%d.", id))
 }
 
 // PurgeOld deletes reminders fired/canceled before remindersCutoff and update rows before updatesCutoff.
@@ -180,13 +231,23 @@ func (s *Service) PurgeOld(ctx context.Context, remindersCutoff, updatesCutoff t
 
 // Sweep fires all due reminders. Intended to be called once per minute from the scheduler.
 func (s *Service) Sweep(ctx context.Context, now time.Time) error {
-	pending, err := s.store.ListPending(ctx, now, 50)
+	// Only fetch reminders of platforms that currently have a sender; the rest
+	// stay pending untouched (attempts not counted) until that platform is back.
+	platforms := s.configuredPlatforms()
+	if len(platforms) == 0 {
+		return nil
+	}
+	pending, err := s.store.ListPendingForPlatforms(ctx, now, 50, platforms)
 	if err != nil {
 		return fmt.Errorf("list pending: %w", err)
 	}
 	for _, r := range pending {
 		text := formatFireMessage(r, now)
-		sendErr := s.sender.SendReply(ctx, r.ChatID, r.OriginalMsgID, text)
+		snd := s.senderFor(r.Platform)
+		if snd == nil { // cannot happen (filtered above); never count an attempt
+			continue
+		}
+		sendErr := snd.SendReply(ctx, r.ChatID, r.OriginalMsgID, text)
 		if sendErr != nil {
 			log.Printf("reminder #%d send failed (attempts=%d): %v", r.ID, r.Attempts+1, sendErr)
 			if incErr := s.store.IncrementAttempts(ctx, r.ID); incErr != nil {
@@ -199,6 +260,13 @@ func (s *Service) Sweep(ctx context.Context, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+func platformOrDefault(p string) string {
+	if p == "" {
+		return PlatformTelegram
+	}
+	return p
 }
 
 func formatFireMessage(r Reminder, now time.Time) string {
@@ -236,7 +304,7 @@ func (s *Service) handleLunar(ctx context.Context, msg IncomingMessage) error {
 	}
 	text := fmt.Sprintf("🌙 *Lịch Âm*\n📅 Dương lịch: %s\n🗓 Âm lịch: %d/%d/%d%s",
 		today.Format("02/01/2006"), lunarDay, lunarMonth, lunarYear, leapSuffix)
-	return s.sender.SendReply(ctx, msg.ChatID, msg.MessageID, text)
+	return s.reply(ctx, msg, text)
 }
 
 func matchListCommand(text string) bool {

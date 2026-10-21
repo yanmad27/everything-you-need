@@ -51,15 +51,28 @@ type Sender interface {
 // Service answers wake-word messages via the LLM, keeping short per-chat history
 // in memory (reset on restart).
 type Service struct {
-	client  *llm.Client
-	sender  Sender
-	mu      sync.Mutex
-	history map[string][]llm.Message
+	client    llm.Completer
+	sender    Sender
+	mu        sync.Mutex
+	history   map[string][]llm.Message
+	safeFetch bool // block private/loopback targets when reading pasted links
 }
 
 func NewService(token, model string, sender Sender) *Service {
+	return NewServiceWithCompleter(llm.NewClient(token, model, 30*time.Second), sender)
+}
+
+// WithSafeFetch makes link reading refuse loopback/private/link-local targets
+// (SSRF guard). Off by default so existing behaviour is unchanged.
+func (s *Service) WithSafeFetch(on bool) *Service {
+	s.safeFetch = on
+	return s
+}
+
+// NewServiceWithCompleter builds the assistant on any LLM backend.
+func NewServiceWithCompleter(client llm.Completer, sender Sender) *Service {
 	return &Service{
-		client:  llm.NewClient(token, model, 30*time.Second),
+		client:  client,
 		sender:  sender,
 		history: make(map[string][]llm.Message),
 	}
@@ -72,6 +85,21 @@ func (s *Service) Handle(ctx context.Context, chatID string, replyToMsgID int64,
 	if !ok {
 		return nil
 	}
+	return s.respond(ctx, chatID, replyToMsgID, prompt)
+}
+
+// HandleAddressed answers a message that is already known to be addressed to
+// the bot (e.g. a Zalo group @mention/reply), so no wake word is required. A
+// wake word, if present, is still stripped.
+func (s *Service) HandleAddressed(ctx context.Context, chatID string, replyToMsgID int64, text string) error {
+	prompt, ok := SplitWake(text)
+	if !ok {
+		prompt = strings.Join(strings.Fields(text), " ")
+	}
+	return s.respond(ctx, chatID, replyToMsgID, prompt)
+}
+
+func (s *Service) respond(ctx context.Context, chatID string, replyToMsgID int64, prompt string) error {
 	if prompt == "" {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! 🩷 Bạn cần gì nào?")
 	}
@@ -99,7 +127,7 @@ func (s *Service) complete(ctx context.Context, chatID, prompt string) (string, 
 	s.mu.Lock()
 	msgs := append([]llm.Message{}, s.history[chatID]...)
 	s.mu.Unlock()
-	msgs = append(msgs, llm.Message{Role: "user", Content: augmentWithURLs(ctx, prompt)})
+	msgs = append(msgs, llm.Message{Role: "user", Content: augmentWithURLs(ctx, prompt, s.safeFetch)})
 	return s.client.Complete(ctx, systemPrompt, msgs, 2048)
 }
 

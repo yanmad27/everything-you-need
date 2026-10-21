@@ -42,6 +42,22 @@ type TelegramConfig struct {
 	WebhookPath   string `mapstructure:"webhook_path"`
 }
 
+type ZaloConfig struct {
+	Enabled       bool   `mapstructure:"enabled"`
+	BotToken      string `mapstructure:"bot_token"`
+	WebhookSecret string `mapstructure:"webhook_secret"`
+	WebhookPath   string `mapstructure:"webhook_path"`
+}
+
+// LLMOpenAIConfig points the Zalo bot's AI work (chat + reminder parsing) at an
+// OpenAI-compatible /v1/chat/completions endpoint. Unused unless both
+// base_url and api_key are set.
+type LLMOpenAIConfig struct {
+	BaseURL string `mapstructure:"base_url"`
+	APIKey  string `mapstructure:"api_key"`
+	Model   string `mapstructure:"model"`
+}
+
 type AppConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`
@@ -74,14 +90,14 @@ type ChatConfig struct {
 }
 
 type NewsConfig struct {
-	Enabled        bool     `mapstructure:"enabled"`
-	DBPath         string   `mapstructure:"db_path"`
-	OpenAIAPIKey   string   `mapstructure:"openai_api_key"`
-	OpenAIModel    string   `mapstructure:"openai_model"`
-	Feeds          []string `mapstructure:"feeds"`
-	SearchQueries  []string `mapstructure:"search_queries"`
-	SerperAPIKey   string   `mapstructure:"serper_api_key"`
-	MaxItems       int      `mapstructure:"max_items"`
-	WindowHours    int      `mapstructure:"window_hours"`
-	DedupDays      int      `mapstructure:"dedup_days"`
+	Enabled       bool     `mapstructure:"enabled"`
+	DBPath        string   `mapstructure:"db_path"`
+	OpenAIAPIKey  string   `mapstructure:"openai_api_key"`
+	OpenAIModel   string   `mapstructure:"openai_model"`
+	Feeds         []string `mapstructure:"feeds"`
+	SearchQueries []string `mapstructure:"search_queries"`
+	SerperAPIKey  string   `mapstructure:"serper_api_key"`
+	MaxItems      int      `mapstructure:"max_items"`
+	WindowHours   int      `mapstructure:"window_hours"`
+	DedupDays     int      `mapstructure:"dedup_days"`
 }

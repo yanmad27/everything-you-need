@@ -22,6 +22,24 @@ telegram:
   webhook_secret: ""
   webhook_path: "/telegram-webhook"
 
+# Zalo Bot Platform (optional): same chat assistant + reminders as Telegram.
+# See docs/zalo-service.md
+zalo:
+  enabled: false
+  bot_token: "your-zalo-bot-token"
+  # 8-256 chars; Zalo echoes it in the X-Bot-Api-Secret-Token header.
+  # Generate with: openssl rand -hex 32
+  webhook_secret: ""
+  webhook_path: "/zalo-webhook"
+
+# OpenAI-compatible LLM used ONLY by the Zalo bot (chat + reminder parsing).
+# Unused unless base_url and api_key are both set; otherwise Zalo falls back to
+# the Anthropic client (chat.api_key / reminder.openai_api_key). Telegram is unaffected.
+llm_openai:
+  base_url: "https://your-openai-compatible-host"   # /v1/chat/completions is appended
+  api_key: "your-api-key"
+  model: "gpt-6-sol"
+
 # Vietnamese natural-language reminder bot (optional)
 reminder:
   enabled: false
@@ -50,7 +68,7 @@ news:
     - "https://vnexpress.net/rss/so-hoa.rss"
     - "https://vnexpress.net/rss/tin-moi-nhat.rss"
 
-# HTTP server for Telegram webhook (only used when reminder.enabled = true)
+# HTTP server for the Telegram / Zalo webhooks (used when reminder or chat is enabled)
 server:
   listen_addr: ":8080"
 
@@ -62,5 +80,11 @@ server:
 # TELEGRAM_BOT_TOKEN="1234567890:ABCdef..."
 # TELEGRAM_CHANNEL_ID="@mychannel"
 # TELEGRAM_WEBHOOK_SECRET="<random-hex-string>"
+# LLM_OPENAI_BASE_URL="https://your-openai-compatible-host"
+# LLM_OPENAI_API_KEY="<api-key>"
+# LLM_OPENAI_MODEL="gpt-6-sol"
+# ZALO_ENABLED="true"
+# ZALO_BOT_TOKEN="<zalo-bot-token>"
+# ZALO_WEBHOOK_SECRET="<random-hex-string>"
 # REMINDER_ENABLED="true"
 # REMINDER_OPENAI_API_KEY="<your-openai-api-key>"
