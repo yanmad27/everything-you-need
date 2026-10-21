@@ -9,7 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
+	zalobot "everything-you-need/m/services/zalo-bot"
 	"everything-you-need/m/services/reminder"
 )
 
@@ -101,5 +103,17 @@ func TestZaloUsesOpenAICompatTelegramUsesAnthropic(t *testing.T) {
 func TestZaloCompleterUnsetFallsBack(t *testing.T) {
 	if buildZaloCompleter(&config.Config{}) != nil {
 		t.Error("expected nil completer when llm_openai is unset")
+	}
+}
+
+func TestZaloWebhookRefusedForBadSecretLength(t *testing.T) {
+	cfg := &config.Config{Zalo: config.ZaloConfig{Enabled: true, WebhookSecret: "short"}}
+	zalo := zalobot.NewClient("t", "http://127.0.0.1:1")
+	chatSvc := chat.NewServiceWithCompleter(nil, &captureSender{})
+	for _, secret := range []string{"", "short", strings.Repeat("x", 257)} {
+		cfg.Zalo.WebhookSecret = secret
+		if srv := startWebhookServer(cfg, nil, nil, nil, zalo, chatSvc); srv != nil {
+			t.Errorf("secret len %d: webhook must not be mounted", len(secret))
+		}
 	}
 }

@@ -221,14 +221,20 @@ func (s *Service) Sweep(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("list pending: %w", err)
 	}
+	warned := map[string]bool{}
 	for _, r := range pending {
 		text := formatFireMessage(r, now)
-		var sendErr error
-		if snd := s.senderFor(r.Platform); snd != nil {
-			sendErr = snd.SendReply(ctx, r.ChatID, r.OriginalMsgID, text)
-		} else {
-			sendErr = fmt.Errorf("no sender configured for platform %q", r.Platform)
+		snd := s.senderFor(r.Platform)
+		if snd == nil {
+			// Platform not configured right now: leave the reminder pending
+			// (no attempt counted) so it fires once that platform is back.
+			if !warned[r.Platform] {
+				warned[r.Platform] = true
+				log.Printf("reminder sweep: no sender configured for platform %q, leaving its reminders pending", r.Platform)
+			}
+			continue
 		}
+		sendErr := snd.SendReply(ctx, r.ChatID, r.OriginalMsgID, text)
 		if sendErr != nil {
 			log.Printf("reminder #%d send failed (attempts=%d): %v", r.ID, r.Attempts+1, sendErr)
 			if incErr := s.store.IncrementAttempts(ctx, r.ID); incErr != nil {

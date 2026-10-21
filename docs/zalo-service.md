@@ -23,7 +23,7 @@ API reference: <https://bot.zaloplatforms.com/docs/call-api/> ·
 |---|---|---|---|
 | `ZALO_ENABLED` | `zalo.enabled` | `false` | |
 | `ZALO_BOT_TOKEN` | `zalo.bot_token` | `""` | Secret. Never commit it. |
-| `ZALO_WEBHOOK_SECRET` | `zalo.webhook_secret` | `""` | 8–256 chars; required to mount the webhook |
+| `ZALO_WEBHOOK_SECRET` | `zalo.webhook_secret` | `""` | 8–256 chars; the webhook is not mounted (and a log line says so) if shorter/longer |
 | — | `zalo.webhook_path` | `/zalo-webhook` | |
 
 `reminder.enabled` + `reminder.openai_api_key` (reminders) and `chat.enabled`
@@ -83,7 +83,7 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<TOKEN>/setWebhook" \
 | Feature | Telegram | Zalo | What we do |
 |---|---|---|---|
 | Reply to original message | `reply_to_message_id` | none | Plain message to the same chat |
-| Markdown | optional `parse_mode` (reminder/chat use plain text) | `parse_mode` markdown/html | Plain text, as on Telegram |
+| Markdown | optional `parse_mode`; the bot sends **plain text** (help/lunar `*bold*` markers show literally on both) | `parse_mode` markdown/html | Plain text, as on Telegram |
 | Edit / delete message | yes | no | Not used by the bot |
 | Inline buttons | yes | no | Not used by the bot |
 | Typing indicator | `sendChatAction` | `sendChatAction` (`typing`) | Not used (bot didn't send one on Telegram) |
@@ -93,4 +93,5 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<TOKEN>/setWebhook" \
 | Groups | bot sees group messages (per privacy mode) | **Beta**: bot only receives messages that @mention it or reply to one of its messages | Wake word / reminder keyword must be inside such a message |
 | User handle | `@username` | `display_name` only | Reminders mention the display name |
 | Non-text | ignored | `message.image/sticker/voice/unsupported.received` | Ignored |
+| Multi-chunk replies | single message | each 2000-char chunk is its own `sendMessage` | If chunk N fails, the reminder sweep retries the whole send, so earlier chunks may be re-sent (accepted) |
 | Channel broadcasts (gold, news…) | yes | not in scope | Stay on Telegram |

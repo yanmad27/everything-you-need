@@ -180,14 +180,6 @@ func (s *Store) ListForPlatformChat(ctx context.Context, platform, chatID string
 	return scanReminders(rows)
 }
 
-func (s *Store) Cancel(ctx context.Context, id int64, _ string) error {
-	existing, err := s.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	return s.cancelExisting(ctx, existing)
-}
-
 // CancelForChat cancels a reminder by id. Telegram keeps its historical
 // semantics (any chat may cancel any telegram reminder); other platforms may
 // only cancel reminders of their own chat. A reminder of another platform

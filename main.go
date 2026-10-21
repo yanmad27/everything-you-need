@@ -215,6 +215,9 @@ func buildChatService(cfg *config.Config, sender chat.Sender, completer llm.Comp
 	return chat.NewService(apiKey, cfg.Chat.Model, sender)
 }
 
+// minZaloWebhookSecret is the shortest secret_token Zalo's setWebhook accepts.
+const minZaloWebhookSecret = 8
+
 func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
 	zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
@@ -243,8 +246,10 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 	}
 
 	if zaloService != nil && (svc != nil || zaloChat != nil) {
-		if cfg.Zalo.WebhookSecret == "" {
-			log.Printf("Zalo webhook disabled: zalo.webhook_secret is empty")
+		if n := len(cfg.Zalo.WebhookSecret); n < minZaloWebhookSecret {
+			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-256 characters (got %d)", minZaloWebhookSecret, n)
+		} else if n > 256 {
+			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-256 characters (got %d)", minZaloWebhookSecret, n)
 		} else {
 			path := cfg.Zalo.WebhookPath
 			if path == "" {

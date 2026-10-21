@@ -320,16 +320,28 @@ func TestSweepRoutesByPlatform(t *testing.T) {
 
 func TestSweepWithoutPlatformSenderKeepsReminderPending(t *testing.T) {
 	ctx := context.Background()
-	svc := newTestService(t, nil, &stubSender{}) // no zalo sender
+	zl := &stubSender{}
+	svc := newTestService(t, nil, nil).WithSender(PlatformZalo, zl) // zalo on, telegram off
 	due := time.Date(2026, 4, 17, 13, 0, 0, 0, time.UTC)
-	id, _ := svc.store.Create(ctx, Reminder{Platform: PlatformZalo, ChatID: "zl1", UserName: "B", Task: "t", FireAt: due})
+	id, _ := svc.store.Create(ctx, Reminder{ChatID: "tg1", UserName: "B", Task: "t", FireAt: due})
 
-	if err := svc.Sweep(ctx, due); err != nil {
-		t.Fatal(err)
+	for i := 0; i < 5; i++ {
+		if err := svc.Sweep(ctx, due.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r, _ := svc.store.GetByID(ctx, id)
-	if r.FiredAt != nil || r.Attempts != 1 {
-		t.Errorf("want unfired with attempts=1, got fired=%v attempts=%d", r.FiredAt, r.Attempts)
+	if r.FiredAt != nil || r.Attempts != 0 {
+		t.Fatalf("want pending with attempts=0, got fired=%v attempts=%d", r.FiredAt, r.Attempts)
+	}
+
+	tg := &stubSender{}
+	svc.sender = tg // telegram comes back
+	if err := svc.Sweep(ctx, due.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(tg.sent) != 1 || tg.sent[0].ChatID != "tg1" || len(zl.sent) != 0 {
+		t.Errorf("telegram=%v zalo=%v", tg.sent, zl.sent)
 	}
 }
 

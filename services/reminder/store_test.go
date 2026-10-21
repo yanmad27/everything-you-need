@@ -84,7 +84,7 @@ func TestListPendingFiltersFutureAndFiredAndCanceled(t *testing.T) {
 	if err := store.MarkFired(ctx, firedID, now); err != nil {
 		t.Fatalf("MarkFired: %v", err)
 	}
-	if err := store.Cancel(ctx, canceledID, "42"); err != nil {
+	if err := store.CancelForChat(ctx, PlatformTelegram, "-100123", canceledID); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 
@@ -147,14 +147,14 @@ func TestCancelErrors(t *testing.T) {
 
 	id, _ := store.Create(ctx, sampleReminder(now.Add(1*time.Hour)))
 
-	if err := store.Cancel(ctx, 9999, "42"); !errors.Is(err, ErrNotFound) {
+	if err := store.CancelForChat(ctx, PlatformTelegram, "-100123", 9999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("cancel missing: want ErrNotFound, got %v", err)
 	}
 
 	if err := store.MarkFired(ctx, id, now); err != nil {
 		t.Fatalf("MarkFired: %v", err)
 	}
-	if err := store.Cancel(ctx, id, "42"); !errors.Is(err, ErrAlreadyFired) {
+	if err := store.CancelForChat(ctx, PlatformTelegram, "-100123", id); !errors.Is(err, ErrAlreadyFired) {
 		t.Errorf("cancel fired: want ErrAlreadyFired, got %v", err)
 	}
 }
