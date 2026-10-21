@@ -146,4 +146,6 @@ zalo dispatch: result=chat chat_type=PRIVATE chat=…4321
 For `shape=unknown` or an undocumented event name an extra `structure=` line shows
 JSON keys with value types only. Both the documented `{ok,result:{...}}` shape and a
 bare `{event_name,message}` are accepted; ids may be strings or numbers. Each
-dispatch runs under a 90s context (the LLM client times out at 60s).
+dispatch runs under a 90s context timeout (the LLM client
+times out at 60s, leaving time for the busy reply). Optional fields (`date`, `is_bot`,
+`text` type quirks) never cause a drop; logged keys/event/chat_type are quoted and capped.

@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 const fakeToken = "111:fake-test-token"
@@ -260,7 +262,7 @@ func TestWebhookAcceptsBareAndWrapped(t *testing.T) {
 		t.Fatalf("bare: code=%d got=%+v", code, got)
 	}
 	if !strings.Contains(logs, "shape=bare") || !strings.Contains(logs, "outcome=dispatched") || !strings.Contains(logs, "chat=…4321") ||
-		!strings.Contains(logs, "chat_type=PRIVATE") || !strings.Contains(logs, "text_len=5") {
+		!strings.Contains(logs, "chat_type=\"PRIVATE\"") || !strings.Contains(logs, "text_len=5") {
 		t.Errorf("bare log: %q", logs)
 	}
 	logs = captureLog(func() { _, got = serve(t, "s", "s", privateText) })
@@ -273,7 +275,7 @@ func TestWebhookGroupMentionDispatched(t *testing.T) {
 	body := strings.Replace(groupText, "pink ơi", "@Bot Pink EYN nhắc tao", 1)
 	var got []Message
 	logs := captureLog(func() { _, got = serve(t, "s", "s", body) })
-	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "@Bot Pink") || !strings.Contains(logs, "chat_type=GROUP") {
+	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "@Bot Pink") || !strings.Contains(logs, "chat_type=\"GROUP\"") {
 		t.Errorf("group: got=%+v log=%q", got, logs)
 	}
 }
@@ -296,7 +298,7 @@ func TestWebhookUnknownShapeLogsTypesOnly(t *testing.T) {
 	var got []Message
 	logs := captureLog(func() { _, got = serve(t, "hdr-secret", "hdr-secret", body) })
 	if len(got) != 0 || !strings.Contains(logs, "shape=unknown") || !strings.Contains(logs, "outcome=dropped:unknown_shape") ||
-		!strings.Contains(logs, "structure={list:[string],weird:{flag:bool,n:number,who:string}}") {
+		!strings.Contains(logs, "structure={\"list\":[string],\"weird\":{\"flag\":bool,\"n\":number,\"who\":string}}") {
 		t.Errorf("got=%+v log=%q", got, logs)
 	}
 	for _, leak := range []string{"SECRETVALUE", "PLANTEDTEXT", "hdr-secret", "42"} {
@@ -309,5 +311,40 @@ func TestWebhookUnknownShapeLogsTypesOnly(t *testing.T) {
 	logs = captureLog(func() { serve(t, "s", "s", odd) })
 	if !strings.Contains(logs, "structure=") || strings.Contains(logs, "PLANTEDTEXT") {
 		t.Errorf("odd event log: %q", logs)
+	}
+}
+
+func TestWebhookTolerantOptionalFields(t *testing.T) {
+	for name, extra := range map[string]string{
+		"date string": `"date":"1750316131602"`,
+		"date float":  `"date":1.75031613e12`,
+		"date object": `"date":{"x":1}`,
+	} {
+		body := `{"event_name":"message.text.received","message":{"from":{"id":"u1","is_bot":"false"},` +
+			`"chat":{"id":"c12345","chat_type":"PRIVATE"},"text":"hi","message_id":"` + name + `",` + extra + `}}`
+		if _, got := serve(t, "s", "s", body); len(got) != 1 || got[0].Text != "hi" {
+			t.Errorf("%s: got=%+v", name, got)
+		}
+	}
+	bot := `{"event_name":"message.text.received","message":{"from":{"id":"b","is_bot":"true"},"chat":{"id":"c1"},"text":"hi"}}`
+	if _, got := serve(t, "s", "s", bot); len(got) != 0 {
+		t.Errorf("string is_bot=true must drop: %+v", got)
+	}
+}
+
+func TestLogHygieneCaps(t *testing.T) {
+	long := strings.Repeat("ệ", 100)
+	if got := SafeField(long, 40); len([]rune(got)) != 41 {
+		t.Errorf("SafeField runes=%d", len([]rune(got)))
+	}
+	if got := MaskID("abcệưở"); got != "…cệưở" && got != "…bcệưở"[:0]+"…cệưở" {
+		t.Errorf("MaskID=%q", got)
+	}
+	big := map[string]any{}
+	for i := 0; i < 200; i++ {
+		big[strings.Repeat("ệ", 30)+strconv.Itoa(i)] = "v"
+	}
+	if d := structureDump(big); len(d) > 504 || !utf8.ValidString(d) {
+		t.Errorf("dump len=%d valid=%v", len(d), utf8.ValidString(d))
 	}
 }

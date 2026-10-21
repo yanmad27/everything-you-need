@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,43 +86,61 @@ func (f *flexString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// Decoding is field-by-field and tolerant: a field of an unexpected type is
+// left at its zero value instead of failing the whole message.
+func rawFields(b []byte) map[string]json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+func rawString(r json.RawMessage) string {
+	var f flexString
+	if len(r) == 0 || f.UnmarshalJSON(r) != nil {
+		return ""
+	}
+	return string(f)
+}
+
+func rawBool(r json.RawMessage) bool {
+	var v bool
+	if json.Unmarshal(r, &v) == nil {
+		return v
+	}
+	var s string
+	if json.Unmarshal(r, &s) == nil {
+		v, _ = strconv.ParseBool(strings.TrimSpace(s))
+	}
+	return v
+}
+
 func (m *Message) UnmarshalJSON(b []byte) error {
-	var a struct {
-		MessageID flexString `json:"message_id"`
-		From      User       `json:"from"`
-		Chat      Chat       `json:"chat"`
-		Text      string     `json:"text"`
-		Date      int64      `json:"date"`
+	f := rawFields(b)
+	*m = Message{MessageID: rawString(f["message_id"]), Text: rawString(f["text"])}
+	if r, ok := f["from"]; ok {
+		_ = m.From.UnmarshalJSON(r)
 	}
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
+	if r, ok := f["chat"]; ok {
+		_ = m.Chat.UnmarshalJSON(r)
 	}
-	*m = Message{MessageID: string(a.MessageID), From: a.From, Chat: a.Chat, Text: a.Text, Date: a.Date}
+	var d float64
+	if json.Unmarshal(f["date"], &d) == nil {
+		m.Date = int64(d)
+	}
 	return nil
 }
 
 func (u *User) UnmarshalJSON(b []byte) error {
-	var a struct {
-		ID          flexString `json:"id"`
-		DisplayName string     `json:"display_name"`
-		IsBot       bool       `json:"is_bot"`
-	}
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
-	}
-	*u = User{ID: string(a.ID), DisplayName: a.DisplayName, IsBot: a.IsBot}
+	f := rawFields(b)
+	*u = User{ID: rawString(f["id"]), DisplayName: rawString(f["display_name"]), IsBot: rawBool(f["is_bot"])}
 	return nil
 }
 
 func (c *Chat) UnmarshalJSON(b []byte) error {
-	var a struct {
-		ID       flexString `json:"id"`
-		ChatType string     `json:"chat_type"`
-	}
-	if err := json.Unmarshal(b, &a); err != nil {
-		return err
-	}
-	*c = Chat{ID: string(a.ID), ChatType: a.ChatType}
+	f := rawFields(b)
+	*c = Chat{ID: rawString(f["id"]), ChatType: rawString(f["chat_type"])}
 	return nil
 }
 
@@ -135,14 +154,24 @@ type envelope struct {
 // dispatchTimeout bounds one dispatched message (LLM call + reply).
 const dispatchTimeout = 90 * time.Second
 
-func maskID(id string) string {
+// MaskID keeps only the last 4 runes of an id.
+func MaskID(id string) string {
 	if id == "" {
 		return "-"
 	}
-	if len(id) <= 4 {
-		return "…" + id
+	r := []rune(id)
+	if len(r) > 4 {
+		r = r[len(r)-4:]
 	}
-	return "…" + id[len(id)-4:]
+	return "…" + string(r)
+}
+
+// SafeField truncates s to n runes (on a rune boundary) for logging with %q.
+func SafeField(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "…"
 }
 
 func jsonType(v any) string {
@@ -162,14 +191,20 @@ func jsonType(v any) string {
 	}
 }
 
-// structureDump renders keys with value types only (no values), capped.
+// structureDump renders keys with value types only (no values), capped at
+// maxDump bytes while building and truncated on a rune boundary.
 func structureDump(v any) string {
+	const maxDump = 500
 	var sb strings.Builder
-	var walk func(v any)
-	walk = func(v any) {
-		if sb.Len() > 600 {
-			return
+	put := func(x string) bool {
+		if sb.Len()+len(x) > maxDump {
+			return false
 		}
+		sb.WriteString(x)
+		return true
+	}
+	var walk func(v any) bool
+	walk = func(v any) bool {
 		switch t := v.(type) {
 		case map[string]any:
 			keys := make([]string, 0, len(t))
@@ -177,31 +212,38 @@ func structureDump(v any) string {
 				keys = append(keys, k)
 			}
 			sort.Strings(keys)
-			sb.WriteString("{")
+			if !put("{") {
+				return false
+			}
 			for i, k := range keys {
-				if i > 0 {
-					sb.WriteString(",")
+				if i > 0 && !put(",") {
+					return false
 				}
-				sb.WriteString(k + ":")
-				walk(t[k])
+				if !put(strconv.Quote(SafeField(k, 40))+":") || !walk(t[k]) {
+					return false
+				}
 			}
-			sb.WriteString("}")
+			return put("}")
 		case []any:
-			sb.WriteString("[")
-			if len(t) > 0 {
-				walk(t[0])
+			if !put("[") {
+				return false
 			}
-			sb.WriteString("]")
+			if len(t) > 0 && !walk(t[0]) {
+				return false
+			}
+			return put("]")
 		default:
-			sb.WriteString(jsonType(v))
+			return put(jsonType(v))
 		}
 	}
-	walk(v)
-	out := sb.String()
-	if len(out) > 500 {
-		out = out[:500] + "…"
+	if !walk(v) {
+		out := sb.String()
+		for !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+		return out + "…"
 	}
-	return out
+	return sb.String()
 }
 
 func topKeys(raw map[string]json.RawMessage) string {
@@ -210,6 +252,12 @@ func topKeys(raw map[string]json.RawMessage) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	if len(keys) > 20 {
+		keys = keys[:20]
+	}
+	for i, k := range keys {
+		keys[i] = strconv.Quote(SafeField(k, 40))
+	}
 	return strings.Join(keys, ",")
 }
 
@@ -280,8 +328,8 @@ func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 		case msg.MessageID != "" && !seen.add(msg.MessageID):
 			outcome = "dropped:duplicate"
 		}
-		log.Printf("zalo webhook: shape=%s keys=[%s] event=%q chat_type=%s text_len=%d is_bot=%t chat=%s outcome=%s",
-			shape, topKeys(raw), event, chatType, textLen, isBot, maskID(chatID), outcome)
+		log.Printf("zalo webhook: shape=%s keys=[%s] event=%q chat_type=%q text_len=%d is_bot=%t chat=%s outcome=%s",
+			shape, topKeys(raw), SafeField(event, 40), SafeField(chatType, 40), textLen, isBot, MaskID(chatID), outcome)
 		if shape == "unknown" || (outcome == "dropped:event_not_text" && !knownNonTextEvent(event)) {
 			var generic any
 			_ = json.Unmarshal(body, &generic)

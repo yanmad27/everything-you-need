@@ -349,13 +349,6 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 	return "ignored"
 }
 
-func lastN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[len(s)-n:]
-}
-
 // dispatchZalo normalizes a Zalo message and routes it. Every Zalo message is
 // treated as addressed to the bot: in 1:1 chats by definition, and in groups
 // because Zalo only delivers messages that @mention the bot or reply to it (the
@@ -367,12 +360,12 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 	if group {
 		msg.Text = zalobot.StripLeadingMention(msg.Text, botNames)
 		if msg.Text == "" {
-			log.Printf("zalo dispatch: result=ignored reason=group_mention_only chat=…%s", lastN(msg.Chat.ID, 4))
+			log.Printf("zalo dispatch: result=ignored reason=group_mention_only chat=%s", zalobot.MaskID(msg.Chat.ID))
 			return
 		}
 	}
 	result := dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), true)
-	log.Printf("zalo dispatch: result=%s chat_type=%s chat=…%s", result, msg.Chat.ChatType, lastN(msg.Chat.ID, 4))
+	log.Printf("zalo dispatch: result=%s chat_type=%q chat=%s", result, zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
 }
 
 func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {
