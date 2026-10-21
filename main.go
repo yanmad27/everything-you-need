@@ -293,7 +293,7 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 			}
 			cancelName()
 			dispatcher := func(ctx context.Context, msg zalobot.Message) {
-				dispatchZalo(ctx, zaloSvc, zaloChat, botNames, msg)
+				dispatchZaloWith(ctx, zaloSvc, zaloChat, botNames, msg, zaloService.FetchImage)
 			}
 			mux.Handle(path, zalobot.NewWebhookHandler(cfg.Zalo.WebhookSecret, dispatcher))
 			log.Printf("Zalo webhook mounted at %s", path)
@@ -361,6 +361,16 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 // assistant answers without a wake word; reminder commands keep priority.
 // Telegram is unaffected (it uses dispatchIncoming with addressed=false).
 func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message) {
+	dispatchZaloWith(ctx, svc, chatSvc, botNames, msg, nil)
+}
+
+// dispatchZaloWith also routes image messages to chat (never to the reminder
+// regex service). fetchImage downloads msg.Photo; nil ignores images.
+func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
+	if msg.Kind == "image" {
+		dispatchZaloImage(ctx, chatSvc, botNames, msg, fetchImage)
+		return
+	}
 	group := strings.EqualFold(msg.Chat.ChatType, "GROUP")
 	if group {
 		msg.Text = zalobot.StripLeadingMention(msg.Text, botNames)
@@ -398,4 +408,22 @@ func toIncomingMessage(msg *telebot.Message) reminder.IncomingMessage {
 		MessageID: msg.MessageID,
 		Text:      msg.Text,
 	}
+}
+
+func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
+	if chatSvc == nil || fetchImage == nil || msg.Photo == "" {
+		log.Printf("zalo dispatch: result=ignored reason=image_unavailable chat=%s", zalobot.MaskID(msg.Chat.ID))
+		return
+	}
+	caption := msg.Caption
+	if strings.EqualFold(msg.Chat.ChatType, "GROUP") {
+		caption = zalobot.StripLeadingMention(caption, botNames) // empty caption stays addressed
+	}
+	photo := msg.Photo
+	err := chatSvc.HandleImage(ctx, msg.Chat.ID, msg.From.ID, msg.From.DisplayName, 0, caption,
+		func(c context.Context) ([]byte, string, error) { return fetchImage(c, photo) })
+	if err != nil {
+		log.Printf("chat dispatch error (zalo image): %v", err)
+	}
+	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
 }

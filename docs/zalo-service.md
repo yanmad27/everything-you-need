@@ -160,3 +160,23 @@ When `llm_openai` is configured, the Zalo assistant answers through a bounded to
 `fetch_url`/`web_search` ran, and create requires reminder wording in the user's own text).
 Replies are sent with Zalo markdown. Each chat is limited to ~6 messages/minute (burst 3).
 Telegram is unchanged. No new config keys.
+
+### Images
+
+An image message (1:1 always; in groups the ones Zalo delivers to the bot) is answered by Pink
+in the same chat, never by the reminder regex service. The image is downloaded at dispatch via
+`zalobot.FetchImage` (SSRF-guarded, 15s, ≤5 MB, jpeg/png/webp/gif by magic bytes) and sent to the
+model as a `data:` URI. Question text = the caption; else the previous message in the chat if it
+was sent within 2 minutes and looks like a question; else Pink describes the image and asks what
+the user needs. Image turns allow tools with at most 2 rounds. History keeps only `[ảnh] <caption>`.
+The image URL (beyond host) and bytes are never logged or stored. Log lines:
+`chat image: kind=image bytes=… mime=… outcome=ok|fetch_error|too_large chat=…NNNN` plus
+`chat usage: …`.
+
+### Summary and accepted limits
+
+- Tools: prices, lunar, news, web search, link reading, due dates, reminders (see above); replies use Zalo markdown.
+- Rate limit: per chat ~6 messages/minute, burst 3; over-limit gets one polite notice per minute.
+- Limits: base64 image > 7 MB is refused with a reply (no LLM call); history is in memory only
+  (lost on restart, 10 messages per chat); `fetch_url` text goes through `r.jina.ai` first, with the
+  direct fallback fetch SSRF-guarded; the Anthropic fallback (no `llm_openai`) has no tools or vision.

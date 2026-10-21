@@ -62,6 +62,7 @@ type Service struct {
 	tools      Tools
 	toolImpls  []toolImpl
 	limiter    *limiter
+	last       map[string]lastText
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -179,14 +180,17 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 		log.Printf("chat: completion error (tools): %v", err)
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
 	}
-	if ms, ok := s.sender.(MarkdownSender); ok {
-		err = ms.SendMarkdown(ctx, chatID, reply)
-	} else {
-		err = s.sender.SendReply(ctx, chatID, replyToMsgID, reply)
-	}
-	if err != nil {
+	if err := s.sendTools(ctx, chatID, replyToMsgID, reply); err != nil {
 		return err
 	}
 	s.remember(chatID, prompt, reply)
+	s.noteUserText(chatID, prompt)
 	return nil
+}
+
+func (s *Service) sendTools(ctx context.Context, chatID string, replyToMsgID int64, reply string) error {
+	if ms, ok := s.sender.(MarkdownSender); ok {
+		return ms.SendMarkdown(ctx, chatID, reply)
+	}
+	return s.sender.SendReply(ctx, chatID, replyToMsgID, reply)
 }
