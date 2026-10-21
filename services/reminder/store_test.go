@@ -21,13 +21,13 @@ func newTestStore(t *testing.T) *Store {
 
 func sampleReminder(fireAt time.Time) Reminder {
 	return Reminder{
-		ChatID:         "-100123",
-		UserID:         "42",
-		UserName:       "Doan",
-		OriginalMsg:    "2h nữa nhắc tao ăn cơm",
-		OriginalMsgID:  777,
-		Task:           "ăn cơm",
-		FireAt:         fireAt.UTC(),
+		ChatID:        "-100123",
+		UserID:        "42",
+		UserName:      "Doan",
+		OriginalMsg:   "2h nữa nhắc tao ăn cơm",
+		OriginalMsgID: 777,
+		Task:          "ăn cơm",
+		FireAt:        fireAt.UTC(),
 	}
 }
 
