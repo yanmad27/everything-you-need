@@ -34,6 +34,13 @@ telegram:
   webhook_secret: "" # -> TELEGRAM_WEBHOOK_SECRET
   webhook_path: "/telegram-webhook"
 
+# Zalo Bot Platform (optional; same reminder + chat features as Telegram)
+zalo:
+  enabled: false # set true via ZALO_ENABLED
+  bot_token: "" # -> ZALO_BOT_TOKEN
+  webhook_secret: "" # -> ZALO_WEBHOOK_SECRET
+  webhook_path: "/zalo-webhook"
+
 reminder:
   enabled: true
   db_path: "data/reminders.db"
