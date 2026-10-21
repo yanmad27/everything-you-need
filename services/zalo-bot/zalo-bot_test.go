@@ -169,8 +169,8 @@ func TestWebhookParsesPrivateAndGroup(t *testing.T) {
 }
 
 func TestWebhookIgnoresNonTextAndBot(t *testing.T) {
-	image := `{"ok":true,"result":{"event_name":"message.image.received","message":{
-	 "from":{"id":"u1","is_bot":false},"chat":{"id":"u1","chat_type":"PRIVATE"},"photo":"http://x","message_id":"m3"}}}`
+	image := `{"ok":true,"result":{"event_name":"message.sticker.received","message":{
+	 "from":{"id":"u1","is_bot":false},"chat":{"id":"u1","chat_type":"PRIVATE"},"message_id":"m3"}}}`
 	bot := strings.Replace(privateText, `"is_bot":false`, `"is_bot":true`, 1)
 	for name, body := range map[string]string{"image": image, "bot": bot, "unsupported": `{"ok":true,"result":{"event_name":"message.unsupported.received"}}`} {
 		code, got := serve(t, "s", "s", body)
@@ -281,8 +281,8 @@ func TestWebhookGroupMentionDispatched(t *testing.T) {
 }
 
 func TestWebhookLogsDropReasonWithoutContent(t *testing.T) {
-	image := `{"ok":true,"result":{"event_name":"message.image.received","message":{
-	 "from":{"id":"u1","is_bot":false},"chat":{"id":"u1","chat_type":"PRIVATE"},"photo":"http://x","message_id":"m3"}}}`
+	image := `{"ok":true,"result":{"event_name":"message.sticker.received","message":{
+	 "from":{"id":"u1","is_bot":false},"chat":{"id":"u1","chat_type":"PRIVATE"},"message_id":"m3"}}}`
 	var got []Message
 	logs := captureLog(func() { _, got = serve(t, "topsecret", "topsecret", image) })
 	if len(got) != 0 || !strings.Contains(logs, "outcome=dropped:event_not_text") {
