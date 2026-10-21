@@ -190,9 +190,10 @@ func TestDispatchZaloGroupVersusPrivate(t *testing.T) {
 	if len(chatLLM.prompts) != before {
 		t.Error("private message without wake word must not be answered")
 	}
+	// private chats never strip a mention; only the wake word is removed
 	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "@Bot Pink EYN chào"))
-	if p := chatLLM.last(); !strings.Contains(p, "@Bot") && !strings.Contains(p, "chào") {
-		t.Errorf("private prompt = %q", p)
+	if p := chatLLM.last(); p != "@Bot EYN chào" {
+		t.Errorf("private prompt = %q, want %q", p, "@Bot EYN chào")
 	}
 	// group message that is only a mention is ignored
 	n := len(chatLLM.prompts)

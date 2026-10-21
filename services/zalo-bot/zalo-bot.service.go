@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/submodule-org/submodule.go/v2"
 )
@@ -93,25 +95,46 @@ func (z *ZaloBotService) BotNames(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-// StripLeadingMention removes a leading "@<bot name>" from a group message.
-// Rule: if the text starts with "@" followed (case-insensitively) by one of the
-// known bot names, that prefix is removed; otherwise, when names are unknown or
-// do not match, a single leading "@token" is removed. Never applied to 1:1
-// chats or Telegram.
+// maxLeadingMentions bounds how many leading @mentions are stripped.
+const maxLeadingMentions = 3
+
+// StripLeadingMention removes leading "@mention"s from a group message, up to
+// maxLeadingMentions of them (so "@Lan @Bot nhắc tao …" reaches the keyword).
+// For each: if the text starts with "@" + one of the known bot names
+// (case-insensitive) followed by a word boundary (end of text, whitespace or
+// punctuation), that prefix is removed; otherwise a single "@token" is removed.
+// Never applied to 1:1 chats or Telegram. Text without a leading "@" is
+// returned unchanged.
 func StripLeadingMention(text string, botNames []string) string {
 	t := strings.TrimSpace(text)
 	if !strings.HasPrefix(t, "@") {
 		return text
 	}
+	for i := 0; i < maxLeadingMentions && strings.HasPrefix(t, "@"); i++ {
+		t = stripOneMention(t, botNames)
+	}
+	return t
+}
+
+func stripOneMention(t string, botNames []string) string {
+	const seps = " \t\n,:;-"
 	lower := strings.ToLower(t)
 	for _, n := range botNames {
 		prefix := "@" + strings.ToLower(n)
-		if strings.HasPrefix(lower, prefix) {
-			return strings.TrimLeft(t[len(prefix):], " \t,:;-")
+		if !strings.HasPrefix(lower, prefix) || len(prefix) > len(t) {
+			continue
 		}
+		rest := t[len(prefix):]
+		if rest == "" {
+			return ""
+		}
+		if r, _ := utf8.DecodeRuneInString(rest); unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			continue // name continues ("@Pinky"): not our mention
+		}
+		return strings.TrimLeft(rest, seps)
 	}
 	if i := strings.IndexAny(t, " \t\n"); i > 0 {
-		return strings.TrimLeft(t[i:], " \t\n,:;-")
+		return strings.TrimLeft(t[i:], seps)
 	}
 	return ""
 }

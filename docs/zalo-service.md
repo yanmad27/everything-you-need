@@ -66,7 +66,7 @@ as the provider above is set.
   **Mention stripping (groups only):** a leading `@<bot name>` is removed before
   reminder matching and chat. At startup the bot calls `getMe` and accepts
   `@display_name` or `@account_name` (case-insensitive); if `getMe` fails or the
-  name does not match, a single leading `@token` is removed. Mentions elsewhere in
+  name does not match (or continues past the name, e.g. `@Pinky`), a single leading `@token` is removed. Up to 3 leading mentions are stripped (`@Lan @Bot nhắc tao …`). Mentions elsewhere in
   the text, and 1:1 or Telegram messages, are never touched. If Zalo ever starts delivering
   *all* group messages, the bot would answer every one of them; to restore
   wake-word behaviour in groups, change `dispatchIncoming(..., addressed)` in

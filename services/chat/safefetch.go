@@ -15,6 +15,7 @@ var errBlockedAddr = errors.New("blocked address")
 
 // extraBlocked lists special-purpose ranges not covered by the netip predicates.
 var extraBlocked = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),     // "this network"
 	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
 	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
 	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments

@@ -197,7 +197,7 @@ func TestWebhookDropsDuplicateDelivery(t *testing.T) {
 }
 
 func TestStripLeadingMention(t *testing.T) {
-	names := []string{"Bot Pink EYN", "bot.RXScwGjR"}
+	names := []string{"Bot Pink EYN", "bot.RXScwGjR", "Pink"}
 	cases := map[string]string{
 		"@Bot Pink EYN nhắc tao 5 phút nữa uống nước": "nhắc tao 5 phút nữa uống nước",
 		"@bot pink eyn, hôm nay thế nào":              "hôm nay thế nào",
