@@ -131,3 +131,21 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<TOKEN>/setWebhook" \
   would answer all of them with no throttling (see "Wake word and groups").
 - **Default model:** `llm_openai.model` defaults to `gpt-6-sol` (verified via `GET /v1/models` and a live completion on https://cpa.lowbit.link). Set `LLM_OPENAI_MODEL`
   explicitly to pin another one; there is no startup warning for the default.
+
+## Webhook diagnostics
+
+Every authenticated delivery logs one secret-free line (no text, no full ids):
+
+```
+zalo webhook: shape=wrapped keys=[ok,result] event="message.text.received" chat_type=PRIVATE text_len=5 is_bot=false chat=…4321 outcome=dispatched
+zalo dispatch: result=chat chat_type=PRIVATE chat=…4321
+```
+
+`outcome` is `dispatched` or `dropped:<reason>` (`unknown_shape`, `event_not_text`,
+`no_message`, `empty_text`, `no_chat_id`, `from_bot`, `duplicate`, `decode_error`).
+For `shape=unknown` or an undocumented event name an extra `structure=` line shows
+JSON keys with value types only. Both the documented `{ok,result:{...}}` shape and a
+bare `{event_name,message}` are accepted; ids may be strings or numbers. Each
+dispatch runs under a 90s context timeout (the LLM client
+times out at 60s, leaving time for the busy reply). Optional fields (`date`, `is_bot`,
+`text` type quirks) never cause a drop; logged keys/event/chat_type are quoted and capped.
