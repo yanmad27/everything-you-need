@@ -52,6 +52,11 @@ func main() {
 	}
 	if zaloService != nil {
 		zaloChat = buildChatService(cfg, zaloService, zaloCompleter, true)
+		var zaloRem *reminder.Service
+		if _, zOn := reminderPlatforms(cfg, teleService != nil, true, zaloCompleter != nil); zOn {
+			zaloRem = reminderService
+		}
+		enableZaloTools(zaloChat, zaloCompleter, buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem))
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -333,7 +338,7 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 		return "reminder"
 	}
 	if chatSvc != nil && addressed {
-		if err := chatSvc.HandleAddressed(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
+		if err := chatSvc.HandleAddressedAs(ctx, incoming.ChatID, incoming.UserID, incoming.UserName, incoming.MessageID, incoming.Text); err != nil {
 			log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
 		}
 		return "chat"

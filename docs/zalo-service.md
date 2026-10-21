@@ -149,3 +149,14 @@ bare `{event_name,message}` are accepted; ids may be strings or numbers. Each
 dispatch runs under a 90s context timeout (the LLM client
 times out at 60s, leaving time for the busy reply). Optional fields (`date`, `is_bot`,
 `text` type quirks) never cause a drop; logged keys/event/chat_type are quoted and capped.
+
+## Pink tools (Zalo only)
+
+When `llm_openai` is configured, the Zalo assistant answers through a bounded tool loop
+(≤4 rounds, ≤3 calls per round, 15s per tool, 60s overall): `get_prices`, `lunar_date`,
+`news_recent`, `web_search` (needs `news.serper_api_key`, independent of the news digest),
+`fetch_url` (SSRF-guarded via netguard), `due_dates`, `reminder_create/list/cancel`
+(scoped to the calling chat; create/cancel at most once per message, disabled once
+`fetch_url`/`web_search` ran, and create requires reminder wording in the user's own text).
+Replies are sent with Zalo markdown. Each chat is limited to ~6 messages/minute (burst 3).
+Telegram is unchanged. No new config keys.
