@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -50,9 +51,12 @@ type Data interface {
 // Config holds the owner credentials. Both Username and PasswordHash (bcrypt)
 // are required; otherwise New fails and the UI stays unmounted.
 type Config struct {
-	Username      string
-	PasswordHash  string
-	SessionSecret string // optional HMAC key for login CSRF tokens; random per process if empty
+	Username     string
+	PasswordHash string
+	// PasswordHashB64 is the bcrypt hash base64-encoded (no `$`, so compose
+	// interpolation cannot mangle it). Takes precedence over PasswordHash.
+	PasswordHashB64 string
+	SessionSecret   string // optional HMAC key for login CSRF tokens; random per process if empty
 }
 
 // Options tunes limits and the clock (tests).
@@ -107,11 +111,33 @@ func normalize(v string) string {
 	return v
 }
 
+// decodeB64 accepts URL-safe/standard base64, padded or raw.
+func decodeB64(v string) ([]byte, bool) {
+	for _, enc := range []*base64.Encoding{base64.RawURLEncoding, base64.URLEncoding, base64.StdEncoding, base64.RawStdEncoding} {
+		if b, err := enc.DecodeString(v); err == nil {
+			return b, true
+		}
+	}
+	return nil, false
+}
+
 // New builds the handler, or returns an error (admin must then stay disabled).
 func New(cfg Config, data Data, opt Options) (*Handler, error) {
 	cfg.Username = normalize(cfg.Username)
+	rawHash := strings.TrimSpace(cfg.PasswordHash)
 	cfg.PasswordHash = normalize(cfg.PasswordHash)
+	b64 := normalize(cfg.PasswordHashB64)
 	cfg.SessionSecret = normalize(cfg.SessionSecret)
+	source := "hash"
+	if b64 != "" {
+		source = "hash_b64"
+		rawHash = strings.TrimSpace(cfg.PasswordHashB64)
+		dec, ok := decodeB64(b64)
+		if !ok {
+			return nil, errors.New("admin: ADMIN_PASSWORD_HASH_B64 is not valid base64")
+		}
+		cfg.PasswordHash = normalize(string(dec))
+	}
 	if cfg.Username == "" || cfg.PasswordHash == "" {
 		return nil, errors.New("admin: username and password hash are required")
 	}
@@ -119,6 +145,10 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		return nil, errors.New("admin: no data source")
 	}
 	if err := ValidateHash(cfg.PasswordHash); err != nil {
+		// Shape only, never content.
+		log.Printf("admin: password hash rejected: source=%s length=%d has_$2_prefix=%t dollar_count=%d quoted=%t",
+			source, len(cfg.PasswordHash), strings.HasPrefix(cfg.PasswordHash, "$2"),
+			strings.Count(cfg.PasswordHash, "$"), rawHash != normalize(rawHash))
 		return nil, err
 	}
 	if opt.Now == nil {

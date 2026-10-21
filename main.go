@@ -465,15 +465,15 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 // fully configured (credentials + conversation store). No default password.
 func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int {
 	a := cfg.Admin
-	if a.Username == "" || a.PasswordHash == "" {
-		log.Printf("Admin UI disabled: admin.username and admin.password_hash are not both set")
+	if a.Username == "" || (a.PasswordHash == "" && a.PasswordHashB64 == "") {
+		log.Printf("Admin UI disabled: admin.username and admin.password_hash (or password_hash_b64) are not both set")
 		return nil
 	}
 	if store == nil {
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, SessionSecret: a.SessionSecret}, store, admin.Options{})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret}, store, admin.Options{})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

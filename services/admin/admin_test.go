@@ -1,11 +1,15 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -446,5 +450,61 @@ func TestEmptyAfterUnquote(t *testing.T) {
 	h, err := New(Config{Username: "owner", PasswordHash: testHash, SessionSecret: "''"}, fixture{}, Options{})
 	if err != nil || len(h.secret) != 32 {
 		t.Errorf("empty quoted secret should fall back to random: %v", err)
+	}
+}
+
+func TestHashB64Encodings(t *testing.T) {
+	for name, enc := range map[string]*base64.Encoding{
+		"rawurl": base64.RawURLEncoding, "url": base64.URLEncoding,
+		"std": base64.StdEncoding, "rawstd": base64.RawStdEncoding,
+	} {
+		h, err := New(Config{Username: "owner", PasswordHashB64: enc.EncodeToString([]byte(testHash))}, fixture{}, Options{})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if string(h.hash) != testHash {
+			t.Errorf("%s: wrong hash", name)
+		}
+	}
+}
+
+func TestHashB64Precedence(t *testing.T) {
+	h, err := New(Config{Username: "owner", PasswordHash: "garbage",
+		PasswordHashB64: base64.RawURLEncoding.EncodeToString([]byte(testHash))}, fixture{}, Options{})
+	if err != nil || string(h.hash) != testHash {
+		t.Fatalf("b64 should win: %v", err)
+	}
+}
+
+func TestHashB64Invalid(t *testing.T) {
+	h, err := New(Config{Username: "owner", PasswordHash: testHash, PasswordHashB64: "!!not base64!!"}, fixture{}, Options{})
+	if err == nil || h != nil || !strings.Contains(err.Error(), "ADMIN_PASSWORD_HASH_B64 is not valid base64") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRejectedHashLogsShapeOnly(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	planted := "$2a$12$PLANTEDsecretFRAGMENTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"[:40] // truncated: invalid
+	if _, err := New(Config{Username: "owner", PasswordHash: "'" + planted + "'"}, fixture{}, Options{}); err == nil {
+		t.Fatal("expected error")
+	}
+	out := buf.String()
+	for _, want := range []string{"source=hash", "length=40", "has_$2_prefix=true", "dollar_count=3", "quoted=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "PLANTED") || strings.Contains(out, planted) {
+		t.Errorf("log leaks hash content: %s", out)
+	}
+	buf.Reset()
+	b := base64.RawURLEncoding.EncodeToString([]byte(planted))
+	New(Config{Username: "owner", PasswordHashB64: b}, fixture{}, Options{})
+	if !strings.Contains(buf.String(), "source=hash_b64") || strings.Contains(buf.String(), b) || strings.Contains(buf.String(), "PLANTED") {
+		t.Errorf("b64 log: %s", buf.String())
 	}
 }

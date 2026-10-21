@@ -23,6 +23,7 @@ services:
       # Admin UI at /admin (off unless both username and bcrypt hash are set).
       - ADMIN_USERNAME=${ADMIN_USERNAME:-}
       - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-}
+      - ADMIN_PASSWORD_HASH_B64=${ADMIN_PASSWORD_HASH_B64:-}
       - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
       # Zalo conversation store for the admin UI (stored on the data volume).
       - CONVO_ENABLED=${CONVO_ENABLED:-true}
