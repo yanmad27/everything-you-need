@@ -149,3 +149,49 @@ bare `{event_name,message}` are accepted; ids may be strings or numbers. Each
 dispatch runs under a 90s context timeout (the LLM client
 times out at 60s, leaving time for the busy reply). Optional fields (`date`, `is_bot`,
 `text` type quirks) never cause a drop; logged keys/event/chat_type are quoted and capped.
+
+## Pink tools (Zalo only)
+
+When `llm_openai` is configured, the Zalo assistant answers through a bounded tool loop
+(≤4 rounds, ≤3 calls per round, 15s per tool, 45s loop deadline, then a forced tool-less answer): `get_prices`, `lunar_date`,
+`news_recent`, `web_search` (needs `news.serper_api_key`, independent of the news digest),
+`fetch_url` (SSRF-guarded via netguard), `due_dates`, `reminder_create/list/cancel`
+(scoped to the calling chat; create/cancel at most once per message, disabled once
+`fetch_url`/`web_search` ran, and create requires reminder wording in the user's own text).
+Replies are sent with Zalo markdown. Each chat is limited to ~6 messages/minute (burst 3).
+Telegram is unchanged. No new config keys.
+
+### Images
+
+An image message (1:1 always; in groups the ones Zalo delivers to the bot) is answered by Pink
+in the same chat, never by the reminder regex service. The image is downloaded at dispatch via
+`zalobot.FetchImage` (SSRF-guarded, 15s, ≤5 MB, jpeg/png/webp/gif by magic bytes) and sent to the
+model as a `data:` URI. Question text = the caption; else the previous message in the chat if it
+was sent within 2 minutes and looks like a question; else Pink describes the image and asks what
+the user needs. Image turns allow tools with at most 2 rounds. History keeps only `[ảnh] <caption>`.
+The image URL (beyond host) and bytes are never logged or stored. Log lines:
+`chat image: kind=image bytes=… mime=… outcome=ok|fetch_error|too_large chat=…NNNN` plus
+`chat usage: …`.
+
+### Summary and accepted limits
+
+- Tools: prices, lunar, news, web search, link reading, due dates, reminders (see above); replies use Zalo markdown.
+- Rate limit: per chat ~6 messages/minute, burst 3; over-limit gets one polite notice per minute.
+- Limits: base64 image > 7 MB is refused with a reply (no LLM call); history is in memory only
+  (lost on restart, 10 messages per chat); `fetch_url` text goes through `r.jina.ai` first, with the
+  direct fallback fetch SSRF-guarded; the Anthropic fallback (no `llm_openai`) has no tools or vision.
+
+### Safety rules (tools)
+
+- Tool output is wrapped as data (`<tool_result>`, closing tags neutralised case-insensitively).
+- Once untrusted content enters a message (`fetch_url`, `web_search`, `news_recent`, or an image),
+  `due_dates` and all `reminder_*` tools are disabled for the rest of that message.
+- `fetch_url` only reads links the user sent or that `web_search` returned in the same message.
+- `web_search`: ≤3 per message and a per-process budget of 200/hour.
+- `reminder_create` needs reminder wording in the user's own text; `reminder_cancel` needs cancel
+  wording (huỷ/xoá/bỏ/cancel/dừng nhắc). Only one successful create/cancel per message; refused or
+  invalid attempts do not count. Errors shown to the user are fixed Vietnamese messages.
+- `due_dates` exposes private task data, so it is registered only for chats listed in
+  `zalo.private_tool_chats` (env `ZALO_PRIVATE_TOOL_CHATS`, comma-separated chat ids). Empty = unavailable.
+- Outbound fetches (link reading, images) only reach ports 80/443 on public addresses (netguard).
+- Replies are sent on a fresh 10s context, so a slow/expired LLM turn still produces an answer.

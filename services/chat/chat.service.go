@@ -56,6 +56,15 @@ type Service struct {
 	mu        sync.Mutex
 	history   map[string][]llm.Message
 	safeFetch bool // block private/loopback targets when reading pasted links
+
+	// Tool-calling path (Zalo only); nil toolClient keeps the plain Complete path.
+	toolClient   llm.ToolCompleter
+	tools        Tools
+	toolImpls    []toolImpl
+	limiter      *limiter
+	last         map[string]lastText
+	searchBudget *searchBudget
+	dueChats     map[string]bool
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -92,22 +101,37 @@ func (s *Service) Handle(ctx context.Context, chatID string, replyToMsgID int64,
 // the bot (e.g. a Zalo group @mention/reply), so no wake word is required. A
 // wake word, if present, is still stripped.
 func (s *Service) HandleAddressed(ctx context.Context, chatID string, replyToMsgID int64, text string) error {
+	return s.HandleAddressedAs(ctx, chatID, "", "", replyToMsgID, text)
+}
+
+// HandleAddressedAs is HandleAddressed with the sender's identity, used to
+// attribute reminders created through tools.
+func (s *Service) HandleAddressedAs(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, text string) error {
 	prompt, ok := SplitWake(text)
 	if !ok {
 		prompt = strings.Join(strings.Fields(text), " ")
 	}
-	return s.respond(ctx, chatID, replyToMsgID, prompt)
+	return s.respondAs(ctx, chatID, userID, userName, replyToMsgID, prompt)
 }
 
 func (s *Service) respond(ctx context.Context, chatID string, replyToMsgID int64, prompt string) error {
+	return s.respondAs(ctx, chatID, "", "", replyToMsgID, prompt)
+}
+
+func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
 	if prompt == "" {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! 🩷 Bạn cần gì nào?")
 	}
 	if IsClearCommand(prompt) {
 		s.mu.Lock()
 		delete(s.history, chatID)
+		s.dropLast(chatID)
 		s.mu.Unlock()
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "🧹 Đã xoá ngữ cảnh. Mình bắt đầu lại từ đầu nhé!")
+	}
+
+	if s.toolClient != nil {
+		return s.respondWithTools(ctx, chatID, userID, userName, replyToMsgID, prompt)
 	}
 
 	reply, err := s.complete(ctx, chatID, prompt)
@@ -141,4 +165,39 @@ func (s *Service) remember(chatID, prompt, reply string) {
 		h = h[len(h)-maxHistory:]
 	}
 	s.history[chatID] = h
+}
+
+// respondWithTools is the Zalo path: rate limit, bounded tool loop, markdown
+// reply. History keeps only the text turns.
+func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
+	if ok, notice := s.limiter.allow(chatID); !ok {
+		log.Printf("chat: rate limited chat=%s notice=%t", maskChat(chatID), notice)
+		if notice {
+			return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé 🩷")
+		}
+		return nil
+	}
+	reply, err := s.completeTools(ctx, chatID, userID, userName, prompt)
+	reply = strings.TrimSpace(reply)
+	if err != nil || reply == "" {
+		log.Printf("chat: completion error (tools): %s chat=%s", errTag(err), maskChat(chatID))
+		rc, cancel := replyCtx(ctx)
+		defer cancel()
+		return s.sender.SendReply(rc, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
+	}
+	rc, cancel := replyCtx(ctx)
+	defer cancel()
+	if err := s.sendTools(rc, chatID, replyToMsgID, reply); err != nil {
+		return err
+	}
+	s.remember(chatID, prompt, reply)
+	s.noteUserText(chatID, userID, prompt)
+	return nil
+}
+
+func (s *Service) sendTools(ctx context.Context, chatID string, replyToMsgID int64, reply string) error {
+	if ms, ok := s.sender.(MarkdownSender); ok {
+		return ms.SendMarkdown(ctx, chatID, reply)
+	}
+	return s.sender.SendReply(ctx, chatID, replyToMsgID, reply)
 }

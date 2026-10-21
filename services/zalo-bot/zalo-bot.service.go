@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/netguard"
 	"fmt"
 	"io"
 	"log"
@@ -33,11 +34,15 @@ type ZaloBotService struct {
 	botToken string
 	baseURL  string
 	client   *http.Client
+	// imageClient downloads user images; SSRF-safe (tests may replace it).
+	imageClient *http.Client
 }
 
 type sendMessageRequest struct {
 	ChatID string `json:"chat_id"`
 	Text   string `json:"text"`
+
+	ParseMode string `json:"parse_mode,omitempty"`
 }
 
 type apiResponse struct {
@@ -67,6 +72,8 @@ func NewClient(botToken, baseURL string) *ZaloBotService {
 		botToken: botToken,
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		client:   &http.Client{Timeout: 30 * time.Second},
+
+		imageClient: netguard.NewSafeClient(imageTimeout),
 	}
 }
 
@@ -195,7 +202,7 @@ func (z *ZaloBotService) call(ctx context.Context, method string, payload any) (
 		return nil, fmt.Errorf("zalo API %s: unexpected response (HTTP %d)", method, resp.StatusCode)
 	}
 	if !out.Ok {
-		return nil, fmt.Errorf("zalo API %s error %d: %s", method, out.ErrorCode, z.redact(out.Description))
+		return nil, &apiError{fmt.Errorf("zalo API %s error %d: %s", method, out.ErrorCode, z.redact(out.Description))}
 	}
 	return out.Result, nil
 }
@@ -239,3 +246,8 @@ func splitText(text string, limit int) []string {
 	}
 	return out
 }
+
+// apiError marks a request the Zalo API answered with ok=false.
+type apiError struct{ error }
+
+func (e *apiError) Unwrap() error { return e.error }

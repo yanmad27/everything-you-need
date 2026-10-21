@@ -19,6 +19,7 @@ services:
       - ZALO_BOT_TOKEN=${ZALO_BOT_TOKEN}
       - ZALO_WEBHOOK_SECRET=${ZALO_WEBHOOK_SECRET}
       - ZALO_WEBHOOK_PATH=${ZALO_WEBHOOK_PATH:-/zalo-webhook}
+      - ZALO_PRIVATE_TOOL_CHATS=${ZALO_PRIVATE_TOOL_CHATS:-}
       # OpenAI-compatible LLM for the Zalo bot only (optional).
       - LLM_OPENAI_BASE_URL=${LLM_OPENAI_BASE_URL}
       - LLM_OPENAI_API_KEY=${LLM_OPENAI_API_KEY}

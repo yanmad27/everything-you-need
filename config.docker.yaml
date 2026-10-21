@@ -40,6 +40,7 @@ zalo:
   bot_token: "" # -> ZALO_BOT_TOKEN
   webhook_secret: "" # -> ZALO_WEBHOOK_SECRET
   webhook_path: "/zalo-webhook"
+  private_tool_chats: "" # -> ZALO_PRIVATE_TOOL_CHATS (comma-separated chat ids allowed to use the due_dates tool)
 
 # OpenAI-compatible LLM used ONLY by the Zalo bot (chat + reminder parsing).
 # Unused unless base_url and api_key are both set; Telegram stays on Claude.
