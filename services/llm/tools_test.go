@@ -85,7 +85,7 @@ func TestCompleteWithToolsParsesCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.ToolCalls) != 2 || r.ToolCalls[0].ID != "a" || r.ToolCalls[0].Arguments != `{"x":1}` || r.ToolCalls[1].ID != "call_2" || r.Text != "" || r.FinishReason != "tool_calls" {
+	if len(r.ToolCalls) != 2 || r.ToolCalls[0].ID != "a" || r.ToolCalls[0].Arguments != `{"x":1}` || !strings.HasPrefix(r.ToolCalls[1].ID, "call_") || r.Text != "" || r.FinishReason != "tool_calls" {
 		t.Fatalf("resp: %+v", r)
 	}
 	if len(r.Assistant.ToolCalls) != 2 {
@@ -142,5 +142,44 @@ func TestCompleteWithToolsMaxCompletionRetry(t *testing.T) {
 	}
 	if second["max_completion_tokens"] == nil || second["max_tokens"] != nil {
 		t.Fatalf("retry body: %v", second)
+	}
+}
+
+func TestCompleteWithToolsSyntheticIDsUnique(t *testing.T) {
+	c := toolServer(t, 200, `{"choices":[{"message":{"tool_calls":[{"function":{"name":"f","arguments":"{}"}},{"function":{"name":"g","arguments":"{}"}}]}}]}`, nil)
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		r, err := c.CompleteWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "x"}}, nil, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range r.ToolCalls {
+			if seen[tc.ID] {
+				t.Fatalf("duplicate id %s", tc.ID)
+			}
+			seen[tc.ID] = true
+		}
+	}
+}
+
+func TestCompleteWithToolsSkipsNonFunction(t *testing.T) {
+	c := toolServer(t, 200, `{"choices":[{"message":{"tool_calls":[{"id":"a","type":"custom","function":{"name":"x","arguments":"{}"}},{"id":"b","type":"function","function":{"name":"f","arguments":"{}"}},{"id":"c","function":{"name":"g","arguments":"{}"}}]}}]}`, nil)
+	r, err := c.CompleteWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "x"}}, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ToolCalls) != 2 || r.ToolCalls[0].ID != "b" || r.ToolCalls[1].ID != "c" {
+		t.Fatalf("calls: %+v", r.ToolCalls)
+	}
+}
+
+func TestCompleteWithToolsObjectArguments(t *testing.T) {
+	c := toolServer(t, 200, `{"choices":[{"message":{"tool_calls":[{"id":"a","type":"function","function":{"name":"f","arguments":{"x":1}}},{"id":"b","type":"function","function":{"name":"g","arguments":"{\"y\":2}"}}]}}]}`, nil)
+	r, err := c.CompleteWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "x"}}, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ToolCalls) != 2 || r.ToolCalls[0].Arguments != `{"x":1}` || r.ToolCalls[1].Arguments != `{"y":2}` {
+		t.Fatalf("calls: %+v", r.ToolCalls)
 	}
 }

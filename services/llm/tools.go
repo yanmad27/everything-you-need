@@ -10,7 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 )
+
+// synthCallSeq numbers synthetic tool-call ids so they are unique across
+// responses within the process.
+var synthCallSeq atomic.Uint64
 
 // ContentPart is one piece of multimodal user content.
 type ContentPart struct {
@@ -107,11 +112,36 @@ type oaiToolRequest struct {
 	MaxCompletionTokens int              `json:"max_completion_tokens,omitempty"`
 }
 
+// oaiRespToolCall tolerates servers that return arguments as a JSON object
+// instead of a JSON string, and entries with a non-function type.
+type oaiRespToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	} `json:"function"`
+}
+
+func (t oaiRespToolCall) arguments() string {
+	raw := bytes.TrimSpace(t.Function.Arguments)
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+	}
+	return string(raw)
+}
+
 type oaiToolResponse struct {
 	Choices []struct {
 		Message struct {
 			Content   *string       `json:"content"`
-			ToolCalls []oaiToolCall `json:"tool_calls"`
+			ToolCalls []oaiRespToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -237,12 +267,15 @@ func (c *OpenAIClient) doTools(ctx context.Context, msgs []oaiChatMessage, tools
 		text = strings.TrimSpace(*ch.Message.Content)
 	}
 	var calls []ToolCall
-	for i, tc := range ch.Message.ToolCalls {
+	for _, tc := range ch.Message.ToolCalls {
+		if tc.Type != "" && tc.Type != "function" {
+			continue
+		}
 		id := tc.ID
 		if id == "" {
-			id = fmt.Sprintf("call_%d", i+1)
+			id = fmt.Sprintf("call_%d", synthCallSeq.Add(1))
 		}
-		calls = append(calls, ToolCall{ID: id, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
+		calls = append(calls, ToolCall{ID: id, Name: tc.Function.Name, Arguments: tc.arguments()})
 	}
 	if text == "" && len(calls) == 0 {
 		return ToolResponse{}, resp.StatusCode, "", errors.New("openai-compat returned no text")
