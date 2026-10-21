@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -400,5 +401,37 @@ func TestRealStoreIntegrationEscapes(t *testing.T) {
 	}
 	if w := do(h, "GET", "/admin/chats?q=%25&from=bad", nil, ck); w.Code != 200 {
 		t.Errorf("chats: %d", w.Code)
+	}
+}
+
+func TestConfigValuesNormalised(t *testing.T) {
+	ok := map[string]Config{
+		"unquoted":    {Username: "owner", PasswordHash: testHash},
+		"single":      {Username: "owner", PasswordHash: "'" + testHash + "'"},
+		"double":      {Username: "owner", PasswordHash: `"` + testHash + `"`},
+		"spaces":      {Username: "owner", PasswordHash: "  '" + testHash + "' \n"},
+		"user quoted": {Username: " 'owner' ", PasswordHash: testHash, SessionSecret: ` "s3cret" `},
+	}
+	for name, c := range ok {
+		h, err := New(c, fixture{}, Options{})
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if string(h.hash) != testHash {
+			t.Errorf("%s: hash not normalised", name)
+		}
+		if h.user != sha256.Sum256([]byte("owner")) {
+			t.Errorf("%s: username not normalised", name)
+		}
+	}
+	h, _ := New(ok["user quoted"], fixture{}, Options{})
+	if string(h.secret) != "s3cret" {
+		t.Errorf("secret not normalised")
+	}
+	for name, hash := range map[string]string{"leading only": "'" + testHash, "mismatched": "'" + testHash + `"`} {
+		if h, err := New(Config{Username: "owner", PasswordHash: hash}, fixture{}, Options{}); err == nil || h != nil {
+			t.Errorf("%s: expected error", name)
+		}
 	}
 }
