@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -228,5 +230,84 @@ func TestBotNamesFromGetMe(t *testing.T) {
 	names, err := NewClient(fakeToken, srv.URL).BotNames(context.Background())
 	if err != nil || len(names) != 2 || names[0] != "Bot Pink" || names[1] != "bot.X" {
 		t.Errorf("names=%v err=%v", names, err)
+	}
+}
+
+// captureLog redirects the std logger for the duration of fn.
+func captureLog(fn func()) string {
+	var buf strings.Builder
+	var mu sync.Mutex
+	log.SetOutput(writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return buf.Write(p) }))
+	defer log.SetOutput(os.Stderr)
+	fn()
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	return buf.String()
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+func TestWebhookAcceptsBareAndWrapped(t *testing.T) {
+	bare := `{"event_name":"message.text.received","message":{"from":{"id":123456,"display_name":"Ted","is_bot":false},
+	 "chat":{"id":987654321,"chat_type":"private"},"text":"hello","message_id":77}}`
+	var code int
+	var got []Message
+	logs := captureLog(func() { code, got = serve(t, "s", "s", bare) })
+	if code != 200 || len(got) != 1 || got[0].Chat.ID != "987654321" || got[0].From.ID != "123456" || got[0].MessageID != "77" {
+		t.Fatalf("bare: code=%d got=%+v", code, got)
+	}
+	if !strings.Contains(logs, "shape=bare") || !strings.Contains(logs, "outcome=dispatched") || !strings.Contains(logs, "chat=…4321") ||
+		!strings.Contains(logs, "chat_type=PRIVATE") || !strings.Contains(logs, "text_len=5") {
+		t.Errorf("bare log: %q", logs)
+	}
+	logs = captureLog(func() { _, got = serve(t, "s", "s", privateText) })
+	if len(got) != 1 || !strings.Contains(logs, "shape=wrapped") || !strings.Contains(logs, "outcome=dispatched") {
+		t.Errorf("wrapped: got=%+v log=%q", got, logs)
+	}
+}
+
+func TestWebhookGroupMentionDispatched(t *testing.T) {
+	body := strings.Replace(groupText, "pink ơi", "@Bot Pink EYN nhắc tao", 1)
+	var got []Message
+	logs := captureLog(func() { _, got = serve(t, "s", "s", body) })
+	if len(got) != 1 || !strings.HasPrefix(got[0].Text, "@Bot Pink") || !strings.Contains(logs, "chat_type=GROUP") {
+		t.Errorf("group: got=%+v log=%q", got, logs)
+	}
+}
+
+func TestWebhookLogsDropReasonWithoutContent(t *testing.T) {
+	image := `{"ok":true,"result":{"event_name":"message.image.received","message":{
+	 "from":{"id":"u1","is_bot":false},"chat":{"id":"u1","chat_type":"PRIVATE"},"photo":"http://x","message_id":"m3"}}}`
+	var got []Message
+	logs := captureLog(func() { _, got = serve(t, "topsecret", "topsecret", image) })
+	if len(got) != 0 || !strings.Contains(logs, "outcome=dropped:event_not_text") {
+		t.Errorf("got=%+v log=%q", got, logs)
+	}
+	if strings.Contains(logs, "topsecret") || strings.Contains(logs, "structure=") {
+		t.Errorf("known non-text event must not dump structure / leak secret: %q", logs)
+	}
+}
+
+func TestWebhookUnknownShapeLogsTypesOnly(t *testing.T) {
+	body := `{"weird":{"who":"SECRETVALUE-abc","n":42,"flag":true},"list":["PLANTEDTEXT"]}`
+	var got []Message
+	logs := captureLog(func() { _, got = serve(t, "hdr-secret", "hdr-secret", body) })
+	if len(got) != 0 || !strings.Contains(logs, "shape=unknown") || !strings.Contains(logs, "outcome=dropped:unknown_shape") ||
+		!strings.Contains(logs, "structure={list:[string],weird:{flag:bool,n:number,who:string}}") {
+		t.Errorf("got=%+v log=%q", got, logs)
+	}
+	for _, leak := range []string{"SECRETVALUE", "PLANTEDTEXT", "hdr-secret", "42"} {
+		if strings.Contains(logs, leak) {
+			t.Errorf("log leaks %q: %q", leak, logs)
+		}
+	}
+	// unrecognised event name also dumps structure, still without values
+	odd := `{"ok":true,"result":{"event_name":"message.weird.received","message":{"text":"PLANTEDTEXT","chat":{"id":"c1"}}}}`
+	logs = captureLog(func() { serve(t, "s", "s", odd) })
+	if !strings.Contains(logs, "structure=") || strings.Contains(logs, "PLANTEDTEXT") {
+		t.Errorf("odd event log: %q", logs)
 	}
 }

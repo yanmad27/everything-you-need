@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -324,26 +325,35 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 // handles wake-word messages that aren't reminder commands. addressed means the
 // platform only delivers messages aimed at the bot (Zalo group @mention/reply),
 // so the chat assistant answers without requiring a wake word.
-func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage, addressed bool) {
+func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage, addressed bool) string {
 	if svc != nil && svc.Matches(incoming.Text) {
 		if err := svc.HandleIncoming(ctx, incoming); err != nil {
 			log.Printf("webhook dispatch error (%s): %v", incoming.Platform, err)
 		}
-		return
+		return "reminder"
 	}
 	if chatSvc != nil && addressed {
 		if err := chatSvc.HandleAddressed(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
 			log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
 		}
-		return
+		return "chat"
 	}
 	if chatSvc != nil {
 		if _, ok := chat.SplitWake(incoming.Text); ok {
 			if err := chatSvc.Handle(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
 				log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
 			}
+			return "chat"
 		}
 	}
+	return "ignored"
+}
+
+func lastN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 // dispatchZalo normalizes a Zalo message and routes it. Every Zalo message is
@@ -353,14 +363,16 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 // assistant answers without a wake word; reminder commands keep priority.
 // Telegram is unaffected (it uses dispatchIncoming with addressed=false).
 func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message) {
-	group := msg.Chat.ChatType == "GROUP"
+	group := strings.EqualFold(msg.Chat.ChatType, "GROUP")
 	if group {
 		msg.Text = zalobot.StripLeadingMention(msg.Text, botNames)
 		if msg.Text == "" {
+			log.Printf("zalo dispatch: result=ignored reason=group_mention_only chat=…%s", lastN(msg.Chat.ID, 4))
 			return
 		}
 	}
-	dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), true)
+	result := dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), true)
+	log.Printf("zalo dispatch: result=%s chat_type=%s chat=…%s", result, msg.Chat.ChatType, lastN(msg.Chat.ID, 4))
 }
 
 func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {
