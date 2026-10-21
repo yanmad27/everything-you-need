@@ -92,7 +92,7 @@ const (
 	defMaxRounds    = 4
 	defMaxCalls     = 3
 	defToolTimeout  = 15 * time.Second
-	defLoopDeadline = 60 * time.Second
+	defLoopDeadline = 45 * time.Second
 	defMaxResult    = 4000
 	defRateBurst    = 3
 	defRatePerMin   = 6.0
