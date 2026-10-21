@@ -6,12 +6,16 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/llm"
 	"everything-you-need/m/services/reminder"
+	telebot "everything-you-need/m/services/tele-bot"
 	zalobot "everything-you-need/m/services/zalo-bot"
 )
 
@@ -112,8 +116,124 @@ func TestZaloWebhookRefusedForBadSecretLength(t *testing.T) {
 	chatSvc := chat.NewServiceWithCompleter(nil, &captureSender{})
 	for _, secret := range []string{"", "short", strings.Repeat("x", 257)} {
 		cfg.Zalo.WebhookSecret = secret
-		if srv := startWebhookServer(cfg, nil, nil, nil, zalo, chatSvc); srv != nil {
+		if srv := startWebhookServer(cfg, nil, nil, nil, nil, zalo, chatSvc); srv != nil {
 			t.Errorf("secret len %d: webhook must not be mounted", len(secret))
 		}
+	}
+}
+
+type recCompleter struct {
+	mu      sync.Mutex
+	prompts []string
+	reply   string
+}
+
+func (r *recCompleter) Complete(_ context.Context, _ string, msgs []llm.Message, _ int) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.prompts = append(r.prompts, msgs[len(msgs)-1].Content)
+	return r.reply, nil
+}
+
+func (r *recCompleter) last() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.prompts) == 0 {
+		return ""
+	}
+	return r.prompts[len(r.prompts)-1]
+}
+
+func zaloMsg(chatType, text string) zalobot.Message {
+	return zalobot.Message{
+		MessageID: "m", Text: text,
+		From: zalobot.User{ID: "u1", DisplayName: "Lan"},
+		Chat: zalobot.Chat{ID: "c1", ChatType: chatType},
+	}
+}
+
+func TestDispatchZaloGroupVersusPrivate(t *testing.T) {
+	ctx := context.Background()
+	names := []string{"Bot Pink EYN"}
+	parse := &recCompleter{reply: `{"ok":true,"when":"2026-10-21T20:00:00+07:00","task":"uống nước"}`}
+	chatLLM := &recCompleter{reply: "chào!"}
+	zl := &captureSender{}
+
+	store, err := reminder.OpenStore(filepath.Join(t.TempDir(), "r.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	svc := reminder.NewService(store, nil, nil, nil).
+		WithSender(reminder.PlatformZalo, zl).
+		WithParser(reminder.PlatformZalo, reminder.NewLLMParser(parse))
+	chatSvc := chat.NewServiceWithCompleter(chatLLM, zl)
+
+	// group: @mention + reminder keyword -> reminder created, mention not seen by the parser
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("GROUP", "@Bot Pink EYN nhắc tao 5 phút nữa uống nước"))
+	if p := parse.last(); !strings.Contains(p, "MESSAGE=nhắc tao 5 phút nữa uống nước") || strings.Contains(p, "@") {
+		t.Errorf("parser saw %q", p)
+	}
+	if list, _ := store.ListForPlatformChat(ctx, reminder.PlatformZalo, "c1"); len(list) != 1 {
+		t.Errorf("reminders = %d, want 1", len(list))
+	}
+
+	// group question without wake word -> answered, mention stripped
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("GROUP", "@Bot Pink EYN hôm nay trời sao"))
+	if p := chatLLM.last(); p != "hôm nay trời sao" {
+		t.Errorf("chat prompt = %q", p)
+	}
+
+	// private: no wake word -> silent, mention-like text is NOT stripped
+	before := len(chatLLM.prompts)
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "hôm nay trời sao"))
+	if len(chatLLM.prompts) != before {
+		t.Error("private message without wake word must not be answered")
+	}
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "@Bot Pink EYN chào"))
+	if p := chatLLM.last(); !strings.Contains(p, "@Bot") && !strings.Contains(p, "chào") {
+		t.Errorf("private prompt = %q", p)
+	}
+	// group message that is only a mention is ignored
+	n := len(chatLLM.prompts)
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("GROUP", "@Bot Pink EYN"))
+	if len(chatLLM.prompts) != n {
+		t.Error("mention-only group message must be ignored")
+	}
+}
+
+func TestReminderForZaloWhenTelegramKeyEmpty(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{Reminder: config.ReminderConfig{Enabled: true, DBPath: filepath.Join(t.TempDir(), "r.db")}} // no anthropic key
+
+	if tOn, zOn := reminderPlatforms(cfg, true, true, true); tOn || !zOn {
+		t.Fatalf("key empty + provider: tele=%v zalo=%v", tOn, zOn)
+	}
+	if tOn, zOn := reminderPlatforms(cfg, true, true, false); tOn || zOn {
+		t.Fatalf("key empty + no provider: tele=%v zalo=%v", tOn, zOn)
+	}
+	cfg.Reminder.OpenAIAPIKey = "k"
+	if tOn, zOn := reminderPlatforms(cfg, true, true, false); !tOn || !zOn {
+		t.Fatalf("key set: tele=%v zalo=%v", tOn, zOn)
+	}
+	cfg.Reminder.OpenAIAPIKey = ""
+
+	// Real constructor: Telegram bot present, key empty, Zalo provider set.
+	svc, store := buildReminderService(cfg, &telebot.TeleBotService{}, zalobot.NewClient("t", "http://127.0.0.1:1"), &recCompleter{reply: "{}"})
+	if svc == nil {
+		t.Fatal("reminder service must be available for Zalo")
+	}
+	defer store.Close()
+	// A telegram row stays untouched (no telegram sender), exactly as when the service was off.
+	id, _ := store.Create(ctx, reminder.Reminder{ChatID: "tg", UserName: "A", Task: "t", FireAt: time.Now().Add(-time.Hour)})
+	if err := svc.Sweep(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := store.GetByID(ctx, id); r.FiredAt != nil || r.Attempts != 0 {
+		t.Errorf("telegram reminder touched: %+v", r)
+	}
+	// And with no provider and no key the service stays disabled, as on main.
+	if s2, _ := buildReminderService(cfg, &telebot.TeleBotService{}, nil, nil); s2 != nil {
+		t.Error("telegram-only with empty key must stay disabled")
 	}
 }

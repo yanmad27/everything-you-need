@@ -195,3 +195,38 @@ func TestWebhookDropsDuplicateDelivery(t *testing.T) {
 		t.Errorf("dispatched %d times, want 1", n)
 	}
 }
+
+func TestStripLeadingMention(t *testing.T) {
+	names := []string{"Bot Pink EYN", "bot.RXScwGjR"}
+	cases := map[string]string{
+		"@Bot Pink EYN nhắc tao 5 phút nữa uống nước": "nhắc tao 5 phút nữa uống nước",
+		"@bot pink eyn, hôm nay thế nào":              "hôm nay thế nào",
+		"@bot.RXScwGjR /reminders":                    "/reminders",
+		"@SomeoneElse nhắc tao họp":                   "nhắc tao họp",               // unknown name: single token stripped
+		"nhắc tao họp @Bot Pink EYN":                  "nhắc tao họp @Bot Pink EYN", // only leading
+		"không có mention":                            "không có mention",
+		"@Bot Pink EYN":                               "",
+	}
+	for in, want := range cases {
+		if got := StripLeadingMention(in, names); got != want {
+			t.Errorf("%q -> %q, want %q", in, got, want)
+		}
+	}
+	if got := StripLeadingMention("@Bot Pink EYN hi", nil); got != "Pink EYN hi" {
+		t.Errorf("unknown names fallback: %q", got)
+	}
+}
+
+func TestBotNamesFromGetMe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getMe") {
+			t.Errorf("path %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"id":"1","account_name":"bot.X","display_name":"Bot Pink"}}`))
+	}))
+	defer srv.Close()
+	names, err := NewClient(fakeToken, srv.URL).BotNames(context.Background())
+	if err != nil || len(names) != 2 || names[0] != "Bot Pink" || names[1] != "bot.X" {
+		t.Errorf("names=%v err=%v", names, err)
+	}
+}

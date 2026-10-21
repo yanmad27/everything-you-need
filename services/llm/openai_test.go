@@ -103,3 +103,18 @@ func TestOpenAIClientRetriesWithMaxCompletionTokens(t *testing.T) {
 		t.Errorf("retry body = %v", bodies[1])
 	}
 }
+
+func TestMaxTokensUnsupportedMatch(t *testing.T) {
+	yes := []string{"Unsupported parameter: 'max_tokens'", "MAX_TOKENS is not supported with this model", "use max_completion_tokens instead of max_tokens"}
+	no := []string{"max_tokens must be positive", "invalid model", "", "unsupported parameter: temperature"}
+	for _, d := range yes {
+		if !maxTokensUnsupported(d) {
+			t.Errorf("%q should retry", d)
+		}
+	}
+	for _, d := range no {
+		if maxTokensUnsupported(d) {
+			t.Errorf("%q should not retry", d)
+		}
+	}
+}

@@ -59,7 +59,15 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	webhookServer := startWebhookServer(cfg, reminderService, teleService, teleChat, zaloService, zaloChat)
+	teleOn, zaloOn := reminderPlatforms(cfg, teleService != nil, zaloService != nil, zaloCompleter != nil)
+	var teleSvc, zaloSvc *reminder.Service
+	if teleOn {
+		teleSvc = reminderService
+	}
+	if zaloOn {
+		zaloSvc = reminderService
+	}
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -87,13 +95,9 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		log.Printf("Reminder service disabled in config")
 		return nil, nil
 	}
-	if teleService == nil && zaloService == nil {
-		log.Printf("Reminder service disabled: neither telegram nor zalo service available")
-		return nil, nil
-	}
-	// The Anthropic key is only optional when Zalo (with its own provider) is the sole platform.
-	if cfg.Reminder.OpenAIAPIKey == "" && !(teleService == nil && zaloLLM != nil) {
-		log.Printf("Reminder service disabled: reminder.openai_api_key is empty")
+	teleOn, zaloOn := reminderPlatforms(cfg, teleService != nil, zaloService != nil, zaloLLM != nil)
+	if !teleOn && !zaloOn {
+		log.Printf("Reminder service disabled: no platform has a bot and an LLM key (telegram needs reminder.openai_api_key; zalo needs llm_openai or reminder.openai_api_key)")
 		return nil, nil
 	}
 
@@ -104,19 +108,33 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 	}
 
 	var teleSender, zaloSender reminder.Sender // stay nil interfaces when unconfigured
-	if teleService != nil {
+	if teleOn {                                // no Telegram sender => Telegram reminders stay off, exactly as before
 		teleSender = teleService
 	}
-	if zaloService != nil {
+	if zaloOn {
 		zaloSender = zaloService
 	}
 	svc := newReminderService(cfg, store, teleSender, zaloSender, zaloLLM)
-	if teleService != nil {
-		log.Printf("Reminder service initialized (db=%s, telegram model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
-	} else {
-		log.Printf("Reminder service initialized (db=%s, zalo provider model=%s)", cfg.Reminder.DBPath, cfg.LLMOpenAI.Model)
+	if teleOn {
+		log.Printf("Reminder service: telegram parser model=%s", cfg.Reminder.OpenAIModel)
 	}
+	if zaloOn {
+		if zaloLLM != nil {
+			log.Printf("Reminder service: zalo parser uses OpenAI-compatible provider (model=%s)", cfg.LLMOpenAI.Model)
+		} else {
+			log.Printf("Reminder service: zalo parser falls back to Anthropic (model=%s)", cfg.Reminder.OpenAIModel)
+		}
+	}
+	log.Printf("Reminder service initialized (db=%s)", cfg.Reminder.DBPath)
 	return svc, store
+}
+
+// reminderPlatforms says which platforms get reminders. Telegram keeps its
+// historical requirement (reminder.openai_api_key); Zalo needs either its own
+// OpenAI-compatible provider or that same Anthropic key as fallback.
+func reminderPlatforms(cfg *config.Config, haveTele, haveZalo, haveZaloLLM bool) (teleOn, zaloOn bool) {
+	hasKey := cfg.Reminder.OpenAIAPIKey != ""
+	return haveTele && hasKey, haveZalo && (haveZaloLLM || hasKey)
 }
 
 // newReminderService wires the Telegram path (Anthropic parser, default) and the
@@ -225,13 +243,13 @@ const (
 	maxZaloWebhookSecret = 256
 )
 
-func startWebhookServer(cfg *config.Config, svc *reminder.Service,
+func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
-	zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
+	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
 	mux := http.NewServeMux()
 	mounted := 0
 
-	if teleService != nil && (svc != nil || teleChat != nil) {
+	if teleService != nil && (teleSvc != nil || teleChat != nil) {
 		if cfg.Telegram.WebhookSecret == "" {
 			log.Printf("Telegram webhook disabled: telegram.webhook_secret is empty")
 		} else {
@@ -244,7 +262,7 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 				if msg == nil || msg.Text == "" {
 					return
 				}
-				dispatchIncoming(ctx, svc, teleChat, toIncomingMessage(msg), false)
+				dispatchIncoming(ctx, teleSvc, teleChat, toIncomingMessage(msg), false)
 			}
 			mux.Handle(path, telebot.NewWebhookHandler(cfg.Telegram.WebhookSecret, dispatcher))
 			log.Printf("Telegram webhook mounted at %s", path)
@@ -252,7 +270,7 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 		}
 	}
 
-	if zaloService != nil && (svc != nil || zaloChat != nil) {
+	if zaloService != nil && (zaloSvc != nil || zaloChat != nil) {
 		if n := len(cfg.Zalo.WebhookSecret); n < minZaloWebhookSecret || n > maxZaloWebhookSecret {
 			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-%d characters (got %d)", minZaloWebhookSecret, maxZaloWebhookSecret, n)
 		} else {
@@ -260,8 +278,16 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 			if path == "" {
 				path = "/zalo-webhook"
 			}
+			var botNames []string
+			nameCtx, cancelName := context.WithTimeout(context.Background(), 10*time.Second)
+			if names, err := zaloService.BotNames(nameCtx); err != nil {
+				log.Printf("Zalo getMe failed (%v); group @mentions fall back to stripping one leading token", err)
+			} else {
+				botNames = names
+			}
+			cancelName()
 			dispatcher := func(ctx context.Context, msg zalobot.Message) {
-				dispatchIncoming(ctx, svc, zaloChat, toZaloIncomingMessage(msg), msg.Chat.ChatType == "GROUP")
+				dispatchZalo(ctx, zaloSvc, zaloChat, botNames, msg)
 			}
 			mux.Handle(path, zalobot.NewWebhookHandler(cfg.Zalo.WebhookSecret, dispatcher))
 			log.Printf("Zalo webhook mounted at %s", path)
@@ -318,6 +344,21 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 			}
 		}
 	}
+}
+
+// dispatchZalo normalizes a Zalo message and routes it. In groups Zalo only
+// delivers messages that @mention the bot or reply to it, so the leading
+// mention is stripped (before reminder matching and chat) and the chat
+// assistant is treated as addressed. 1:1 chats keep the wake-word rule.
+func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message) {
+	group := msg.Chat.ChatType == "GROUP"
+	if group {
+		msg.Text = zalobot.StripLeadingMention(msg.Text, botNames)
+		if msg.Text == "" {
+			return
+		}
+	}
+	dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), group)
 }
 
 func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {

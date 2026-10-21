@@ -84,7 +84,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, system string, messages []M
 		return text, nil
 	}
 	// Some models reject max_tokens; retry once with max_completion_tokens.
-	if status == http.StatusBadRequest && strings.Contains(detail, "max_tokens") {
+	if status == http.StatusBadRequest && maxTokensUnsupported(detail) {
 		text, _, _, err = c.do(ctx, msgs, maxTokens, true)
 		return text, err
 	}
@@ -155,4 +155,15 @@ func (c *OpenAIClient) redact(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, c.apiKey, "<redacted>")
+}
+
+// maxTokensUnsupported reports whether a 400 message says the max_tokens
+// parameter is not accepted (and so max_completion_tokens should be used).
+func maxTokensUnsupported(detail string) bool {
+	d := strings.ToLower(detail)
+	if !strings.Contains(d, "max_tokens") {
+		return false
+	}
+	return strings.Contains(d, "unsupported") || strings.Contains(d, "not supported") ||
+		strings.Contains(d, "max_completion_tokens")
 }

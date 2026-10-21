@@ -62,7 +62,12 @@ as the provider above is set.
   to the bot. The assistant therefore answers **without** needing a wake word
   (a wake word, if present, is stripped). Reminder commands still take
   priority. This is implemented as a separate `HandleAddressed` path in the chat
-  service; the Telegram trigger logic is untouched. If Zalo ever starts delivering
+  service; the Telegram trigger logic is untouched.
+  **Mention stripping (groups only):** a leading `@<bot name>` is removed before
+  reminder matching and chat. At startup the bot calls `getMe` and accepts
+  `@display_name` or `@account_name` (case-insensitive); if `getMe` fails or the
+  name does not match, a single leading `@token` is removed. Mentions elsewhere in
+  the text, and 1:1 or Telegram messages, are never touched. If Zalo ever starts delivering
   *all* group messages, the bot would answer every one of them; to restore
   wake-word behaviour in groups, change `dispatchIncoming(..., addressed)` in
   `main.go` to pass `false` for Zalo groups.
@@ -70,6 +75,14 @@ as the provider above is set.
 **Link reading:** the Zalo chat assistant only fetches public http/https links
 (loopback, private, link-local, CGNAT, multicast and unspecified addresses are
 refused at dial time, including redirects). Telegram's link reader is unchanged.
+
+### Reminders availability
+
+Telegram reminders still require `reminder.openai_api_key` (unchanged). Zalo
+reminders need either `llm_openai` (base URL + key) or that same Anthropic key
+as fallback. With Telegram on, the Anthropic key empty and `llm_openai` set,
+only Zalo reminders are active; Telegram reminders stay off exactly as before
+(existing Telegram rows stay pending, untouched).
 
 ## Enabling in Dokploy
 
@@ -105,3 +118,14 @@ curl -X POST "https://bot-api.zaloplatforms.com/bot<TOKEN>/setWebhook" \
 | Non-text | ignored | `message.image/sticker/voice/unsupported.received` | Ignored |
 | Multi-chunk replies | single message | each 2000-char chunk is its own `sendMessage` | If chunk N fails, the reminder sweep retries the whole send, so earlier chunks may be re-sent (accepted) |
 | Channel broadcasts (gold, news…) | yes | not in scope | Stay on Telegram |
+
+## Accepted gaps
+
+- **Multi-chunk resend:** a reply longer than 2000 characters is sent as several
+  messages; if a later chunk fails, the reminder sweep retries the whole message
+  and earlier chunks may be sent again.
+- **No per-chat rate limit:** if Zalo ever delivered all group messages, the bot
+  would answer all of them with no throttling (see "Wake word and groups").
+- **Default model:** `llm_openai.model` defaults to `codex-auto-review` (the only
+  model with "codex" in its id on the tested endpoint). Set `LLM_OPENAI_MODEL`
+  explicitly to pin another one; there is no startup warning for the default.

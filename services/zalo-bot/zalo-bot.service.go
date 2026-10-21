@@ -39,9 +39,10 @@ type sendMessageRequest struct {
 }
 
 type apiResponse struct {
-	Ok          bool   `json:"ok"`
-	Description string `json:"description,omitempty"`
-	ErrorCode   int    `json:"error_code,omitempty"`
+	Ok          bool            `json:"ok"`
+	Description string          `json:"description,omitempty"`
+	ErrorCode   int             `json:"error_code,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
 }
 
 func NewZaloBotService(config *config.Config) *ZaloBotService {
@@ -69,6 +70,52 @@ func NewClient(botToken, baseURL string) *ZaloBotService {
 
 var ZaloBotServiceMod = submodule.Make[*ZaloBotService](NewZaloBotService, config.ConfigMod)
 
+// BotNames returns the names a group @mention of this bot may use (display
+// name, account name) according to getMe.
+func (z *ZaloBotService) BotNames(ctx context.Context) ([]string, error) {
+	raw, err := z.call(ctx, "getMe", struct{}{})
+	if err != nil {
+		return nil, err
+	}
+	var me struct {
+		DisplayName string `json:"display_name"`
+		AccountName string `json:"account_name"`
+	}
+	if err := json.Unmarshal(raw, &me); err != nil {
+		return nil, fmt.Errorf("zalo API getMe: unexpected result")
+	}
+	var names []string
+	for _, n := range []string{me.DisplayName, me.AccountName} {
+		if n != "" {
+			names = append(names, n)
+		}
+	}
+	return names, nil
+}
+
+// StripLeadingMention removes a leading "@<bot name>" from a group message.
+// Rule: if the text starts with "@" followed (case-insensitively) by one of the
+// known bot names, that prefix is removed; otherwise, when names are unknown or
+// do not match, a single leading "@token" is removed. Never applied to 1:1
+// chats or Telegram.
+func StripLeadingMention(text string, botNames []string) string {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "@") {
+		return text
+	}
+	lower := strings.ToLower(t)
+	for _, n := range botNames {
+		prefix := "@" + strings.ToLower(n)
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimLeft(t[len(prefix):], " \t,:;-")
+		}
+	}
+	if i := strings.IndexAny(t, " \t\n"); i > 0 {
+		return strings.TrimLeft(t[i:], " \t\n,:;-")
+	}
+	return ""
+}
+
 // SendMessage satisfies the reminder.Sender interface.
 func (z *ZaloBotService) SendMessage(ctx context.Context, chatID, text string) error {
 	return z.send(ctx, chatID, text)
@@ -83,7 +130,7 @@ func (z *ZaloBotService) SendReply(ctx context.Context, chatID string, _ int64, 
 
 func (z *ZaloBotService) send(ctx context.Context, chatID, text string) error {
 	for _, chunk := range splitText(text, maxTextLen) {
-		if err := z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: chunk}); err != nil {
+		if _, err := z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: chunk}); err != nil {
 			return err
 		}
 	}
@@ -92,16 +139,16 @@ func (z *ZaloBotService) send(ctx context.Context, chatID, text string) error {
 
 // call POSTs a JSON payload to a bot API method. The token lives in the URL
 // path, so no error or log line produced here may contain the URL.
-func (z *ZaloBotService) call(ctx context.Context, method string, payload any) error {
+func (z *ZaloBotService) call(ctx context.Context, method string, payload any) (json.RawMessage, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return nil, fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
 	endpoint := fmt.Sprintf("%s/bot%s/%s", z.baseURL, z.botToken, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %s", z.redact(err.Error()))
+		return nil, fmt.Errorf("failed to create request: %s", z.redact(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -111,23 +158,23 @@ func (z *ZaloBotService) call(ctx context.Context, method string, payload any) e
 		if errors.As(err, &uerr) {
 			err = uerr.Err // drop the URL (it embeds the token)
 		}
-		return fmt.Errorf("failed to send %s request: %s", method, z.redact(err.Error()))
+		return nil, fmt.Errorf("failed to send %s request: %s", method, z.redact(err.Error()))
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return fmt.Errorf("failed to read response: %s", z.redact(err.Error()))
+		return nil, fmt.Errorf("failed to read response: %s", z.redact(err.Error()))
 	}
 
 	var out apiResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return fmt.Errorf("zalo API %s: unexpected response (HTTP %d)", method, resp.StatusCode)
+		return nil, fmt.Errorf("zalo API %s: unexpected response (HTTP %d)", method, resp.StatusCode)
 	}
 	if !out.Ok {
-		return fmt.Errorf("zalo API %s error %d: %s", method, out.ErrorCode, z.redact(out.Description))
+		return nil, fmt.Errorf("zalo API %s error %d: %s", method, out.ErrorCode, z.redact(out.Description))
 	}
-	return nil
+	return out.Result, nil
 }
 
 func (z *ZaloBotService) redact(s string) string {
