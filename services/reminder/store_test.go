@@ -2,7 +2,9 @@ package reminder
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -212,5 +214,90 @@ func TestPurgeOld(t *testing.T) {
 	}
 	if _, err := store.GetByID(ctx, pending); err != nil {
 		t.Errorf("pending should remain: %v", err)
+	}
+}
+
+func TestOldSchemaMigratesToTelegramPlatform(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "old.db")
+
+	// A database as created before multi-platform support: no platform column.
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE reminders (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL, user_id TEXT NOT NULL,
+			user_name TEXT NOT NULL, original_msg TEXT NOT NULL, original_msg_id INTEGER NOT NULL,
+			task TEXT NOT NULL, fire_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			fired_at DATETIME, canceled_at DATETIME, attempts INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO reminders (chat_id, user_id, user_name, original_msg, original_msg_id, task, fire_at)
+		 VALUES ('-100123', '42', 'Doan', 'nhắc tao ăn cơm', 777, 'ăn cơm', '2026-04-17 12:00:00')`,
+	} {
+		if _, err := old.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = old.Close()
+
+	for i := 0; i < 2; i++ { // second open proves the migration is idempotent
+		store, err := OpenStore(path)
+		if err != nil {
+			t.Fatalf("OpenStore #%d: %v", i, err)
+		}
+		r, err := store.GetByID(ctx, 1)
+		if err != nil {
+			t.Fatalf("GetByID: %v", err)
+		}
+		if r.Platform != PlatformTelegram {
+			t.Errorf("platform = %q, want telegram", r.Platform)
+		}
+		if i == 0 {
+			if list, err := store.ListForChat(ctx, "-100123"); err != nil || len(list) != 1 {
+				t.Fatalf("ListForChat: %v %v", list, err)
+			}
+			// ...and it fires to Telegram, not Zalo.
+			tg, zl := &stubSender{}, &stubSender{}
+			svc := NewService(store, nil, tg, time.Now).WithSender(PlatformZalo, zl)
+			if err := svc.Sweep(ctx, time.Date(2026, 4, 17, 13, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatal(err)
+			}
+			if len(tg.sent) != 1 || tg.sent[0].ChatID != "-100123" || len(zl.sent) != 0 {
+				t.Errorf("telegram=%v zalo=%v", tg.sent, zl.sent)
+			}
+		}
+		_ = store.Close()
+	}
+}
+
+func TestListAndCancelScopedByPlatformAndChat(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	fireAt := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
+
+	tg := sampleReminder(fireAt)
+	tg.ChatID = "same"
+	zl := sampleReminder(fireAt)
+	zl.ChatID = "same"
+	zl.Platform = PlatformZalo
+	tgID, _ := store.Create(ctx, tg)
+	zlID, _ := store.Create(ctx, zl)
+
+	if l, _ := store.ListForPlatformChat(ctx, PlatformZalo, "same"); len(l) != 1 || l[0].ID != zlID {
+		t.Errorf("zalo list = %+v", l)
+	}
+	if l, _ := store.ListForPlatformChat(ctx, PlatformTelegram, "same"); len(l) != 1 || l[0].ID != tgID {
+		t.Errorf("telegram list = %+v", l)
+	}
+	if err := store.CancelForChat(ctx, PlatformTelegram, "same", zlID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-platform cancel: %v", err)
+	}
+	if err := store.CancelForChat(ctx, PlatformZalo, "other", zlID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("cross-chat cancel: %v", err)
+	}
+	if err := store.CancelForChat(ctx, PlatformZalo, "same", zlID); err != nil {
+		t.Errorf("own cancel: %v", err)
 	}
 }

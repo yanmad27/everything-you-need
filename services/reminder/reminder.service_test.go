@@ -3,6 +3,7 @@ package reminder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -295,4 +296,69 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+func TestSweepRoutesByPlatform(t *testing.T) {
+	ctx := context.Background()
+	tg, zl := &stubSender{}, &stubSender{}
+	svc := newTestService(t, nil, tg).WithSender(PlatformZalo, zl)
+	due := time.Date(2026, 4, 17, 13, 0, 0, 0, time.UTC)
+
+	_, _ = svc.store.Create(ctx, Reminder{ChatID: "tg1", UserID: "1", UserName: "A", Task: "t1", FireAt: due})
+	_, _ = svc.store.Create(ctx, Reminder{Platform: PlatformZalo, ChatID: "zl1", UserID: "2", UserName: "B", Task: "t2", FireAt: due})
+
+	if err := svc.Sweep(ctx, due.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(tg.sent) != 1 || tg.sent[0].ChatID != "tg1" {
+		t.Errorf("telegram sent = %+v", tg.sent)
+	}
+	if len(zl.sent) != 1 || zl.sent[0].ChatID != "zl1" || !strings.Contains(zl.sent[0].Text, "t2") {
+		t.Errorf("zalo sent = %+v", zl.sent)
+	}
+}
+
+func TestSweepWithoutPlatformSenderKeepsReminderPending(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService(t, nil, &stubSender{}) // no zalo sender
+	due := time.Date(2026, 4, 17, 13, 0, 0, 0, time.UTC)
+	id, _ := svc.store.Create(ctx, Reminder{Platform: PlatformZalo, ChatID: "zl1", UserName: "B", Task: "t", FireAt: due})
+
+	if err := svc.Sweep(ctx, due); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := svc.store.GetByID(ctx, id)
+	if r.FiredAt != nil || r.Attempts != 1 {
+		t.Errorf("want unfired with attempts=1, got fired=%v attempts=%d", r.FiredAt, r.Attempts)
+	}
+}
+
+func TestZaloCreateListCancelRepliesOnZalo(t *testing.T) {
+	ctx := context.Background()
+	tg, zl := &stubSender{}, &stubSender{}
+	parser := &stubParser{result: ParseResult{OK: true, When: time.Date(2026, 4, 17, 16, 0, 0, 0, time.UTC), Task: "họp"}}
+	svc := newTestService(t, parser, tg).WithSender(PlatformZalo, zl)
+	msg := IncomingMessage{Platform: PlatformZalo, ChatID: "g9", UserID: "u2", UserName: "Lan", Text: "4h chiều nhắc tao họp"}
+
+	if err := svc.HandleIncoming(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := svc.store.ListForPlatformChat(ctx, PlatformZalo, "g9")
+	if len(list) != 1 || list[0].Platform != PlatformZalo {
+		t.Fatalf("stored = %+v", list)
+	}
+	if len(zl.sent) != 1 || len(tg.sent) != 0 {
+		t.Fatalf("ack routing: zalo=%d telegram=%d", len(zl.sent), len(tg.sent))
+	}
+
+	msg.Text = "/reminders"
+	_ = svc.HandleIncoming(ctx, msg)
+	if !strings.Contains(zl.sent[1].Text, "họp") {
+		t.Errorf("list reply = %q", zl.sent[1].Text)
+	}
+	msg.Text = fmt.Sprintf("/cancel %d", list[0].ID)
+	_ = svc.HandleIncoming(ctx, msg)
+	if !strings.Contains(zl.sent[2].Text, "Đã hủy") || len(tg.sent) != 0 {
+		t.Errorf("cancel reply = %q telegram=%d", zl.sent[2].Text, len(tg.sent))
+	}
 }

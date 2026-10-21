@@ -48,3 +48,29 @@ func TestDockerConfigEnvOverride(t *testing.T) {
 		t.Errorf("channel_id: want file value, got %q", cfg.Telegram.ChannelID)
 	}
 }
+
+// Zalo is off by default and picks up its secrets from env vars.
+func TestDockerConfigZaloEnv(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "config.docker.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cfg := LoadConfig()
+	if cfg == nil || cfg.Zalo.Enabled || cfg.Zalo.WebhookPath != "/zalo-webhook" {
+		t.Fatalf("zalo defaults: %+v", cfg)
+	}
+
+	t.Setenv("ZALO_ENABLED", "true")
+	t.Setenv("ZALO_BOT_TOKEN", "zalo-tok")
+	t.Setenv("ZALO_WEBHOOK_SECRET", "zalo-sec")
+	cfg = LoadConfig()
+	if !cfg.Zalo.Enabled || cfg.Zalo.BotToken != "zalo-tok" || cfg.Zalo.WebhookSecret != "zalo-sec" {
+		t.Errorf("zalo env override: %+v", cfg.Zalo)
+	}
+}

@@ -11,6 +11,7 @@ import (
 type Config struct {
 	PriceSources PriceSourcesConfig `mapstructure:"price_sources"`
 	Telegram     TelegramConfig     `mapstructure:"telegram"`
+	Zalo         ZaloConfig         `mapstructure:"zalo"`
 	App          AppConfig          `mapstructure:"app"`
 	Reminder     ReminderConfig     `mapstructure:"reminder"`
 	Server       ServerConfig       `mapstructure:"server"`
@@ -70,6 +71,11 @@ func setDefaults() {
 	viper.SetDefault("telegram.timeout_seconds", 30)
 	viper.SetDefault("telegram.webhook_secret", "")
 	viper.SetDefault("telegram.webhook_path", "/telegram-webhook")
+
+	viper.SetDefault("zalo.enabled", false)
+	viper.SetDefault("zalo.bot_token", "")
+	viper.SetDefault("zalo.webhook_secret", "")
+	viper.SetDefault("zalo.webhook_path", "/zalo-webhook")
 
 	viper.SetDefault("reminder.enabled", false)
 	viper.SetDefault("reminder.db_path", "data/reminders.db")

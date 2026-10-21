@@ -18,6 +18,7 @@ import (
 	pricetracker "everything-you-need/m/services/price-tracker"
 	"everything-you-need/m/services/reminder"
 	telebot "everything-you-need/m/services/tele-bot"
+	zalobot "everything-you-need/m/services/zalo-bot"
 )
 
 func main() {
@@ -29,8 +30,9 @@ func main() {
 
 	priceService := pricetracker.PriceTrackerServiceMod.Resolve()
 	teleService := telebot.TeleBotServiceMod.Resolve()
+	zaloService := zalobot.ZaloBotServiceMod.Resolve()
 
-	reminderService, reminderStore := buildReminderService(cfg, teleService)
+	reminderService, reminderStore := buildReminderService(cfg, teleService, zaloService)
 	if reminderStore != nil {
 		defer reminderStore.Close()
 	}
@@ -41,7 +43,13 @@ func main() {
 	}
 
 	dueDateService := buildDueDateService(cfg)
-	chatService := buildChatService(cfg, teleService)
+	var teleChat, zaloChat *chat.Service
+	if teleService != nil {
+		teleChat = buildChatService(cfg, teleService)
+	}
+	if zaloService != nil {
+		zaloChat = buildChatService(cfg, zaloService)
+	}
 
 	scheduler := jobscheduler.NewJobScheduler()
 	registerJobs(scheduler, priceService, teleService, reminderService, newsService, dueDateService, cfg)
@@ -49,7 +57,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	webhookServer := startWebhookServer(cfg, reminderService, chatService)
+	webhookServer := startWebhookServer(cfg, reminderService, teleService, teleChat, zaloService, zaloChat)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -72,13 +80,13 @@ func main() {
 	log.Printf("✅ Shutdown complete")
 }
 
-func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotService) (*reminder.Service, *reminder.Store) {
+func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotService, zaloService *zalobot.ZaloBotService) (*reminder.Service, *reminder.Store) {
 	if !cfg.Reminder.Enabled {
 		log.Printf("Reminder service disabled in config")
 		return nil, nil
 	}
-	if teleService == nil {
-		log.Printf("Reminder service disabled: telegram service not available")
+	if teleService == nil && zaloService == nil {
+		log.Printf("Reminder service disabled: neither telegram nor zalo service available")
 		return nil, nil
 	}
 	if cfg.Reminder.OpenAIAPIKey == "" {
@@ -93,7 +101,14 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 	}
 
 	parser := reminder.NewOpenAIParser(cfg.Reminder.OpenAIAPIKey, cfg.Reminder.OpenAIModel, 0)
-	svc := reminder.NewService(store, parser, teleService, time.Now)
+	var defaultSender reminder.Sender // Telegram; stays a nil interface when unconfigured
+	if teleService != nil {
+		defaultSender = teleService
+	}
+	svc := reminder.NewService(store, parser, defaultSender, time.Now)
+	if zaloService != nil {
+		svc.WithSender(reminder.PlatformZalo, zaloService)
+	}
 	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
 	return svc, store
 }
@@ -147,13 +162,11 @@ func buildDueDateService(cfg *config.Config) *duedate.Service {
 	return duedate.NewService(cfg.DueDate.CSVURL, cfg.DueDate.StatePath, time.Now)
 }
 
-func buildChatService(cfg *config.Config, teleService *telebot.TeleBotService) *chat.Service {
+// buildChatService builds one chat assistant bound to one platform's sender
+// (history is kept per assistant, so platforms never share context).
+func buildChatService(cfg *config.Config, sender chat.Sender) *chat.Service {
 	if !cfg.Chat.Enabled {
 		log.Printf("Chat service disabled in config")
-		return nil
-	}
-	if teleService == nil {
-		log.Printf("Chat service disabled: telegram service not available")
 		return nil
 	}
 	apiKey := cfg.Chat.APIKey
@@ -168,54 +181,61 @@ func buildChatService(cfg *config.Config, teleService *telebot.TeleBotService) *
 		return nil
 	}
 	log.Printf("Chat service initialized (model=%s)", cfg.Chat.Model)
-	return chat.NewService(apiKey, cfg.Chat.Model, teleService)
+	return chat.NewService(apiKey, cfg.Chat.Model, sender)
 }
 
-func startWebhookServer(cfg *config.Config, svc *reminder.Service, chatSvc *chat.Service) *http.Server {
-	if svc == nil && chatSvc == nil {
-		return nil
+func startWebhookServer(cfg *config.Config, svc *reminder.Service,
+	teleService *telebot.TeleBotService, teleChat *chat.Service,
+	zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
+	mux := http.NewServeMux()
+	mounted := 0
+
+	if teleService != nil && (svc != nil || teleChat != nil) {
+		if cfg.Telegram.WebhookSecret == "" {
+			log.Printf("Telegram webhook disabled: telegram.webhook_secret is empty")
+		} else {
+			path := cfg.Telegram.WebhookPath
+			if path == "" {
+				path = "/telegram-webhook"
+			}
+			dispatcher := func(ctx context.Context, update telebot.Update) {
+				msg := update.AnyMessage()
+				if msg == nil || msg.Text == "" {
+					return
+				}
+				dispatchIncoming(ctx, svc, teleChat, toIncomingMessage(msg))
+			}
+			mux.Handle(path, telebot.NewWebhookHandler(cfg.Telegram.WebhookSecret, dispatcher))
+			log.Printf("Telegram webhook mounted at %s", path)
+			mounted++
+		}
 	}
-	if cfg.Telegram.WebhookSecret == "" {
-		log.Printf("Webhook server disabled: telegram.webhook_secret is empty")
+
+	if zaloService != nil && (svc != nil || zaloChat != nil) {
+		if cfg.Zalo.WebhookSecret == "" {
+			log.Printf("Zalo webhook disabled: zalo.webhook_secret is empty")
+		} else {
+			path := cfg.Zalo.WebhookPath
+			if path == "" {
+				path = "/zalo-webhook"
+			}
+			dispatcher := func(ctx context.Context, msg zalobot.Message) {
+				dispatchIncoming(ctx, svc, zaloChat, toZaloIncomingMessage(msg))
+			}
+			mux.Handle(path, zalobot.NewWebhookHandler(cfg.Zalo.WebhookSecret, dispatcher))
+			log.Printf("Zalo webhook mounted at %s", path)
+			mounted++
+		}
+	}
+
+	if mounted == 0 {
 		return nil
 	}
 
-	path := cfg.Telegram.WebhookPath
-	if path == "" {
-		path = "/telegram-webhook"
-	}
 	addr := cfg.Server.ListenAddr
 	if addr == "" {
 		addr = ":8080"
 	}
-
-	dispatcher := func(ctx context.Context, update telebot.Update) {
-		msg := update.AnyMessage()
-		if msg == nil || msg.Text == "" {
-			return
-		}
-		incoming := toIncomingMessage(msg)
-
-		// Reminders take priority; chat handles wake-word messages that aren't
-		// reminder commands.
-		if svc != nil && svc.Matches(incoming.Text) {
-			if err := svc.HandleIncoming(ctx, incoming); err != nil {
-				log.Printf("webhook dispatch error: %v", err)
-			}
-			return
-		}
-		if chatSvc != nil {
-			if _, ok := chat.SplitWake(incoming.Text); ok {
-				if err := chatSvc.Handle(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
-					log.Printf("chat dispatch error: %v", err)
-				}
-			}
-		}
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle(path, telebot.NewWebhookHandler(cfg.Telegram.WebhookSecret, dispatcher))
-
 	server := &http.Server{
 		Addr:         addr,
 		Handler:      mux,
@@ -224,13 +244,41 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service, chatSvc *chat
 	}
 
 	go func() {
-		log.Printf("🌐 Webhook server listening on %s%s", addr, path)
+		log.Printf("🌐 Webhook server listening on %s", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Webhook server error: %v", err)
 		}
 	}()
 
 	return server
+}
+
+// dispatchIncoming routes a normalized message: reminders take priority; chat
+// handles wake-word messages that aren't reminder commands.
+func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage) {
+	if svc != nil && svc.Matches(incoming.Text) {
+		if err := svc.HandleIncoming(ctx, incoming); err != nil {
+			log.Printf("webhook dispatch error (%s): %v", incoming.Platform, err)
+		}
+		return
+	}
+	if chatSvc != nil {
+		if _, ok := chat.SplitWake(incoming.Text); ok {
+			if err := chatSvc.Handle(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
+				log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
+			}
+		}
+	}
+}
+
+func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {
+	return reminder.IncomingMessage{
+		Platform: reminder.PlatformZalo,
+		ChatID:   msg.Chat.ID,
+		UserID:   msg.From.ID,
+		UserName: msg.From.DisplayName,
+		Text:     msg.Text,
+	}
 }
 
 func toIncomingMessage(msg *telebot.Message) reminder.IncomingMessage {
@@ -241,6 +289,7 @@ func toIncomingMessage(msg *telebot.Message) reminder.IncomingMessage {
 		userID = strconv.FormatInt(msg.From.ID, 10)
 	}
 	return reminder.IncomingMessage{
+		Platform:  reminder.PlatformTelegram,
 		ChatID:    strconv.FormatInt(msg.Chat.ID, 10),
 		UserID:    userID,
 		UserName:  userName,

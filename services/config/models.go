@@ -42,6 +42,13 @@ type TelegramConfig struct {
 	WebhookPath   string `mapstructure:"webhook_path"`
 }
 
+type ZaloConfig struct {
+	Enabled       bool   `mapstructure:"enabled"`
+	BotToken      string `mapstructure:"bot_token"`
+	WebhookSecret string `mapstructure:"webhook_secret"`
+	WebhookPath   string `mapstructure:"webhook_path"`
+}
+
 type AppConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`
