@@ -79,6 +79,19 @@ func openPairs(rs []rune) []string {
 
 // validCut reports whether cutting before rs[cut] leaves escapes and ** / __
 // markers intact.
+// splitsEscape reports whether cutting at cut separates a backslash from the
+// character it escapes.
+func splitsEscape(rs []rune, cut int) bool {
+	if cut <= 0 || cut >= len(rs) {
+		return false
+	}
+	n := 0
+	for i := cut - 1; i >= 0 && rs[i] == '\\'; i-- {
+		n++
+	}
+	return n%2 == 1
+}
+
 func validCut(rs []rune, cut int) bool {
 	if cut <= 0 || cut >= len(rs) {
 		return true
@@ -123,8 +136,18 @@ func chooseCut(rs []rune, budget int) int {
 			}
 		}
 	}
+	hard := cut
 	for cut > 1 && !validCut(rs, cut) {
 		cut--
+	}
+	if cut < budget/2 {
+		// Long runs of markers would otherwise yield one tiny piece per rune.
+		// Hard-cut at the budget, backing off only to stay rune-safe and not
+		// split an escape sequence.
+		cut = hard
+		for cut > 1 && splitsEscape(rs, cut) {
+			cut--
+		}
 	}
 	return cut
 }

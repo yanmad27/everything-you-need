@@ -309,3 +309,18 @@ func TestWebhookImageDumpCapped(t *testing.T) {
 		t.Errorf("structure dumps = %d, want %d", n, maxImageDumps)
 	}
 }
+
+func TestSplitMarkdownLongMarkerRunIsBounded(t *testing.T) {
+	for _, ch := range []string{"*", "_", `\`} {
+		text := strings.Repeat(ch, 2500)
+		chunks := splitMarkdown(text, 2000)
+		if len(chunks) > 4 {
+			t.Errorf("%q run produced %d chunks", ch, len(chunks))
+		}
+		for _, c := range chunks {
+			if n := len([]rune(c.md)); n > 2000 || !utf8.ValidString(c.md) {
+				t.Errorf("chunk len=%d valid=%v", n, utf8.ValidString(c.md))
+			}
+		}
+	}
+}

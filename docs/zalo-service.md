@@ -153,7 +153,7 @@ times out at 60s, leaving time for the busy reply). Optional fields (`date`, `is
 ## Pink tools (Zalo only)
 
 When `llm_openai` is configured, the Zalo assistant answers through a bounded tool loop
-(≤4 rounds, ≤3 calls per round, 15s per tool, 60s overall): `get_prices`, `lunar_date`,
+(≤4 rounds, ≤3 calls per round, 15s per tool, 45s loop deadline, then a forced tool-less answer): `get_prices`, `lunar_date`,
 `news_recent`, `web_search` (needs `news.serper_api_key`, independent of the news digest),
 `fetch_url` (SSRF-guarded via netguard), `due_dates`, `reminder_create/list/cancel`
 (scoped to the calling chat; create/cancel at most once per message, disabled once
@@ -180,3 +180,18 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
 - Limits: base64 image > 7 MB is refused with a reply (no LLM call); history is in memory only
   (lost on restart, 10 messages per chat); `fetch_url` text goes through `r.jina.ai` first, with the
   direct fallback fetch SSRF-guarded; the Anthropic fallback (no `llm_openai`) has no tools or vision.
+
+### Safety rules (tools)
+
+- Tool output is wrapped as data (`<tool_result>`, closing tags neutralised case-insensitively).
+- Once untrusted content enters a message (`fetch_url`, `web_search`, `news_recent`, or an image),
+  `due_dates` and all `reminder_*` tools are disabled for the rest of that message.
+- `fetch_url` only reads links the user sent or that `web_search` returned in the same message.
+- `web_search`: ≤3 per message and a per-process budget of 200/hour.
+- `reminder_create` needs reminder wording in the user's own text; `reminder_cancel` needs cancel
+  wording (huỷ/xoá/bỏ/cancel/dừng nhắc). Only one successful create/cancel per message; refused or
+  invalid attempts do not count. Errors shown to the user are fixed Vietnamese messages.
+- `due_dates` exposes private task data, so it is registered only for chats listed in
+  `zalo.private_tool_chats` (env `ZALO_PRIVATE_TOOL_CHATS`, comma-separated chat ids). Empty = unavailable.
+- Outbound fetches (link reading, images) only reach ports 80/443 on public addresses (netguard).
+- Replies are sent on a fresh 10s context, so a slow/expired LLM turn still produces an answer.

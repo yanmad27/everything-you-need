@@ -31,6 +31,9 @@ zalo:
   # Generate with: openssl rand -hex 32
   webhook_secret: ""
   webhook_path: "/zalo-webhook"
+  # Comma-separated Zalo chat ids allowed to use the due_dates tool (private data).
+  # Empty = the tool is unavailable. ZALO_PRIVATE_TOOL_CHATS overrides.
+  private_tool_chats: ""
 
 # OpenAI-compatible LLM used ONLY by the Zalo bot (chat + reminder parsing).
 # Unused unless base_url and api_key are both set; otherwise Zalo falls back to

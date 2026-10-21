@@ -58,11 +58,13 @@ type Service struct {
 	safeFetch bool // block private/loopback targets when reading pasted links
 
 	// Tool-calling path (Zalo only); nil toolClient keeps the plain Complete path.
-	toolClient llm.ToolCompleter
-	tools      Tools
-	toolImpls  []toolImpl
-	limiter    *limiter
-	last       map[string]lastText
+	toolClient   llm.ToolCompleter
+	tools        Tools
+	toolImpls    []toolImpl
+	limiter      *limiter
+	last         map[string]lastText
+	searchBudget *searchBudget
+	dueChats     map[string]bool
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -123,6 +125,7 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 	if IsClearCommand(prompt) {
 		s.mu.Lock()
 		delete(s.history, chatID)
+		s.dropLast(chatID)
 		s.mu.Unlock()
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "🧹 Đã xoá ngữ cảnh. Mình bắt đầu lại từ đầu nhé!")
 	}
@@ -177,14 +180,18 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 	reply, err := s.completeTools(ctx, chatID, userID, userName, prompt)
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {
-		log.Printf("chat: completion error (tools): %v", err)
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
+		log.Printf("chat: completion error (tools): %s chat=%s", errTag(err), maskChat(chatID))
+		rc, cancel := replyCtx(ctx)
+		defer cancel()
+		return s.sender.SendReply(rc, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
 	}
-	if err := s.sendTools(ctx, chatID, replyToMsgID, reply); err != nil {
+	rc, cancel := replyCtx(ctx)
+	defer cancel()
+	if err := s.sendTools(rc, chatID, replyToMsgID, reply); err != nil {
 		return err
 	}
 	s.remember(chatID, prompt, reply)
-	s.noteUserText(chatID, prompt)
+	s.noteUserText(chatID, userID, prompt)
 	return nil
 }
 

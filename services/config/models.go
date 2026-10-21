@@ -47,6 +47,9 @@ type ZaloConfig struct {
 	BotToken      string `mapstructure:"bot_token"`
 	WebhookSecret string `mapstructure:"webhook_secret"`
 	WebhookPath   string `mapstructure:"webhook_path"`
+	// PrivateToolChats: comma-separated chat ids allowed to use the due_dates
+	// tool (private data). Empty disables it.
+	PrivateToolChats string `mapstructure:"private_tool_chats"`
 }
 
 // LLMOpenAIConfig points the Zalo bot's AI work (chat + reminder parsing) at an

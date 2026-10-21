@@ -77,6 +77,7 @@ func setDefaults() {
 	viper.SetDefault("zalo.bot_token", "")
 	viper.SetDefault("zalo.webhook_secret", "")
 	viper.SetDefault("zalo.webhook_path", "/zalo-webhook")
+	viper.SetDefault("zalo.private_tool_chats", "")
 
 	viper.SetDefault("llm_openai.base_url", "")
 	viper.SetDefault("llm_openai.api_key", "")

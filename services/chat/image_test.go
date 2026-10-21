@@ -50,7 +50,7 @@ func TestImageUsesRecentQuestionElseDescribe(t *testing.T) {
 	now := time.Date(2026, 10, 21, 9, 0, 0, 0, ictZone)
 	r := newRig(t, func(tl *Tools) { tl.Now = func() time.Time { return now } }, textStep("a"), textStep("b"), textStep("c"), textStep("d"))
 	ask := func(c string) {
-		_ = r.svc.HandleImage(context.Background(), "chat-1234", "u", "An", 0, c, okImg(5))
+		_ = r.svc.HandleImage(context.Background(), "chat-1234", "u1", "An", 0, c, okImg(5))
 	}
 	r.ask("đây là bảng giá gì vậy?")
 	now = now.Add(time.Minute)
@@ -123,5 +123,38 @@ func TestImageWithoutToolsPath(t *testing.T) {
 	_ = svc.HandleImage(context.Background(), "c", "", "", 0, "", okImg(1))
 	if len(s.plain) != 1 {
 		t.Errorf("plain=%v", s.plain)
+	}
+}
+
+func TestRecentQuestionKeyedByUserClearedAndPruned(t *testing.T) {
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, ictZone)
+	r := newRig(t, func(tl *Tools) { tl.Now = func() time.Time { return now } })
+	ctx := context.Background()
+	_ = r.svc.HandleAddressedAs(ctx, "g", "alice", "", 0, "cái này là gì?")
+	if r.svc.recentQuestion("g", "bob") != "" || r.svc.recentQuestion("g", "alice") == "" {
+		t.Error("question must be keyed by chat+user")
+	}
+	_ = r.svc.HandleAddressedAs(ctx, "g", "alice", "", 0, "xóa ngữ cảnh")
+	if r.svc.recentQuestion("g", "alice") != "" {
+		t.Error("clear command must drop remembered text")
+	}
+	_ = r.svc.HandleAddressedAs(ctx, "g", "alice", "", 0, "cái này là gì?")
+	now = now.Add(11 * time.Minute)
+	r.svc.noteUserText("g2", "carol", "x?")
+	if len(r.svc.last) != 1 {
+		t.Errorf("old entries not pruned: %d", len(r.svc.last))
+	}
+}
+
+func TestProviderErrorTextNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	r := newRig(t, nil, func([]llm.ChatMessage, []llm.ToolDef) (llm.ToolResponse, error) {
+		return llm.ToolResponse{}, errors.New("openai-compat HTTP 429: PROVIDER-SECRET-DETAIL")
+	})
+	r.ask("hi")
+	if out := buf.String(); strings.Contains(out, "PROVIDER-SECRET") || !strings.Contains(out, "status=429") {
+		t.Errorf("log: %s", out)
 	}
 }

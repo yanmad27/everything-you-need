@@ -63,3 +63,13 @@ func TestNoProxy(t *testing.T) {
 		t.Error("fixed message expected")
 	}
 }
+
+func TestSafeClientRefusesNonWebPorts(t *testing.T) {
+	// httptest listens on 127.0.0.1:<random>; an allowed public IP on an odd port
+	// must be refused by the port rule before any connection happens.
+	c := NewSafeClient(2 * time.Second)
+	_, err := c.Get("http://93.184.216.34:8080/")
+	if err == nil || !errors.Is(err, ErrBlocked) {
+		t.Fatalf("odd port must be blocked, got %v", err)
+	}
+}

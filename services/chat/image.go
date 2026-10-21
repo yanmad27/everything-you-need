@@ -29,19 +29,38 @@ type lastText struct {
 	at   time.Time
 }
 
-func (s *Service) noteUserText(chatID, text string) {
+func lastKey(chatID, userID string) string { return chatID + "\x00" + userID }
+
+// noteUserText remembers a user's latest text (keyed by chat+user) for the
+// image "recent question" lookup, pruning entries older than 10 minutes.
+func (s *Service) noteUserText(chatID, userID, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.last == nil {
 		s.last = map[string]lastText{}
 	}
-	s.last[chatID] = lastText{text, s.tools.Now()}
+	now := s.tools.Now()
+	for k, v := range s.last {
+		if now.Sub(v.at) > 10*time.Minute {
+			delete(s.last, k)
+		}
+	}
+	s.last[lastKey(chatID, userID)] = lastText{text, now}
 }
 
-func (s *Service) recentQuestion(chatID string) string {
+// dropLast forgets every user's remembered text for a chat; s.mu must be held.
+func (s *Service) dropLast(chatID string) {
+	for k := range s.last {
+		if strings.HasPrefix(k, chatID+"\x00") {
+			delete(s.last, k)
+		}
+	}
+}
+
+func (s *Service) recentQuestion(chatID, userID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	l, ok := s.last[chatID]
+	l, ok := s.last[lastKey(chatID, userID)]
 	if !ok || s.tools.Now().Sub(l.at) > recentQuestionW || !questionRe.MatchString(l.text) {
 		return ""
 	}
@@ -86,7 +105,7 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 
 	text := caption
 	if text == "" {
-		if text = s.recentQuestion(chatID); text == "" {
+		if text = s.recentQuestion(chatID, userID); text == "" {
 			text = describePrompt
 		}
 	}
@@ -98,10 +117,14 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 	reply, err := s.completeToolsMsg(ctx, chatID, userID, userName, caption, user, imageMaxRounds)
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {
-		log.Printf("chat: completion error (image): %v", err)
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
+		log.Printf("chat: completion error (image): %s chat=%s", errTag(err), maskChat(chatID))
+		rc, cancel := replyCtx(ctx)
+		defer cancel()
+		return s.sender.SendReply(rc, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
 	}
-	if err := s.sendTools(ctx, chatID, replyToMsgID, reply); err != nil {
+	rc, cancel := replyCtx(ctx)
+	defer cancel()
+	if err := s.sendTools(rc, chatID, replyToMsgID, reply); err != nil {
 		return err
 	}
 	s.remember(chatID, strings.TrimSpace("[ảnh] "+caption), reply)

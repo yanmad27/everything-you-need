@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,13 @@ func (s *Service) WithTools(tc llm.ToolCompleter, tl Tools) *Service {
 	s.toolClient = tc
 	s.tools = tl
 	s.limiter = newLimiter(tl.RateBurst, tl.RatePerMinute, tl.Now)
+	s.searchBudget = &searchBudget{limit: orInt(tl.SearchPerHour, defSearchPerHour)}
+	s.dueChats = map[string]bool{}
+	for _, c := range tl.DueChats {
+		if c = strings.TrimSpace(c); c != "" {
+			s.dueChats[c] = true
+		}
+	}
 	s.toolImpls = s.buildTools()
 	return s
 }
@@ -88,13 +96,78 @@ func orInt(v, d int) int {
 	return v
 }
 
-// turn is the per-message state of one tool loop.
+// turn is the per-message state of one tool loop. Tool goroutines may outlive
+// a timeout, so the mutable parts sit behind a mutex.
 type turn struct {
 	chatID, userID, userName string
 	userText                 string
 	now                      func() time.Time
-	sawWeb                   bool
-	remMutations             int
+
+	mu           sync.Mutex
+	untrusted    bool // untrusted content (web, news, image) has entered the turn
+	searches     int
+	remMutations int
+	urls         map[string]bool // URLs returned by web_search this turn
+}
+
+func (t *turn) taint() { t.mu.Lock(); t.untrusted = true; t.mu.Unlock() }
+func (t *turn) tainted() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.untrusted
+}
+func (t *turn) countSearch() int { t.mu.Lock(); defer t.mu.Unlock(); t.searches++; return t.searches }
+func (t *turn) mutationCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.remMutations
+}
+func (t *turn) addMutation() { t.mu.Lock(); t.remMutations++; t.mu.Unlock() }
+func (t *turn) addURLs(hits []WebHit) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.urls == nil {
+		t.urls = map[string]bool{}
+	}
+	for _, h := range hits {
+		t.urls[h.URL] = true
+	}
+}
+
+// urlAllowed: fetch_url only follows links the user sent or web_search returned.
+func (t *turn) urlAllowed(u string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.urls[u] {
+		return true
+	}
+	for _, m := range urlRe.FindAllString(t.userText, -1) {
+		if strings.TrimRight(m, ".,)!?;:") == u || m == u {
+			return true
+		}
+	}
+	return false
+}
+
+// searchBudget is a simple per-process hourly cap on Serper calls.
+type searchBudget struct {
+	mu    sync.Mutex
+	limit int
+	start time.Time
+	n     int
+}
+
+func (b *searchBudget) take(now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if now.Sub(b.start) >= time.Hour {
+		b.start, b.n = now, 0
+	}
+	if b.n >= b.limit {
+		return false
+	}
+	b.n++
+	return true
 }
 
 func maskChat(id string) string {
@@ -133,11 +206,17 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	}
 	msgs = append(msgs, user)
 
-	defs := make([]llm.ToolDef, len(s.toolImpls))
+	var defs []llm.ToolDef
 	byName := make(map[string]toolImpl, len(s.toolImpls))
-	for i, ti := range s.toolImpls {
-		defs[i] = ti.def
+	for _, ti := range s.toolImpls {
+		if ti.def.Name == "due_dates" && !s.dueChats[chatID] {
+			continue // private data: only for allow-listed chats
+		}
+		defs = append(defs, ti.def)
 		byName[ti.def.Name] = ti
+	}
+	if user.Role == "user" && len(user.Parts) > 0 {
+		t.taint() // image turn: untrusted content from the start
 	}
 	system := s.systemPromptFor(tl.Now())
 
@@ -196,7 +275,16 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	if ctx.Err() != nil {
 		return finish("", ctx.Err())
 	}
-	finalCtx, cancelFinal := context.WithTimeout(ctx, 30*time.Second)
+	finalTO := 25 * time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if rem := time.Until(dl) - 5*time.Second; rem < finalTO {
+			finalTO = rem
+		}
+	}
+	if finalTO < 3*time.Second {
+		finalTO = 3 * time.Second
+	}
+	finalCtx, cancelFinal := context.WithTimeout(ctx, finalTO)
 	defer cancelFinal()
 	rounds++
 	resp, err := s.toolClient.CompleteWithTools(finalCtx, system, msgs, nil, 2048)
@@ -207,10 +295,37 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	return finish(resp.Text, nil)
 }
 
+var httpStatusRe = regexp.MustCompile(`HTTP (\d{3})`)
+
+// errTag reduces a provider error to a status code; provider message text is
+// never logged.
+func errTag(err error) string {
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	}
+	if m := httpStatusRe.FindStringSubmatch(err.Error()); m != nil {
+		return "status=" + m[1]
+	}
+	return "error"
+}
+
+// replyCtx is a fresh short context, detached from an expired loop context, so
+// the user always gets an answer.
+func replyCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+}
+
 func (s *Service) record(f func()) {
 	defer func() { _ = recover() }()
 	f()
 }
+
+var closerRe = regexp.MustCompile(`(?i)</tool_result`)
 
 func errResult(name, msg string) string {
 	return wrapResult(name, "error: "+msg, 0)
@@ -218,7 +333,7 @@ func errResult(name, msg string) string {
 
 // wrapResult marks tool output as data, truncated to max chars when max > 0.
 func wrapResult(name, body string, max int) string {
-	body = strings.ReplaceAll(body, "</tool_result", "<\\/tool_result")
+	body = closerRe.ReplaceAllString(body, "<\\/tool_result")
 	if max > 0 && utf8.RuneCountInString(body) > max {
 		body = string([]rune(body)[:max]) + "\n…(đã cắt bớt)"
 	}
@@ -242,20 +357,15 @@ func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolIm
 		outcome = "error"
 		return errResult(safeName(call.Name), "unknown tool")
 	}
-	// Injection guard.
-	if ti.kind == "remind" {
-		if t.sawWeb {
-			outcome = "blocked"
-			return errResult(call.Name, "reminders are disabled after web content was read in this message; ask the user to repeat the request")
-		}
-		if t.remMutations >= 1 {
-			outcome = "blocked"
-			return errResult(call.Name, "only one reminder create/cancel is allowed per message")
-		}
-		t.remMutations++
+	// Exfiltration guard: once untrusted content is in the turn, private-data
+	// and reminder tools are off. Mutation limits are enforced inside the tools
+	// and only count calls that actually succeed.
+	if ti.sensitive && t.tainted() {
+		outcome = "blocked"
+		return errResult(call.Name, "this tool is disabled after web, news or image content entered this message; ask the user to repeat the request")
 	}
-	if ti.kind == "web" {
-		t.sawWeb = true
+	if ti.taints {
+		t.taint()
 	}
 	args := json.RawMessage(strings.TrimSpace(call.Arguments))
 	if len(args) == 0 {

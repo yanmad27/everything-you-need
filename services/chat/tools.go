@@ -73,6 +73,11 @@ type Tools struct {
 	Recorder  Recorder
 	Now       func() time.Time
 
+	// DueChats lists the chat ids allowed to use due_dates (private data); empty disables it.
+	DueChats []string
+	// SearchPerHour is the per-process web_search budget (default 200).
+	SearchPerHour int
+
 	// Limits; zero values use the defaults below.
 	MaxRounds       int
 	MaxCallsPerTurn int
@@ -91,6 +96,9 @@ const (
 	defMaxResult    = 4000
 	defRateBurst    = 3
 	defRatePerMin   = 6.0
+
+	maxSearchesPerTurn = 3
+	defSearchPerHour   = 200
 )
 
 // ictZone is Vietnam time; a fixed zone avoids depending on tzdata.
@@ -148,9 +156,10 @@ var foldVN = func() map[rune]rune {
 }()
 
 type toolImpl struct {
-	def  llm.ToolDef
-	run  func(ctx context.Context, t *turn, args json.RawMessage) (string, error)
-	kind string // "web" marks tools that pull untrusted content; "remind" marks mutations
+	def       llm.ToolDef
+	run       func(ctx context.Context, t *turn, args json.RawMessage) (string, error)
+	taints    bool // brings untrusted content into the turn
+	sensitive bool // exposes or changes private data; disabled once the turn is tainted
 }
 
 func schema(s string) json.RawMessage { return json.RawMessage(s) }
@@ -221,6 +230,7 @@ func (s *Service) buildTools() []toolImpl {
 	})
 	if tl.News != nil {
 		out = append(out, toolImpl{
+			taints: true,
 			def: llm.ToolDef{Name: "news_recent", Description: "Các tin tức đã đăng gần đây trên kênh tin của bot.",
 				Parameters: schema(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":5}}}`)},
 			run: func(ctx context.Context, _ *turn, raw json.RawMessage) (string, error) {
@@ -236,16 +246,19 @@ func (s *Service) buildTools() []toolImpl {
 	}
 	if tl.Search != nil {
 		out = append(out, toolImpl{
-			kind: "web",
+			taints: true,
 			def: llm.ToolDef{Name: "web_search", Description: "Tìm kiếm web hoặc tin tức mới.",
 				Parameters: schema(`{"type":"object","properties":{"query":{"type":"string"},"kind":{"type":"string","enum":["web","news"]},"n":{"type":"integer","minimum":1,"maximum":5}},"required":["query"]}`)},
-			run: func(ctx context.Context, _ *turn, raw json.RawMessage) (string, error) {
+			run: func(ctx context.Context, t *turn, raw json.RawMessage) (string, error) {
 				var a struct {
 					Query, Kind string
 					N           int
 				}
 				if err := json.Unmarshal(raw, &a); err != nil || strings.TrimSpace(a.Query) == "" {
 					return "", userError("invalid arguments: query required")
+				}
+				if t.countSearch() > maxSearchesPerTurn || !s.searchBudget.take(tl.Now()) {
+					return "", userError("đã hết lượt tìm kiếm, hãy trả lời bằng thông tin đã có")
 				}
 				n := clamp(a.N, 1, 5, 5)
 				var hits []WebHit
@@ -258,18 +271,22 @@ func (s *Service) buildTools() []toolImpl {
 				if err != nil {
 					return "", err
 				}
+				t.addURLs(hits)
 				return formatHits(hits), nil
 			},
 		})
 	}
 	out = append(out, toolImpl{
-		kind: "web",
+		taints: true,
 		def: llm.ToolDef{Name: "fetch_url", Description: "Đọc nội dung văn bản của một trang web http(s) công khai.",
 			Parameters: schema(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`)},
-		run: func(ctx context.Context, _ *turn, raw json.RawMessage) (string, error) {
+		run: func(ctx context.Context, t *turn, raw json.RawMessage) (string, error) {
 			var a struct{ URL string }
 			if err := json.Unmarshal(raw, &a); err != nil || a.URL == "" {
 				return "", userError("invalid arguments: url required")
+			}
+			if !t.urlAllowed(a.URL) {
+				return "", userError("chỉ đọc link người dùng gửi hoặc từ kết quả tìm kiếm")
 			}
 			fetch := tl.Fetch
 			if fetch == nil {
@@ -280,12 +297,17 @@ func (s *Service) buildTools() []toolImpl {
 	})
 	if tl.Due != nil {
 		out = append(out, toolImpl{
+			sensitive: true,
 			def: llm.ToolDef{Name: "due_dates", Description: "Công việc sắp đến hạn trong N ngày tới.",
 				Parameters: schema(`{"type":"object","properties":{"days":{"type":"integer","minimum":0,"maximum":30}}}`)},
 			run: func(ctx context.Context, _ *turn, raw json.RawMessage) (string, error) {
-				var a struct{ Days int }
+				var a struct{ Days *int }
 				_ = json.Unmarshal(raw, &a)
-				items, err := tl.Due.Upcoming(ctx, clamp(a.Days, 0, 30, 7))
+				days := 7
+				if a.Days != nil {
+					days = clamp(*a.Days, 0, 30, 0)
+				}
+				items, err := tl.Due.Upcoming(ctx, days)
 				if err != nil {
 					return "", err
 				}
@@ -310,13 +332,16 @@ func (s *Service) reminderTools() []toolImpl {
 	tl := s.tools
 	return []toolImpl{
 		{
-			kind: "remind",
+			sensitive: true,
 			def: llm.ToolDef{Name: "reminder_create", Description: "Tạo nhắc nhở cho chat này. Chỉ dùng khi người dùng yêu cầu rõ ràng trong tin nhắn của họ.",
 				Parameters: schema(`{"type":"object","properties":{"task":{"type":"string"},"when":{"type":"string","description":"RFC3339 với múi giờ, ví dụ 2026-10-21T19:00:00+07:00"}},"required":["task","when"]}`)},
 			run: func(ctx context.Context, t *turn, raw json.RawMessage) (string, error) {
 				var a struct{ Task, When string }
 				if err := json.Unmarshal(raw, &a); err != nil {
 					return "", userError("invalid arguments")
+				}
+				if t.mutationCount() >= 1 {
+					return "", userError("chỉ được tạo hoặc huỷ một nhắc nhở cho mỗi tin nhắn")
 				}
 				if !reminderIntent(t.userText) {
 					return "", userError("the user did not ask for a reminder; ask them to confirm (e.g. 'nhắc tôi ...') before creating one")
@@ -325,17 +350,19 @@ func (s *Service) reminderTools() []toolImpl {
 				if err != nil {
 					return "", userError("when must be RFC3339 with offset, e.g. 2026-10-21T19:00:00+07:00")
 				}
-				id, err := tl.Reminders.Create(ctx, tl.Platform, t.chatID, t.userID, t.userName, a.Task, at)
+				// The write must not be lost or duplicated by a tool timeout.
+				wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				defer cancel()
+				id, err := tl.Reminders.Create(wctx, tl.Platform, t.chatID, t.userID, t.userName, a.Task, at)
 				if err != nil {
-					if errors.Is(err, reminder.ErrTooMany) {
-						return "", userError("too many pending reminders in this chat")
-					}
-					return "", userError("could not create reminder: " + err.Error())
+					return "", userError(reminderErrMsg(err))
 				}
+				t.addMutation()
 				return fmt.Sprintf("Đã tạo nhắc nhở #%d lúc %s", id, at.In(ictZone).Format("02/01/2006 15:04")), nil
 			},
 		},
 		{
+			sensitive: true,
 			def: llm.ToolDef{Name: "reminder_list", Description: "Liệt kê nhắc nhở đang chờ của chat này.",
 				Parameters: schema(`{"type":"object","properties":{}}`)},
 			run: func(ctx context.Context, t *turn, _ json.RawMessage) (string, error) {
@@ -354,7 +381,7 @@ func (s *Service) reminderTools() []toolImpl {
 			},
 		},
 		{
-			kind: "remind",
+			sensitive: true,
 			def: llm.ToolDef{Name: "reminder_cancel", Description: "Huỷ một nhắc nhở của chat này theo id.",
 				Parameters: schema(`{"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]}`)},
 			run: func(ctx context.Context, t *turn, raw json.RawMessage) (string, error) {
@@ -362,9 +389,18 @@ func (s *Service) reminderTools() []toolImpl {
 				if err := json.Unmarshal(raw, &a); err != nil || a.ID <= 0 {
 					return "", userError("invalid arguments: id required")
 				}
-				if err := tl.Reminders.Cancel(ctx, tl.Platform, t.chatID, a.ID); err != nil {
-					return "", userError("could not cancel reminder")
+				if t.mutationCount() >= 1 {
+					return "", userError("chỉ được tạo hoặc huỷ một nhắc nhở cho mỗi tin nhắn")
 				}
+				if !cancelIntentRe.MatchString(t.userText) {
+					return "", userError("the user did not ask to cancel a reminder; ask them to confirm first")
+				}
+				wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				defer cancel()
+				if err := tl.Reminders.Cancel(wctx, tl.Platform, t.chatID, a.ID); err != nil {
+					return "", userError("không huỷ được nhắc nhở này (kiểm tra lại số thứ tự)")
+				}
+				t.addMutation()
 				return fmt.Sprintf("Đã huỷ nhắc nhở #%d", a.ID), nil
 			},
 		},
@@ -372,6 +408,27 @@ func (s *Service) reminderTools() []toolImpl {
 }
 
 var reminderIntentRe = regexp.MustCompile(`(?i)(nhắc|remind|hẹn giờ|báo thức|đặt lịch)`)
+
+var cancelIntentRe = regexp.MustCompile(`(?i)(huỷ|hủy|xoá|xóa|bỏ|cancel|dừng nhắc)`)
+
+// reminderErrMsg maps store/validation errors to fixed Vietnamese messages;
+// raw error text never reaches the model or the user.
+func reminderErrMsg(err error) string {
+	e := err.Error()
+	switch {
+	case errors.Is(err, reminder.ErrTooMany):
+		return "chat này đã có quá nhiều nhắc nhở đang chờ"
+	case strings.Contains(e, "future"):
+		return "thời gian nhắc phải ở tương lai"
+	case strings.Contains(e, "1 year"):
+		return "chỉ đặt nhắc nhở trong vòng 1 năm tới"
+	case strings.Contains(e, "empty task"):
+		return "nội dung nhắc nhở đang trống"
+	case strings.Contains(e, "longer than"):
+		return "nội dung nhắc nhở quá dài"
+	}
+	return "không tạo được nhắc nhở lúc này, thử lại sau"
+}
 
 // reminderIntent is the guard for reminder_create: the user's own text must
 // carry reminder intent, whatever the model says.

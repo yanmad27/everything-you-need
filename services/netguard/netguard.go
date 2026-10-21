@@ -61,9 +61,9 @@ func NewSafeClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
 		Control: func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return ErrBlocked
+			host, port, err := net.SplitHostPort(address)
+			if err != nil || (port != "80" && port != "443") {
+				return ErrBlocked // only default web ports (a URL without a port dials 80/443)
 			}
 			ip, err := netip.ParseAddr(host)
 			if err != nil || IsBlockedIP(ip) {

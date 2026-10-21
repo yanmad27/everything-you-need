@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"everything-you-need/m/services/chat"
@@ -91,7 +92,7 @@ func (a reminderAdapter) Cancel(ctx context.Context, platform, chatID string, id
 // service that is not configured is left nil, which omits its tool.
 func buildZaloTools(cfg *config.Config, prices *pricetracker.PriceTrackerService, newsStore *news.Store,
 	due *duedate.Service, rem *reminder.Service) chat.Tools {
-	tl := chat.Tools{Platform: reminder.PlatformZalo}
+	tl := chat.Tools{Platform: reminder.PlatformZalo, DueChats: strings.Split(cfg.Zalo.PrivateToolChats, ",")}
 	if prices != nil {
 		tl.Prices = priceAdapter{pricetracker.NewCachedPriceReader(prices, 2*time.Minute)}
 	}
@@ -123,5 +124,5 @@ func enableZaloTools(svc *chat.Service, completer llm.Completer, tl chat.Tools) 
 	}
 	svc.WithTools(tc, tl)
 	log.Printf("Zalo chat tools enabled (prices=%t search=%t news=%t due=%t reminders=%t)",
-		tl.Prices != nil, tl.Search != nil, tl.News != nil, tl.Due != nil, tl.Reminders != nil)
+		tl.Prices != nil, tl.Search != nil, tl.News != nil, tl.Due != nil && len(tl.DueChats) > 0, tl.Reminders != nil)
 }
