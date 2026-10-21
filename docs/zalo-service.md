@@ -43,6 +43,9 @@ Telegram, news and the default reminder parser keep using Anthropic Claude.
 | `LLM_OPENAI_API_KEY` | `llm_openai.api_key` | `""` (secret) |
 | `LLM_OPENAI_MODEL` | `llm_openai.model` | `codex-auto-review` |
 
+(If the server rejects `max_tokens`, the client retries once with `max_completion_tokens`.)
+
+
 The provider is used only when both base URL and key are set. Otherwise Zalo
 falls back to the Anthropic client (`chat.api_key`, else `reminder.openai_api_key`),
 exactly like Telegram. Check the model list with `GET {base_url}/v1/models`.
@@ -59,7 +62,14 @@ as the provider above is set.
   to the bot. The assistant therefore answers **without** needing a wake word
   (a wake word, if present, is stripped). Reminder commands still take
   priority. This is implemented as a separate `HandleAddressed` path in the chat
-  service; the Telegram trigger logic is untouched.
+  service; the Telegram trigger logic is untouched. If Zalo ever starts delivering
+  *all* group messages, the bot would answer every one of them; to restore
+  wake-word behaviour in groups, change `dispatchIncoming(..., addressed)` in
+  `main.go` to pass `false` for Zalo groups.
+
+**Link reading:** the Zalo chat assistant only fetches public http/https links
+(loopback, private, link-local, CGNAT, multicast and unspecified addresses are
+refused at dial time, including redirects). Telegram's link reader is unchanged.
 
 ## Enabling in Dokploy
 

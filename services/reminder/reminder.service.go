@@ -30,12 +30,12 @@ type IncomingMessage struct {
 
 // Service wires Store + Parser + Sender into the bot command handler.
 type Service struct {
-	store  *Store
-	parser Parser
-	sender Sender // default (Telegram) sender
-	extra  map[string]Sender
+	store   *Store
+	parser  Parser
+	sender  Sender // default (Telegram) sender
+	extra   map[string]Sender
 	parsers map[string]Parser // per-platform overrides of parser
-	now    func() time.Time
+	now     func() time.Time
 }
 
 // WithSender registers the sender used for a non-default platform.
@@ -61,6 +61,20 @@ func (s *Service) parserFor(platform string) Parser {
 		return p
 	}
 	return s.parser
+}
+
+// configuredPlatforms lists the platforms that have a sender.
+func (s *Service) configuredPlatforms() []string {
+	var out []string
+	if s.sender != nil {
+		out = append(out, PlatformTelegram)
+	}
+	for p, snd := range s.extra {
+		if snd != nil && p != PlatformTelegram {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // senderFor returns the sender for a platform, or nil if none is configured.
@@ -151,14 +165,14 @@ func (s *Service) handleCreate(ctx context.Context, msg IncomingMessage) error {
 	}
 
 	reminder := Reminder{
-		Platform:       msg.Platform,
-		ChatID:         msg.ChatID,
-		UserID:         msg.UserID,
-		UserName:       msg.UserName,
-		OriginalMsg:    msg.Text,
-		OriginalMsgID:  msg.MessageID,
-		Task:           result.Task,
-		FireAt:         result.When,
+		Platform:      msg.Platform,
+		ChatID:        msg.ChatID,
+		UserID:        msg.UserID,
+		UserName:      msg.UserName,
+		OriginalMsg:   msg.Text,
+		OriginalMsgID: msg.MessageID,
+		Task:          result.Task,
+		FireAt:        result.When,
 	}
 	id, err := s.store.Create(ctx, reminder)
 	if err != nil {
@@ -217,21 +231,20 @@ func (s *Service) PurgeOld(ctx context.Context, remindersCutoff, updatesCutoff t
 
 // Sweep fires all due reminders. Intended to be called once per minute from the scheduler.
 func (s *Service) Sweep(ctx context.Context, now time.Time) error {
-	pending, err := s.store.ListPending(ctx, now, 50)
+	// Only fetch reminders of platforms that currently have a sender; the rest
+	// stay pending untouched (attempts not counted) until that platform is back.
+	platforms := s.configuredPlatforms()
+	if len(platforms) == 0 {
+		return nil
+	}
+	pending, err := s.store.ListPendingForPlatforms(ctx, now, 50, platforms)
 	if err != nil {
 		return fmt.Errorf("list pending: %w", err)
 	}
-	warned := map[string]bool{}
 	for _, r := range pending {
 		text := formatFireMessage(r, now)
 		snd := s.senderFor(r.Platform)
-		if snd == nil {
-			// Platform not configured right now: leave the reminder pending
-			// (no attempt counted) so it fires once that platform is back.
-			if !warned[r.Platform] {
-				warned[r.Platform] = true
-				log.Printf("reminder sweep: no sender configured for platform %q, leaving its reminders pending", r.Platform)
-			}
+		if snd == nil { // cannot happen (filtered above); never count an attempt
 			continue
 		}
 		sendErr := snd.SendReply(ctx, r.ChatID, r.OriginalMsgID, text)

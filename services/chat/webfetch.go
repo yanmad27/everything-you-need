@@ -27,7 +27,7 @@ const maxPageChars = 12000
 // augmentWithURLs appends readable text of any URLs found in the prompt so the
 // model can answer about a link the user pasted. Best-effort: fetch failures are
 // logged and skipped (up to 2 URLs).
-func augmentWithURLs(ctx context.Context, prompt string) string {
+func augmentWithURLs(ctx context.Context, prompt string, safe bool) string {
 	urls := urlRe.FindAllString(prompt, 2)
 	if len(urls) == 0 {
 		return prompt
@@ -35,6 +35,17 @@ func augmentWithURLs(ctx context.Context, prompt string) string {
 	var b strings.Builder
 	b.WriteString(prompt)
 	for _, u := range urls {
+		if safe {
+			text, err := fetchPageTextSafe(ctx, u)
+			if err != nil {
+				// No URL or transport detail in logs / model text.
+				log.Printf("chat: link fetch failed (safe mode)")
+				b.WriteString("\n\n[Không đọc được nội dung một liên kết. Hãy nói với người dùng là không truy cập được trang này và gợi ý họ dán nội dung vào.]")
+				continue
+			}
+			fmt.Fprintf(&b, "\n\n[Nội dung trích từ trang %s]:\n%s", u, text)
+			continue
+		}
 		text, err := fetchPageText(ctx, u)
 		if err != nil {
 			log.Printf("chat: fetch %s: %v", u, err)
@@ -50,17 +61,17 @@ func augmentWithURLs(ctx context.Context, prompt string) string {
 // bypasses WAF/IP blocks and renders JS, returning clean LLM-ready text). Falls
 // back to a direct fetch if the reader is unavailable.
 func fetchPageText(ctx context.Context, rawURL string) (string, error) {
-	if text, err := getText(ctx, "https://r.jina.ai/"+rawURL, false); err == nil {
+	if text, err := getText(ctx, fetchHTTP, "https://r.jina.ai/"+rawURL, false); err == nil {
 		return text, nil
 	} else {
 		log.Printf("chat: reader %s: %v (trying direct)", rawURL, err)
 	}
-	return getText(ctx, rawURL, true)
+	return getText(ctx, fetchHTTP, rawURL, true)
 }
 
 // getText GETs a URL and returns readable text. stripHTML runs the tag stripper
 // (needed for a direct fetch; the reader already returns markdown).
-func getText(ctx context.Context, url string, stripHTML bool) (string, error) {
+func getText(ctx context.Context, client *http.Client, url string, stripHTML bool) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
@@ -68,7 +79,7 @@ func getText(ctx context.Context, url string, stripHTML bool) (string, error) {
 	req.Header.Set("User-Agent", browserUA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "vi,en;q=0.9")
-	resp, err := fetchHTTP.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

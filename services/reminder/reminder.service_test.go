@@ -374,3 +374,26 @@ func TestZaloCreateListCancelRepliesOnZalo(t *testing.T) {
 		t.Errorf("cancel reply = %q telegram=%d", zl.sent[2].Text, len(tg.sent))
 	}
 }
+
+func TestSweepUnconfiguredPlatformCannotStarveOthers(t *testing.T) {
+	ctx := context.Background()
+	zl := &stubSender{}
+	svc := newTestService(t, nil, nil).WithSender(PlatformZalo, zl) // no telegram sender
+	base := time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 60; i++ { // older than the zalo row, so they sort first
+		_, _ = svc.store.Create(ctx, Reminder{ChatID: "tg", UserName: "A", Task: "old", FireAt: base.Add(time.Duration(i) * time.Second)})
+	}
+	zid, _ := svc.store.Create(ctx, Reminder{Platform: PlatformZalo, ChatID: "zl", UserName: "B", Task: "z", FireAt: base.Add(time.Hour)})
+
+	if err := svc.Sweep(ctx, base.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := svc.store.GetByID(ctx, zid); r.FiredAt == nil || len(zl.sent) != 1 {
+		t.Fatalf("zalo row must fire in the first sweep: %+v sent=%d", r, len(zl.sent))
+	}
+	var untouched int
+	_ = svc.store.db.QueryRow(`SELECT COUNT(*) FROM reminders WHERE platform='telegram' AND attempts=0 AND fired_at IS NULL`).Scan(&untouched)
+	if untouched != 60 {
+		t.Errorf("telegram rows touched: %d/60 untouched", untouched)
+	}
+}

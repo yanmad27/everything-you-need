@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -26,19 +27,19 @@ const (
 )
 
 type Reminder struct {
-	ID             int64
-	Platform       string
-	ChatID         string
-	UserID         string
-	UserName       string
-	OriginalMsg    string
-	OriginalMsgID  int64
-	Task           string
-	FireAt         time.Time
-	CreatedAt      time.Time
-	FiredAt        *time.Time
-	CanceledAt     *time.Time
-	Attempts       int
+	ID            int64
+	Platform      string
+	ChatID        string
+	UserID        string
+	UserName      string
+	OriginalMsg   string
+	OriginalMsgID int64
+	Task          string
+	FireAt        time.Time
+	CreatedAt     time.Time
+	FiredAt       *time.Time
+	CanceledAt    *time.Time
+	Attempts      int
 }
 
 type Store struct {
@@ -146,13 +147,30 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Reminder, error) {
 }
 
 func (s *Store) ListPending(ctx context.Context, now time.Time, limit int) ([]Reminder, error) {
-	rows, err := s.db.QueryContext(ctx, selectReminderBase+`
+	return s.ListPendingForPlatforms(ctx, now, limit, nil)
+}
+
+// ListPendingForPlatforms is ListPending restricted to the given platforms
+// (nil/empty = all), so rows of an unconfigured platform cannot crowd out
+// deliverable ones under LIMIT.
+func (s *Store) ListPendingForPlatforms(ctx context.Context, now time.Time, limit int, platforms []string) ([]Reminder, error) {
+	query := selectReminderBase + `
 		WHERE fired_at IS NULL
 		  AND canceled_at IS NULL
 		  AND attempts < ?
-		  AND fire_at <= ?
+		  AND fire_at <= ?`
+	args := []any{maxAttempts, now.UTC()}
+	if len(platforms) > 0 {
+		query += ` AND platform IN (?` + strings.Repeat(`,?`, len(platforms)-1) + `)`
+		for _, p := range platforms {
+			args = append(args, p)
+		}
+	}
+	query += `
 		ORDER BY fire_at ASC
-		LIMIT ?`, maxAttempts, now.UTC(), limit)
+		LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query pending: %w", err)
 	}

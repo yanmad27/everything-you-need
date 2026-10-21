@@ -13,8 +13,8 @@ import (
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/duedate"
-	"everything-you-need/m/services/llm"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
+	"everything-you-need/m/services/llm"
 	"everything-you-need/m/services/news"
 	pricetracker "everything-you-need/m/services/price-tracker"
 	"everything-you-need/m/services/reminder"
@@ -47,10 +47,10 @@ func main() {
 	dueDateService := buildDueDateService(cfg)
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
-		teleChat = buildChatService(cfg, teleService, nil)
+		teleChat = buildChatService(cfg, teleService, nil, false)
 	}
 	if zaloService != nil {
-		zaloChat = buildChatService(cfg, zaloService, zaloCompleter)
+		zaloChat = buildChatService(cfg, zaloService, zaloCompleter, true)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -111,7 +111,11 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		zaloSender = zaloService
 	}
 	svc := newReminderService(cfg, store, teleSender, zaloSender, zaloLLM)
-	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
+	if teleService != nil {
+		log.Printf("Reminder service initialized (db=%s, telegram model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
+	} else {
+		log.Printf("Reminder service initialized (db=%s, zalo provider model=%s)", cfg.Reminder.DBPath, cfg.LLMOpenAI.Model)
+	}
 	return svc, store
 }
 
@@ -191,14 +195,14 @@ func buildZaloCompleter(cfg *config.Config) llm.Completer {
 
 // buildChatService builds one chat assistant bound to one platform's sender
 // (history is kept per assistant, so platforms never share context).
-func buildChatService(cfg *config.Config, sender chat.Sender, completer llm.Completer) *chat.Service {
+func buildChatService(cfg *config.Config, sender chat.Sender, completer llm.Completer, safeFetch bool) *chat.Service {
 	if !cfg.Chat.Enabled {
 		log.Printf("Chat service disabled in config")
 		return nil
 	}
 	if completer != nil {
 		log.Printf("Chat service initialized (OpenAI-compatible provider)")
-		return chat.NewServiceWithCompleter(completer, sender)
+		return chat.NewServiceWithCompleter(completer, sender).WithSafeFetch(safeFetch)
 	}
 	apiKey := cfg.Chat.APIKey
 	if apiKey == "" {
@@ -212,11 +216,14 @@ func buildChatService(cfg *config.Config, sender chat.Sender, completer llm.Comp
 		return nil
 	}
 	log.Printf("Chat service initialized (model=%s)", cfg.Chat.Model)
-	return chat.NewService(apiKey, cfg.Chat.Model, sender)
+	return chat.NewService(apiKey, cfg.Chat.Model, sender).WithSafeFetch(safeFetch)
 }
 
 // minZaloWebhookSecret is the shortest secret_token Zalo's setWebhook accepts.
-const minZaloWebhookSecret = 8
+const (
+	minZaloWebhookSecret = 8
+	maxZaloWebhookSecret = 256
+)
 
 func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
@@ -246,10 +253,8 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 	}
 
 	if zaloService != nil && (svc != nil || zaloChat != nil) {
-		if n := len(cfg.Zalo.WebhookSecret); n < minZaloWebhookSecret {
-			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-256 characters (got %d)", minZaloWebhookSecret, n)
-		} else if n > 256 {
-			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-256 characters (got %d)", minZaloWebhookSecret, n)
+		if n := len(cfg.Zalo.WebhookSecret); n < minZaloWebhookSecret || n > maxZaloWebhookSecret {
+			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-%d characters (got %d)", minZaloWebhookSecret, maxZaloWebhookSecret, n)
 		} else {
 			path := cfg.Zalo.WebhookPath
 			if path == "" {

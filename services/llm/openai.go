@@ -47,6 +47,9 @@ type openAIRequest struct {
 	Model     string          `json:"model"`
 	Messages  []openAIMessage `json:"messages"`
 	MaxTokens int             `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens is used instead of MaxTokens by servers that reject
+	// max_tokens (newer OpenAI models).
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 }
 
 type openAIResponse struct {
@@ -76,14 +79,34 @@ func (c *OpenAIClient) Complete(ctx context.Context, system string, messages []M
 		}
 		msgs = append(msgs, openAIMessage{Role: role, Content: m.Content})
 	}
-	body, err := json.Marshal(openAIRequest{Model: c.model, Messages: msgs, MaxTokens: maxTokens})
+	text, status, detail, err := c.do(ctx, msgs, maxTokens, false)
+	if err == nil {
+		return text, nil
+	}
+	// Some models reject max_tokens; retry once with max_completion_tokens.
+	if status == http.StatusBadRequest && strings.Contains(detail, "max_tokens") {
+		text, _, _, err = c.do(ctx, msgs, maxTokens, true)
+		return text, err
+	}
+	return "", err
+}
+
+// do performs one request. On non-2xx it returns the status and server message.
+func (c *OpenAIClient) do(ctx context.Context, msgs []openAIMessage, maxTokens int, completionField bool) (text string, status int, detail string, err error) {
+	reqBody := openAIRequest{Model: c.model, Messages: msgs}
+	if completionField {
+		reqBody.MaxCompletionTokens = maxTokens
+	} else {
+		reqBody.MaxTokens = maxTokens
+	}
+	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("openai-compat marshal: %w", err)
+		return "", 0, "", fmt.Errorf("openai-compat marshal: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("openai-compat request: %s", c.redact(err.Error()))
+		return "", 0, "", fmt.Errorf("openai-compat request: %s", c.redact(err.Error()))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -94,34 +117,37 @@ func (c *OpenAIClient) Complete(ctx context.Context, system string, messages []M
 		if errors.As(err, &uerr) {
 			err = uerr.Err
 		}
-		return "", fmt.Errorf("openai-compat request failed: %s", c.redact(err.Error()))
+		return "", 0, "", fmt.Errorf("openai-compat request failed: %s", c.redact(err.Error()))
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", fmt.Errorf("openai-compat read: %s", c.redact(err.Error()))
+		return "", 0, "", fmt.Errorf("openai-compat read: %s", c.redact(err.Error()))
 	}
 
 	var out openAIResponse
 	jsonErr := json.Unmarshal(raw, &out)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		detail := ""
 		if jsonErr == nil && out.Error != nil {
-			detail = ": " + c.redact(out.Error.Message)
+			detail = c.redact(out.Error.Message)
 		}
-		return "", fmt.Errorf("openai-compat HTTP %d%s", resp.StatusCode, detail)
+		msg := fmt.Sprintf("openai-compat HTTP %d", resp.StatusCode)
+		if detail != "" {
+			msg += ": " + detail
+		}
+		return "", resp.StatusCode, detail, errors.New(msg)
 	}
 	if jsonErr != nil {
-		return "", fmt.Errorf("openai-compat: malformed response JSON")
+		return "", resp.StatusCode, "", fmt.Errorf("openai-compat: malformed response JSON")
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("openai-compat: response has no choices")
+		return "", resp.StatusCode, "", fmt.Errorf("openai-compat: response has no choices")
 	}
-	text := strings.TrimSpace(out.Choices[0].Message.Content)
+	text = strings.TrimSpace(out.Choices[0].Message.Content)
 	if text == "" {
-		return "", fmt.Errorf("openai-compat returned no text")
+		return "", resp.StatusCode, "", fmt.Errorf("openai-compat returned no text")
 	}
-	return text, nil
+	return text, resp.StatusCode, "", nil
 }
 
 func (c *OpenAIClient) redact(s string) string {

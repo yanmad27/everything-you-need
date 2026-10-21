@@ -46,11 +46,11 @@ func TestOpenAIClientErrors(t *testing.T) {
 		status int
 		body   string
 	}{
-		"non-2xx":        {401, `{"error":{"message":"bad key ` + fakeKey + `"}}`},
+		"non-2xx":         {401, `{"error":{"message":"bad key ` + fakeKey + `"}}`},
 		"non-2xx-no-json": {502, `<html>`},
-		"malformed":      {200, `{not json`},
-		"empty choices":  {200, `{"choices":[]}`},
-		"empty text":     {200, `{"choices":[{"message":{"content":"  "}}]}`},
+		"malformed":       {200, `{not json`},
+		"empty choices":   {200, `{"choices":[]}`},
+		"empty text":      {200, `{"choices":[{"message":{"content":"  "}}]}`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -77,5 +77,29 @@ func TestOpenAIClientTransportErrorHidesKeyAndURL(t *testing.T) {
 	_, err := NewOpenAIClient(url, fakeKey, "m", 0).Complete(context.Background(), "", []Message{{Role: "user", Content: "x"}}, 0)
 	if err == nil || strings.Contains(err.Error(), fakeKey) || strings.Contains(err.Error(), url) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestOpenAIClientRetriesWithMaxCompletionTokens(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &m)
+		bodies = append(bodies, m)
+		if _, ok := m["max_tokens"]; ok {
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"error":{"message":"Unsupported parameter: max_tokens. Use max_completion_tokens."}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+	out, err := NewOpenAIClient(srv.URL, fakeKey, "m", 0).Complete(context.Background(), "", []Message{{Role: "user", Content: "x"}}, 77)
+	if err != nil || out != "ok" || len(bodies) != 2 {
+		t.Fatalf("out=%q err=%v calls=%d", out, err, len(bodies))
+	}
+	if bodies[1]["max_completion_tokens"] != float64(77) || bodies[1]["max_tokens"] != nil {
+		t.Errorf("retry body = %v", bodies[1])
 	}
 }

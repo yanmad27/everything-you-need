@@ -11,8 +11,8 @@ import (
 
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
-	zalobot "everything-you-need/m/services/zalo-bot"
 	"everything-you-need/m/services/reminder"
+	zalobot "everything-you-need/m/services/zalo-bot"
 )
 
 type captureSender struct{ texts []string }
@@ -59,8 +59,8 @@ func TestZaloUsesOpenAICompatTelegramUsesAnthropic(t *testing.T) {
 
 	// chat
 	ctx := context.Background()
-	zaloChat := buildChatService(cfg, zl, completer)
-	teleChat := buildChatService(cfg, tg, nil)
+	zaloChat := buildChatService(cfg, zl, completer, true)
+	teleChat := buildChatService(cfg, tg, nil, false)
 	if err := zaloChat.Handle(ctx, "z", 0, "pink ơi chào"); err != nil {
 		t.Fatal(err)
 	}
