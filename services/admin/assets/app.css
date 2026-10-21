@@ -1,0 +1,20 @@
+:root{color-scheme:light dark;--bg:#fafafa;--fg:#1c1c1e;--mut:#6b6b70;--line:#dcdce0;--card:#fff;--acc:#d6336c;--bad:#c92a2a;--ok:#2b8a3e}
+@media(prefers-color-scheme:dark){:root{--bg:#161618;--fg:#ececf0;--mut:#9a9aa2;--line:#33333a;--card:#1f1f23;--acc:#f06595;--bad:#ff8787;--ok:#69db7c}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;gap:16px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--card)}
+header b{color:var(--acc)}header a{color:var(--fg);text-decoration:none}header a.on{color:var(--acc);font-weight:600}
+header form{margin-left:auto}main{padding:20px;max-width:1200px;margin:0 auto}
+h1{font-size:20px;margin:0 0 14px}table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line)}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--mut);font-weight:600;white-space:nowrap}
+td.n{text-align:right;font-variant-numeric:tabular-nums}a{color:var(--acc)}
+form.f{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:end}form.f label{display:flex;flex-direction:column;font-size:12px;color:var(--mut)}
+input,select,button{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}header button{background:none;color:var(--fg);border-color:var(--line)}
+.mut{color:var(--mut)}.bad{color:var(--bad)}.ok{color:var(--ok)}.pager{display:flex;gap:12px;margin:12px 0}
+.msg{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:8px 0;max-width:80%;white-space:pre-wrap;word-break:break-word}
+.msg.out{margin-left:auto;border-color:var(--acc)}.msg.system{border-style:dashed}.meta{font-size:12px;color:var(--mut)}
+.tool{margin:4px 0 4px 24px;padding:4px 10px;border-left:3px solid var(--line);font-size:13px;color:var(--mut)}
+.tool.err{border-color:var(--bad)}.tool code{color:var(--fg);word-break:break-all}
+.login{max-width:320px;margin:15vh auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
+.login label{display:block;margin:10px 0 2px}.login input{width:100%}.login button{margin-top:14px;width:100%}
+.sec{margin-top:20px}

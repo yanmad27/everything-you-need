@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"everything-you-need/m/services/admin"
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
+	"everything-you-need/m/services/convo"
 	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/llm"
@@ -46,6 +48,7 @@ func main() {
 	}
 
 	dueDateService := buildDueDateService(cfg)
+	var convoStore *convo.Store
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
@@ -56,7 +59,13 @@ func main() {
 		if _, zOn := reminderPlatforms(cfg, teleService != nil, true, zaloCompleter != nil); zOn {
 			zaloRem = reminderService
 		}
-		enableZaloTools(zaloChat, zaloCompleter, buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem))
+		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
+		if convoStore = buildConvoStore(cfg); convoStore != nil {
+			defer convoStore.Close()
+			zaloTools.Recorder = convoStore
+			zaloTools.Model = zaloModel(cfg, zaloCompleter)
+		}
+		enableZaloTools(zaloChat, zaloCompleter, zaloTools)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -73,7 +82,7 @@ func main() {
 	if zaloOn {
 		zaloSvc = reminderService
 	}
-	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat)
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -251,9 +260,15 @@ const (
 
 func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
-	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
+	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service,
+	extra ...func(*http.ServeMux) int) *http.Server {
 	mux := http.NewServeMux()
 	mounted := 0
+	for _, m := range extra {
+		if m != nil {
+			mounted += m(mux)
+		}
+	}
 
 	if teleService != nil && (teleSvc != nil || teleChat != nil) {
 		if cfg.Telegram.WebhookSecret == "" {
@@ -367,6 +382,7 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 // dispatchZaloWith also routes image messages to chat (never to the reminder
 // regex service). fetchImage downloads msg.Photo; nil ignores images.
 func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
+	ctx = chat.WithMeta(ctx, chat.Meta{ChatType: msg.Chat.ChatType})
 	if msg.Kind == "image" {
 		dispatchZaloImage(ctx, chatSvc, botNames, msg, fetchImage)
 		return
@@ -426,4 +442,54 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 		log.Printf("chat dispatch error (zalo image): %v", err)
 	}
 	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
+}
+
+// buildConvoStore opens the Zalo conversation store; a failure disables
+// recording only (the bot keeps working).
+func buildConvoStore(cfg *config.Config) *convo.Store {
+	c := cfg.Convo
+	if !c.Enabled {
+		return nil
+	}
+	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
+		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K})
+	if err != nil {
+		log.Printf("Convo store open failed: %v (conversation recording disabled)", err)
+		return nil
+	}
+	log.Printf("Convo store initialized (db=%s, retention_days=%d)", c.DBPath, c.RetentionDays)
+	return st
+}
+
+// adminMount returns a mux mounter for the admin UI, or nil when it is not
+// fully configured (credentials + conversation store). No default password.
+func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int {
+	a := cfg.Admin
+	if a.Username == "" || a.PasswordHash == "" {
+		log.Printf("Admin UI disabled: admin.username and admin.password_hash are not both set")
+		return nil
+	}
+	if store == nil {
+		log.Printf("Admin UI disabled: conversation store is not available")
+		return nil
+	}
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, SessionSecret: a.SessionSecret}, store, admin.Options{})
+	if err != nil {
+		log.Printf("Admin UI disabled: %v", err)
+		return nil
+	}
+	return func(mux *http.ServeMux) int {
+		h.Mount(mux)
+		log.Printf("Admin UI mounted at /admin")
+		return 1
+	}
+}
+
+// zaloModel names the model the Zalo assistant actually calls: the
+// OpenAI-compatible one when that completer is in use, else the Anthropic chat model.
+func zaloModel(cfg *config.Config, completer llm.Completer) string {
+	if completer != nil {
+		return cfg.LLMOpenAI.Model
+	}
+	return cfg.Chat.Model
 }

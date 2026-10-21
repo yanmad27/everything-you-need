@@ -1,0 +1,13 @@
+{{template "head" .}}<h1>{{.Data.Platform}} · {{.Data.ChatID}} <span class="mut">({{.Data.Total}} mục)</span></h1>
+<p><a href="/admin/chats">← Danh sách</a></p>
+{{template "pager" .Data.Pager}}
+{{range .Data.Items}}
+{{if .Message}}{{with .Message}}<div class="msg {{.Direction}}{{if eq .Kind "system"}} system{{end}}">
+<div class="meta">{{ftime .CreatedAt}} · {{if eq .Direction "in"}}{{if .UserName}}{{.UserName}}{{else}}{{.UserID}}{{end}}{{else}}Pink{{end}}{{if eq .Kind "system"}} · hệ thống{{end}} · lượt {{.TurnID}}{{if .ErrorTag}} · <span class="bad">{{.ErrorTag}}</span>{{end}}</div>
+{{if eq .Kind "image"}}<div>🖼 ảnh {{if .ImageMime}}{{.ImageMime}}{{end}}{{if .ImageBytes}} {{kb .ImageBytes}}{{end}} <span class="mut">(không lưu nội dung ảnh)</span></div>{{end}}
+{{if .Text}}<div>{{.Text}}</div>{{end}}</div>{{end}}
+{{else}}{{with .Tool}}<div class="tool{{if ne .Outcome "ok"}} err{{end}}">🔧 <b>{{.Name}}</b> · <span class="{{if eq .Outcome "ok"}}ok{{else}}bad{{end}}">{{.Outcome}}</span> · {{.LatencyMS}} ms · {{ftime .CreatedAt}}
+{{if .ArgsSummary}}<div>args: <code>{{.ArgsSummary}}</code></div>{{end}}{{if .ResultSummary}}<div>kết quả: <code>{{.ResultSummary}}</code></div>{{end}}</div>{{end}}{{end}}
+{{end}}
+{{template "pager" .Data.Pager}}
+{{template "foot" .}}

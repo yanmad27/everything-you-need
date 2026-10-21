@@ -1,0 +1,15 @@
+{{template "head" .}}<h1>{{.Title}}</h1>
+<form class="f" method="get">
+<label>Nền tảng<select name="platform"><option value="">tất cả</option><option value="zalo"{{if eq (.Q.Get "platform") "zalo"}} selected{{end}}>zalo</option><option value="telegram"{{if eq (.Q.Get "platform") "telegram"}} selected{{end}}>telegram</option></select></label>
+<label>Tìm (tên/id)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
+{{if not .Data.ByChat}}<label>Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>{{end}}
+<label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
+<label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
+<button type="submit">Lọc</button></form>
+<table><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th>Tin nhắn</th><th>Ngày hoạt động</th><th>Lần cuối</th><th>Nhắc nhở</th><th>Ảnh</th><th>Công cụ hàng đầu</th><th>Lỗi</th><th>Thông báo</th><th>Token (in/out/tổng)</th><th>Chi phí ước tính</th></tr>
+{{range .Data.Items}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.ID}}</span>{{else}}{{.ID}}{{end}} <span class="mut">{{.Platform}}</span></td>
+<td class="n">{{.Messages}}</td><td class="n">{{.ActiveDays}}</td><td>{{ftime .LastSeen}}</td><td class="n">{{.RemindersCreated}}</td><td class="n">{{.ImagesSent}}</td>
+<td>{{range .TopTools}}{{.Name}}×{{.Count}} {{end}}</td><td class="n{{if .Errors}} bad{{end}}">{{.Errors}}</td><td class="n">{{.Notices}}</td>
+<td class="n">{{.PromptTokens}}/{{.CompletionTokens}}/{{.TotalTokens}}</td><td class="n">{{if .EstCost}}{{cost .EstCost}}{{else}}<span class="mut">—</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="11" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+{{template "foot" .}}

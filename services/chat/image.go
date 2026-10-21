@@ -67,6 +67,11 @@ func (s *Service) recentQuestion(chatID, userID string) string {
 	return l.text
 }
 
+const (
+	msgImageFetch = "Pink không tải được ảnh, bạn gửi lại giúp nhé"
+	msgImageLarge = "Ảnh này lớn quá, Pink chưa đọc được. Bạn gửi ảnh nhỏ hơn giúp nhé"
+)
+
 const describePrompt = "Người dùng gửi một bức ảnh không kèm lời nhắn. Hãy mô tả ngắn gọn ảnh và hỏi họ cần Pink giúp gì với ảnh này."
 
 func imageFetchReason(err error) string {
@@ -85,21 +90,32 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 	if s.toolClient == nil {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink chưa xem được ảnh ở đây, bạn mô tả bằng chữ giúp Pink nhé 🩷")
 	}
+	ctx = newTurn(ctx)
+	caption = strings.Join(strings.Fields(caption), " ")
+	in := ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "image", Text: caption}
 	if ok, notice := s.limiter.allow(chatID); !ok {
+		in.Text, in.ErrTag = "", "rate_limited"
+		s.recordConvo(ctx, in)
 		if notice {
-			return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé 🩷")
+			s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgRateLimit, ErrTag: "rate_limited"})
+			return s.sender.SendReply(ctx, chatID, replyToMsgID, msgRateLimit)
 		}
 		return nil
 	}
-	caption = strings.Join(strings.Fields(caption), " ")
 	data, mime, err := fetch(ctx)
 	if err != nil {
-		log.Printf("chat image: kind=image bytes=0 mime= outcome=fetch_error reason=%s chat=%s", imageFetchReason(err), maskChat(chatID))
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink không tải được ảnh, bạn gửi lại giúp nhé")
+		reason := imageFetchReason(err)
+		log.Printf("chat image: kind=image bytes=0 mime= outcome=fetch_error reason=%s chat=%s", reason, maskChat(chatID))
+		s.recordConvo(ctx, in)
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgImageFetch, ErrTag: "image_fetch_" + reason})
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, msgImageFetch)
 	}
+	in.ImageMime, in.ImageBytes = mime, len(data)
+	s.recordConvo(ctx, in)
 	if base64.StdEncoding.EncodedLen(len(data)) > maxImageB64 {
 		log.Printf("chat image: kind=image bytes=%d mime=%s outcome=too_large chat=%s", len(data), mime, maskChat(chatID))
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Ảnh này lớn quá, Pink chưa đọc được. Bạn gửi ảnh nhỏ hơn giúp nhé")
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgImageLarge, ErrTag: "image_too_large"})
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, msgImageLarge)
 	}
 	log.Printf("chat image: kind=image bytes=%d mime=%s outcome=ok chat=%s", len(data), mime, maskChat(chatID))
 
@@ -118,15 +134,18 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {
 		log.Printf("chat: completion error (image): %s chat=%s", errTag(err), maskChat(chatID))
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgBusy, ErrTag: failTag(err)})
 		rc, cancel := replyCtx(ctx)
 		defer cancel()
-		return s.sender.SendReply(rc, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
+		return s.sender.SendReply(rc, chatID, replyToMsgID, msgBusy)
 	}
 	rc, cancel := replyCtx(ctx)
 	defer cancel()
 	if err := s.sendTools(rc, chatID, replyToMsgID, reply); err != nil {
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply, ErrTag: "send_failed"})
 		return err
 	}
+	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply})
 	s.remember(chatID, strings.TrimSpace("[ảnh] "+caption), reply)
 	return nil
 }

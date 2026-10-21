@@ -71,6 +71,7 @@ type Tools struct {
 	Reminders ReminderTools
 	Fetch     func(ctx context.Context, url string) (string, error) // default: SSRF-safe reader
 	Recorder  Recorder
+	Model     string // LLM model name, recorded with usage
 	Now       func() time.Time
 
 	// DueChats lists the chat ids allowed to use due_dates (private data); empty disables it.
