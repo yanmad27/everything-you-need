@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,12 +19,64 @@ import (
 // SecretHeader carries the secret_token registered via setWebhook.
 const SecretHeader = "X-Bot-Api-Secret-Token"
 
-const eventTextReceived = "message.text.received"
+const (
+	eventTextReceived  = "message.text.received"
+	eventImageReceived = "message.image.received"
+)
+
+// photoKeys are the message fields that may carry an image URL, in priority order.
+var photoKeys = []string{"photo", "url", "image", "image_url"}
+
+func httpURL(r json.RawMessage) string {
+	var s string
+	if json.Unmarshal(r, &s) != nil {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if len(s) > 8 && (strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")) {
+		return s
+	}
+	return ""
+}
+
+// findPhotoURL recovers an image URL from a message's fields: photo (the
+// documented one), else the first http(s) string among url|image|image_url,
+// else attachments[*].payload.url (or .url).
+func findPhotoURL(f map[string]json.RawMessage) string {
+	for _, k := range photoKeys {
+		if u := httpURL(f[k]); u != "" {
+			return u
+		}
+	}
+	var atts []json.RawMessage
+	if json.Unmarshal(f["attachments"], &atts) != nil {
+		return ""
+	}
+	for _, a := range atts {
+		af := rawFields(a)
+		if u := httpURL(af["url"]); u != "" {
+			return u
+		}
+		if u := httpURL(rawFields(af["payload"])["url"]); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+// hostOnly returns just the host of a URL (path and query may carry tokens).
+func hostOnly(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return "-"
+	}
+	return SafeField(u.Hostname(), 100)
+}
 
 // knownNonTextEvent reports documented events that are expected to be dropped.
 func knownNonTextEvent(e string) bool {
 	switch strings.ToLower(e) {
-	case "message.image.received", "message.sticker.received", "message.voice.received", "message.unsupported.received":
+	case "message.sticker.received", "message.voice.received", "message.unsupported.received":
 		return true
 	}
 	return false
@@ -50,6 +103,10 @@ type Message struct {
 	Chat      Chat   `json:"chat"`
 	Text      string `json:"text,omitempty"`
 	Date      int64  `json:"date,omitempty"`
+
+	Kind    string `json:"-"` // "text" | "image", set by the webhook handler
+	Photo   string `json:"-"` // image URL (never logged)
+	Caption string `json:"-"`
 }
 
 type User struct {
@@ -118,7 +175,8 @@ func rawBool(r json.RawMessage) bool {
 
 func (m *Message) UnmarshalJSON(b []byte) error {
 	f := rawFields(b)
-	*m = Message{MessageID: rawString(f["message_id"]), Text: rawString(f["text"])}
+	*m = Message{MessageID: rawString(f["message_id"]), Text: rawString(f["text"]),
+		Caption: rawString(f["caption"]), Photo: findPhotoURL(f)}
 	if r, ok := f["from"]; ok {
 		_ = m.From.UnmarshalJSON(r)
 	}
@@ -309,17 +367,20 @@ func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 				chatType = strings.ToUpper(msg.Chat.ChatType)
 			}
 		}
+		isImage := strings.EqualFold(event, eventImageReceived)
 		outcome := "dispatched"
 		switch {
 		case decodeErr != nil:
 			outcome = "dropped:decode_error"
 		case shape == "unknown":
 			outcome = "dropped:unknown_shape"
-		case !strings.EqualFold(event, eventTextReceived):
+		case !isImage && !strings.EqualFold(event, eventTextReceived):
 			outcome = "dropped:event_not_text"
 		case msg == nil:
 			outcome = "dropped:no_message"
-		case msg.Text == "":
+		case isImage && msg.Photo == "":
+			outcome = "dropped:no_photo"
+		case !isImage && msg.Text == "":
 			outcome = "dropped:empty_text"
 		case msg.Chat.ID == "":
 			outcome = "dropped:no_chat_id"
@@ -328,9 +389,14 @@ func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 		case msg.MessageID != "" && !seen.add(msg.MessageID):
 			outcome = "dropped:duplicate"
 		}
-		log.Printf("zalo webhook: shape=%s keys=[%s] event=%q chat_type=%q text_len=%d is_bot=%t chat=%s outcome=%s",
-			shape, topKeys(raw), SafeField(event, 40), SafeField(chatType, 40), textLen, isBot, MaskID(chatID), outcome)
-		if shape == "unknown" || (outcome == "dropped:event_not_text" && !knownNonTextEvent(event)) {
+		imageInfo := ""
+		if isImage && msg != nil {
+			imageInfo = " kind=image photo_host=" + strconv.Quote(hostOnly(msg.Photo))
+		}
+		log.Printf("zalo webhook: shape=%s keys=[%s] event=%q chat_type=%q text_len=%d is_bot=%t chat=%s%s outcome=%s",
+			shape, topKeys(raw), SafeField(event, 40), SafeField(chatType, 40), textLen, isBot, MaskID(chatID), imageInfo, outcome)
+		// TODO: drop the image structure dump once real image payloads are known.
+		if shape == "unknown" || isImage || (outcome == "dropped:event_not_text" && !knownNonTextEvent(event)) {
 			var generic any
 			_ = json.Unmarshal(body, &generic)
 			log.Printf("zalo webhook: structure=%s", structureDump(generic))
@@ -339,6 +405,15 @@ func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 			return
 		}
 
+		if isImage {
+			msg.Kind = "image"
+			if msg.Caption == "" {
+				msg.Caption = msg.Text
+			}
+		} else {
+			msg.Kind = "text"
+			msg.Photo, msg.Caption = "", ""
+		}
 		go func(m Message) {
 			defer func() {
 				if rec := recover(); rec != nil {
