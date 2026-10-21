@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -81,6 +82,10 @@ func knownNonTextEvent(e string) bool {
 	}
 	return false
 }
+
+// maxImageDumps bounds how many image events get a structure dump per handler
+// (one handler per process), enough to learn the real payload shape.
+const maxImageDumps = 5
 
 // maxBodyBytes bounds the webhook request body.
 const maxBodyBytes = 1 << 20
@@ -327,6 +332,7 @@ type Dispatcher func(ctx context.Context, msg Message)
 // and dispatches asynchronously. An empty secret rejects everything.
 func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 	seen := newSeenSet(1024)
+	var imageDumps atomic.Int32 // structure dumps for the first few image events only
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get(SecretHeader)
 		if secretToken == "" || subtle.ConstantTimeCompare([]byte(got), []byte(secretToken)) != 1 {
@@ -396,7 +402,7 @@ func NewWebhookHandler(secretToken string, dispatch Dispatcher) http.Handler {
 		log.Printf("zalo webhook: shape=%s keys=[%s] event=%q chat_type=%q text_len=%d is_bot=%t chat=%s%s outcome=%s",
 			shape, topKeys(raw), SafeField(event, 40), SafeField(chatType, 40), textLen, isBot, MaskID(chatID), imageInfo, outcome)
 		// TODO: drop the image structure dump once real image payloads are known.
-		if shape == "unknown" || isImage || (outcome == "dropped:event_not_text" && !knownNonTextEvent(event)) {
+		if shape == "unknown" || (isImage && imageDumps.Add(1) <= maxImageDumps) || (outcome == "dropped:event_not_text" && !knownNonTextEvent(event)) {
 			var generic any
 			_ = json.Unmarshal(body, &generic)
 			log.Printf("zalo webhook: structure=%s", structureDump(generic))

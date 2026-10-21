@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -31,13 +32,17 @@ func TestSplitMarkdownKeepsURLsAndPairs(t *testing.T) {
 		t.Fatalf("want split, got %d", len(parts))
 	}
 	esc := escapeURLs(url)
-	joined := strings.Join(parts, "")
+	var mds []string
+	for _, p := range parts {
+		mds = append(mds, p.md)
+	}
+	joined := strings.Join(mds, "")
 	if !strings.Contains(joined, esc) {
 		t.Error("URL was split across chunks")
 	}
 	for _, p := range parts {
-		if utf8.RuneCountInString(p) > 2000 {
-			t.Errorf("chunk too long: %d", utf8.RuneCountInString(p))
+		if utf8.RuneCountInString(p.md) > 2000 {
+			t.Errorf("chunk too long: %d", utf8.RuneCountInString(p.md))
 		}
 	}
 
@@ -47,10 +52,10 @@ func TestSplitMarkdownKeepsURLsAndPairs(t *testing.T) {
 		t.Fatalf("want split, got %d", len(parts))
 	}
 	for i, p := range parts {
-		if utf8.RuneCountInString(p) > 2000 {
+		if utf8.RuneCountInString(p.md) > 2000 {
 			t.Errorf("chunk %d too long", i)
 		}
-		if star, _ := openPairs([]rune(p)); star {
+		if len(openPairs([]rune(p.md))) > 0 {
 			t.Errorf("chunk %d leaves ** open", i)
 		}
 	}
@@ -232,5 +237,75 @@ func TestFetchImageDefaultClientBlocksLoopback(t *testing.T) {
 	}
 	if _, _, err := z.FetchImage(context.Background(), "file:///etc/passwd"); err != errImageURL {
 		t.Errorf("scheme: %v", err)
+	}
+}
+
+func TestSplitMarkdownTerminatesOnHugeTokens(t *testing.T) {
+	for name, text := range map[string]string{
+		"bold+url":   "**https://" + strings.Repeat("a", 2500),
+		"under+url":  "__https://" + strings.Repeat("a", 2500),
+		"escaped":    "**https://" + strings.Repeat("a_", 1500),
+		"huge token": strings.Repeat("x", 5000),
+		"both":       "**__https://" + strings.Repeat("a", 5000),
+	} {
+		parts := splitMarkdown(escapeURLs(text), 2000)
+		if len(parts) < 2 || len(parts) > 10 {
+			t.Errorf("%s: %d chunks", name, len(parts))
+		}
+		for i, p := range parts {
+			if n := utf8.RuneCountInString(p.md); n > 2000 {
+				t.Errorf("%s chunk %d: %d runes", name, i, n)
+			}
+			if strings.HasSuffix(strings.TrimSuffix(p.md, "**"), "\\") && !strings.HasSuffix(p.md, "\\\\") {
+				// a dangling single backslash would escape the closer
+				t.Errorf("%s chunk %d ends in dangling escape", name, i)
+			}
+		}
+	}
+}
+
+func TestEscapeURLsKeepsTrailingMarkers(t *testing.T) {
+	got := escapeURLs("**see https://a.com/x_y** and (https://b.io/p_q). ok https://c.io/a_b!")
+	want := "**see https://a.com/x\\_y** and (https://b.io/p\\_q). ok https://c.io/a\\_b!"
+	if got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestSplitMarkdownBothPairsReverseOrder(t *testing.T) {
+	text := "**__" + strings.Repeat("lorem ipsum ", 400) + "__**"
+	parts := splitMarkdown(text, 2000)
+	if len(parts) < 2 {
+		t.Fatal("want split")
+	}
+	first, second := parts[0].md, parts[1].md
+	if !strings.HasSuffix(first, "__**") || !strings.HasPrefix(second, "**__") {
+		t.Errorf("first ends %q, second starts %q", first[len(first)-6:], second[:6])
+	}
+	for _, p := range parts {
+		if len(openPairs([]rune(p.md))) != 0 {
+			t.Error("chunk leaves a pair open")
+		}
+		if strings.Contains(p.plain, "**") && p.plain != parts[0].plain && strings.HasPrefix(p.plain, "**__") {
+			t.Error("plain keeps synthetic reopener")
+		}
+	}
+	if strings.HasPrefix(parts[1].plain, "**") || strings.HasSuffix(parts[0].plain, "**") {
+		t.Error("plain must exclude synthetic markers")
+	}
+}
+
+func TestWebhookImageDumpCapped(t *testing.T) {
+	logs := captureLog(func() {
+		h := NewWebhookHandler("s", func(context.Context, Message) {})
+		for i := 0; i < 8; i++ {
+			body := strings.Replace(imgBody(`"photo":"https://h.example/p.jpg"`), `"i1"`, `"i`+strconv.Itoa(i)+`"`, 1)
+			req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+			req.Header.Set(SecretHeader, "s")
+			h.ServeHTTP(httptest.NewRecorder(), req)
+		}
+	})
+	if n := strings.Count(logs, "structure="); n != maxImageDumps {
+		t.Errorf("structure dumps = %d, want %d", n, maxImageDumps)
 	}
 }

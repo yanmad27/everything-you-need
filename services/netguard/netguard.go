@@ -23,14 +23,17 @@ var (
 
 // extraBlocked lists special-purpose ranges not covered by the netip predicates.
 var extraBlocked = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),     // "this network"
-	netip.MustParsePrefix("100.64.0.0/10"), // CGNAT
-	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
-	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments
-	netip.MustParsePrefix("240.0.0.0/4"),   // reserved
-	netip.MustParsePrefix("64:ff9b::/96"),  // NAT64
-	netip.MustParsePrefix("2002::/16"),     // 6to4
-	netip.MustParsePrefix("2001::/32"),     // Teredo
+	netip.MustParsePrefix("0.0.0.0/8"),      // "this network"
+	netip.MustParsePrefix("100.64.0.0/10"),  // CGNAT
+	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking
+	netip.MustParsePrefix("192.0.0.0/24"),   // IETF protocol assignments
+	netip.MustParsePrefix("240.0.0.0/4"),    // reserved
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64
+	netip.MustParsePrefix("2002::/16"),      // 6to4
+	netip.MustParsePrefix("2001::/32"),      // Teredo
+	netip.MustParsePrefix("::/96"),          // IPv4-compatible (deprecated), also :: and ::1
+	netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64
+	netip.MustParsePrefix("fec0::/10"),      // site-local (deprecated)
 }
 
 // IsBlockedIP reports whether ip is a loopback, private, link-local,

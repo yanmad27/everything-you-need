@@ -9,20 +9,28 @@ import (
 
 var urlRe = regexp.MustCompile(`https?://\S+`)
 
-const mdSpecial = "_*~\\"
+const (
+	mdSpecial = "_*~\\"
+	// urlTrail are trailing characters that belong to the surrounding text or
+	// markdown, not to the URL.
+	urlTrail = "*_~.,)!?:;"
+)
 
 // escapeURLs backslash-escapes markdown-significant characters inside bare
 // http(s) URLs so Zalo's markdown (which has no links) does not mangle them.
+// Trailing markers and punctuation are left out of the URL and stay untouched.
 func escapeURLs(text string) string {
 	return urlRe.ReplaceAllStringFunc(text, func(u string) string {
+		body := strings.TrimRight(u, urlTrail)
+		tail := u[len(body):]
 		var sb strings.Builder
-		for _, r := range u {
+		for _, r := range body {
 			if strings.ContainsRune(mdSpecial, r) {
 				sb.WriteByte('\\')
 			}
 			sb.WriteRune(r)
 		}
-		return sb.String()
+		return sb.String() + tail
 	})
 }
 
@@ -41,21 +49,32 @@ func unescapeURLs(text string) string {
 	})
 }
 
-// openPairs scans rs and reports whether a ** or __ pair is left open.
-func openPairs(rs []rune) (star, under bool) {
+// openPairs scans rs and returns the ** / __ markers left open, in the order
+// they were opened.
+func openPairs(rs []rune) []string {
+	var open []string
+	toggle := func(m string) {
+		for i, o := range open {
+			if o == m {
+				open = append(open[:i], open[i+1:]...)
+				return
+			}
+		}
+		open = append(open, m)
+	}
 	for i := 0; i < len(rs); i++ {
 		switch {
 		case rs[i] == '\\':
 			i++
 		case rs[i] == '*' && i+1 < len(rs) && rs[i+1] == '*':
-			star = !star
+			toggle("**")
 			i++
 		case rs[i] == '_' && i+1 < len(rs) && rs[i+1] == '_':
-			under = !under
+			toggle("__")
 			i++
 		}
 	}
-	return
+	return open
 }
 
 // validCut reports whether cutting before rs[cut] leaves escapes and ** / __
@@ -110,42 +129,71 @@ func chooseCut(rs []rune, budget int) int {
 	return cut
 }
 
-// splitMarkdown cuts text into pieces of at most limit runes. A ** or __ pair
-// left open at a cut is closed there and reopened in the next piece.
-func splitMarkdown(text string, limit int) []string {
+// mdChunk is one markdown piece plus the same content without the synthetic
+// closing/reopening markers and URL escapes (for the plain-text fallback).
+type mdChunk struct{ md, plain string }
+
+// closeAt returns the closers to append to head and the openers to prepend to
+// the rest. Closers run in reverse order of opening.
+func closeAt(head []rune) (closers, reopen string) {
+	open := openPairs(head)
+	for i := len(open) - 1; i >= 0; i-- {
+		closers += open[i]
+	}
+	return closers, strings.Join(open, "")
+}
+
+// splitMarkdown cuts text into pieces of at most limit runes. ** / __ pairs
+// left open at a cut are closed there and reopened in the next piece. Every
+// iteration strictly shrinks the remaining text.
+func splitMarkdown(text string, limit int) []mdChunk {
+	const markerRoom = 4 // two closing markers
 	rs := []rune(text)
-	var out []string
+	prefix := 0 // synthetic reopeners at the start of rs
+	var out []mdChunk
 	for len(rs) > limit {
-		cut := chooseCut(rs, limit-2) // room for a closing marker
+		budget := limit - markerRoom
+		cut := chooseCut(rs, budget)
+		closers, reopen := closeAt(rs[:cut])
+		if cut <= len(reopen) { // no net progress: hard cut
+			cut = budget
+			for cut > 1 && !validCut(rs, cut) {
+				cut--
+			}
+			closers, reopen = closeAt(rs[:cut])
+		}
 		head := rs[:cut]
-		star, under := openPairs(head)
-		piece, reopen := string(head), ""
-		if star {
-			piece += "**"
-			reopen += "**"
+		plain := head
+		if prefix < len(plain) {
+			plain = plain[prefix:]
+		} else {
+			plain = nil
 		}
-		if under && !star {
-			piece += "__"
-			reopen += "__"
-		}
-		out = append(out, piece)
+		out = append(out, mdChunk{string(head) + closers, unescapeURLs(string(plain))})
 		rs = append([]rune(reopen), rs[cut:]...)
+		prefix = len([]rune(reopen))
 	}
 	if len(strings.TrimSpace(string(rs))) > 0 {
-		out = append(out, string(rs))
+		plain := rs
+		if prefix < len(plain) {
+			plain = plain[prefix:]
+		}
+		out = append(out, mdChunk{string(rs), unescapeURLs(string(plain))})
 	}
 	return out
 }
 
 // SendMarkdown sends text with parse_mode "markdown". URLs are escaped so
-// they survive intact. A chunk the API rejects is resent as plain text, so
-// formatting never drops a reply.
+// they survive intact. If the API rejects a chunk (ok=false; Zalo's error codes
+// don't distinguish parse errors, so any API-level rejection triggers it) that
+// chunk is resent as plain text without the synthetic markers, so formatting
+// never drops a reply. Transport and context errors are returned as they are.
 func (z *ZaloBotService) SendMarkdown(ctx context.Context, chatID, text string) error {
-	for _, chunk := range splitMarkdown(escapeURLs(text), maxTextLen) {
-		_, err := z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: chunk, ParseMode: "markdown"})
+	for _, c := range splitMarkdown(escapeURLs(text), maxTextLen) {
+		_, err := z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: c.md, ParseMode: "markdown"})
 		var ae *apiError
-		if errors.As(err, &ae) {
-			_, err = z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: unescapeURLs(chunk)})
+		if errors.As(err, &ae) && strings.TrimSpace(c.plain) != "" {
+			_, err = z.call(ctx, "sendMessage", sendMessageRequest{ChatID: chatID, Text: c.plain})
 		}
 		if err != nil {
 			return err
