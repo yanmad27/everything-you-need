@@ -435,3 +435,16 @@ func TestConfigValuesNormalised(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyAfterUnquote(t *testing.T) {
+	if h, err := New(Config{Username: "''", PasswordHash: testHash}, fixture{}, Options{}); err == nil || h != nil {
+		t.Error("empty quoted username should be rejected")
+	}
+	if h, err := New(Config{Username: "owner", PasswordHash: "''"}, fixture{}, Options{}); err == nil || h != nil {
+		t.Error("empty quoted hash should be rejected")
+	}
+	h, err := New(Config{Username: "owner", PasswordHash: testHash, SessionSecret: "''"}, fixture{}, Options{})
+	if err != nil || len(h.secret) != 32 {
+		t.Errorf("empty quoted secret should fall back to random: %v", err)
+	}
+}
