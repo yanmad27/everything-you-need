@@ -1,4 +1,5 @@
-// Command adminhash prints a bcrypt hash for ADMIN_PASSWORD_HASH. The password
+// Command adminhash prints a bcrypt hash for ADMIN_PASSWORD_HASH and, on a second line, its
+// base64 form as ADMIN_PASSWORD_HASH_B64 (no `$`; use this on compose/Dokploy). The password
 // is read from stdin (never from argv) and is never logged or echoed.
 //
 //	printf '%s' 'my password' | go run ./cmd/adminhash
@@ -7,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -34,4 +36,5 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(string(h))
+	fmt.Println("ADMIN_PASSWORD_HASH_B64=" + base64.RawURLEncoding.EncodeToString(h))
 }

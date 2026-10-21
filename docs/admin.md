@@ -33,9 +33,23 @@ key for login CSRF tokens; random per process if empty).
 Create the hash (password read from stdin, 12–72 bytes, never logged):
 `printf '%s' 'your password' | go run ./cmd/adminhash` — paste the output into the
 env **without quotes** (in Dokploy and similar UIs the value is passed verbatim).
+The tool prints a second line, `ADMIN_PASSWORD_HASH_B64=…`: the same hash base64-encoded.
+
+**Recommended on Dokploy/compose: set `ADMIN_PASSWORD_HASH_B64`.** A bcrypt hash
+contains `$` characters, and compose interpolation treats `$NAME` as a variable
+reference, silently eating part of the hash (a 60-char hash arrives as ~55 chars and
+is rejected). The base64 form has no `$`, so it survives intact. It accepts standard
+or URL-safe base64, padded or not, and takes precedence over `ADMIN_PASSWORD_HASH`.
+Invalid base64 disables the admin UI (`admin: ADMIN_PASSWORD_HASH_B64 is not valid
+base64`). When a hash is rejected the log shows only its shape (source, length,
+`$2` prefix, `$` count, quoted), never the value.
+
+`ADMIN_PASSWORD_HASH` (raw bcrypt) remains an alternative; it needs every `$`
+written as `$$` when the platform interpolates.
+Details for the raw form:
 One pair of surrounding single/double quotes and surrounding whitespace are
 tolerated and stripped from `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and
-`ADMIN_SESSION_SECRET`. If your platform interpolates `$`, write each `$` as `$$`.
+`ADMIN_SESSION_SECRET`.
 
 Routes (all need a session except login; logged out: HTML → 302 `/admin/login`,
 `/admin/api/*` → 401):
