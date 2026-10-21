@@ -140,7 +140,7 @@ func (t oaiRespToolCall) arguments() string {
 type oaiToolResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   *string       `json:"content"`
+			Content   *string           `json:"content"`
 			ToolCalls []oaiRespToolCall `json:"tool_calls"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
