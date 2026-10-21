@@ -74,3 +74,36 @@ func TestDockerConfigZaloEnv(t *testing.T) {
 		t.Errorf("zalo env override: %+v", cfg.Zalo)
 	}
 }
+
+// docker-compose passes every new variable even when Dokploy leaves it unset
+// (substituted as ""); that must mean "defaults, Zalo disabled", not an error
+// and not an empty string clobbering a default.
+func TestDockerConfigNewEnvVarsEmpty(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "config.docker.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	for _, k := range []string{"ZALO_ENABLED", "ZALO_BOT_TOKEN", "ZALO_WEBHOOK_SECRET", "ZALO_WEBHOOK_PATH",
+		"LLM_OPENAI_BASE_URL", "LLM_OPENAI_API_KEY", "LLM_OPENAI_MODEL"} {
+		t.Setenv(k, "")
+	}
+
+	cfg := LoadConfig()
+	if cfg == nil {
+		t.Fatal("LoadConfig returned nil with empty Zalo/LLM env vars")
+	}
+	if cfg.Zalo.Enabled || cfg.Zalo.BotToken != "" || cfg.Zalo.WebhookSecret != "" {
+		t.Errorf("zalo must be disabled/empty: %+v", cfg.Zalo)
+	}
+	if cfg.Zalo.WebhookPath != "/zalo-webhook" {
+		t.Errorf("webhook_path clobbered: %q", cfg.Zalo.WebhookPath)
+	}
+	if cfg.LLMOpenAI.Model == "" || cfg.LLMOpenAI.BaseURL != "" || cfg.LLMOpenAI.APIKey != "" {
+		t.Errorf("llm_openai: %+v", cfg.LLMOpenAI)
+	}
+}

@@ -346,10 +346,12 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 	}
 }
 
-// dispatchZalo normalizes a Zalo message and routes it. In groups Zalo only
-// delivers messages that @mention the bot or reply to it, so the leading
-// mention is stripped (before reminder matching and chat) and the chat
-// assistant is treated as addressed. 1:1 chats keep the wake-word rule.
+// dispatchZalo normalizes a Zalo message and routes it. Every Zalo message is
+// treated as addressed to the bot: in 1:1 chats by definition, and in groups
+// because Zalo only delivers messages that @mention the bot or reply to it (the
+// leading mention is stripped before reminder matching and chat). So the chat
+// assistant answers without a wake word; reminder commands keep priority.
+// Telegram is unaffected (it uses dispatchIncoming with addressed=false).
 func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message) {
 	group := msg.Chat.ChatType == "GROUP"
 	if group {
@@ -358,7 +360,7 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 			return
 		}
 	}
-	dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), group)
+	dispatchIncoming(ctx, svc, chatSvc, toZaloIncomingMessage(msg), true)
 }
 
 func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {

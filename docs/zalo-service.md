@@ -3,8 +3,9 @@
 The Zalo bot offers the same two features as the Telegram bot, in 1:1 chats and
 in Zalo groups the bot has been added to:
 
-1. **Chat assistant "Trợ lý Pink"** — same wake words (`pink`, `trợ lý`, `troly`),
-   clear-context commands and link reading.
+1. **Chat assistant "Trợ lý Pink"** — answers every 1:1 message and every
+   delivered group message (no wake word; see "Wake word and groups"),
+   with clear-context commands and link reading.
 2. **Vietnamese natural-language reminders** — create, `/reminders`, `/cancel <id>`
    and the reminder firing back into the same Zalo chat.
 
@@ -54,9 +55,11 @@ as the provider above is set.
 
 ## Wake word and groups
 
-- **1:1 chats:** same trigger as Telegram — the chat assistant answers messages
-  containing a wake word (`pink`, `trợ lý`, `troly`). Reminder keywords
-  ("nhắc tao…") and `/reminders`, `/cancel` always work.
+- **1:1 chats:** the assistant answers **every** text message, no wake word
+  needed (a wake word, if present, is stripped). Reminder commands/keywords
+  ("nhắc tao…", `/reminders`, `/cancel`) keep priority over chat, and the
+  context-clear command ("xóa ngữ cảnh", "clear", …) still works. (Telegram is
+  unchanged: it still needs a wake word.)
 - **Groups (Beta):** Zalo only delivers messages that @mention the bot or reply
   to one of its messages, so every delivered group message is already addressed
   to the bot. The assistant therefore answers **without** needing a wake word
@@ -69,8 +72,8 @@ as the provider above is set.
   name does not match (or continues past the name, e.g. `@Pinky`), a single leading `@token` is removed. Up to 3 leading mentions are stripped (`@Lan @Bot nhắc tao …`). Mentions elsewhere in
   the text, and 1:1 or Telegram messages, are never touched. If Zalo ever starts delivering
   *all* group messages, the bot would answer every one of them; to restore
-  wake-word behaviour in groups, change `dispatchIncoming(..., addressed)` in
-  `main.go` to pass `false` for Zalo groups.
+  wake-word behaviour in groups, make `dispatchZalo` in
+  `main.go` pass `addressed=false` for `GROUP` chats.
 
 **Link reading:** the Zalo chat assistant only fetches public http/https links
 (loopback, private, link-local, CGNAT, multicast and unspecified addresses are

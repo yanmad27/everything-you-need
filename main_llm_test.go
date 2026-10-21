@@ -184,11 +184,22 @@ func TestDispatchZaloGroupVersusPrivate(t *testing.T) {
 		t.Errorf("chat prompt = %q", p)
 	}
 
-	// private: no wake word -> silent, mention-like text is NOT stripped
-	before := len(chatLLM.prompts)
+	// private: every message is answered, no wake word needed
 	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "hôm nay trời sao"))
-	if len(chatLLM.prompts) != before {
-		t.Error("private message without wake word must not be answered")
+	if p := chatLLM.last(); p != "hôm nay trời sao" {
+		t.Errorf("private prompt without wake word = %q", p)
+	}
+	// ...and the clear command still works (no model call)
+	n0 := len(chatLLM.prompts)
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "xóa ngữ cảnh"))
+	if len(chatLLM.prompts) != n0 || !strings.Contains(zl.texts[len(zl.texts)-1], "Đã xoá ngữ cảnh") {
+		t.Errorf("clear command: prompts %d->%d last=%q", n0, len(chatLLM.prompts), zl.texts[len(zl.texts)-1])
+	}
+	// ...and reminder commands keep priority over chat
+	pb := len(parse.prompts)
+	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "5 phút nữa nhắc tao uống nước"))
+	if len(parse.prompts) != pb+1 {
+		t.Error("private reminder message must go to the reminder parser")
 	}
 	// private chats never strip a mention; only the wake word is removed
 	dispatchZalo(ctx, svc, chatSvc, names, zaloMsg("PRIVATE", "@Bot Pink EYN chào"))
@@ -236,5 +247,24 @@ func TestReminderForZaloWhenTelegramKeyEmpty(t *testing.T) {
 	// And with no provider and no key the service stays disabled, as on main.
 	if s2, _ := buildReminderService(cfg, &telebot.TeleBotService{}, nil, nil); s2 != nil {
 		t.Error("telegram-only with empty key must stay disabled")
+	}
+}
+
+// Telegram keeps its wake-word rule: a plain message is ignored, a wake-word
+// message is answered.
+func TestTelegramPrivateStillRequiresWakeWord(t *testing.T) {
+	ctx := context.Background()
+	chatLLM := &recCompleter{reply: "chào!"}
+	chatSvc := chat.NewServiceWithCompleter(chatLLM, &captureSender{})
+	in := reminder.IncomingMessage{Platform: reminder.PlatformTelegram, ChatID: "42", Text: "hôm nay trời sao"}
+
+	dispatchIncoming(ctx, nil, chatSvc, in, false)
+	if len(chatLLM.prompts) != 0 {
+		t.Fatal("telegram message without wake word must not be answered")
+	}
+	in.Text = "pink ơi hôm nay trời sao"
+	dispatchIncoming(ctx, nil, chatSvc, in, false)
+	if len(chatLLM.prompts) != 1 {
+		t.Error("telegram wake-word message must be answered")
 	}
 }
