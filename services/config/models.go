@@ -49,6 +49,15 @@ type ZaloConfig struct {
 	WebhookPath   string `mapstructure:"webhook_path"`
 }
 
+// LLMOpenAIConfig points the Zalo bot's AI work (chat + reminder parsing) at an
+// OpenAI-compatible /v1/chat/completions endpoint. Unused unless both
+// base_url and api_key are set.
+type LLMOpenAIConfig struct {
+	BaseURL string `mapstructure:"base_url"`
+	APIKey  string `mapstructure:"api_key"`
+	Model   string `mapstructure:"model"`
+}
+
 type AppConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`

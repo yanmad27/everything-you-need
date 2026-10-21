@@ -13,6 +13,7 @@ import (
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/duedate"
+	"everything-you-need/m/services/llm"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/news"
 	pricetracker "everything-you-need/m/services/price-tracker"
@@ -32,7 +33,8 @@ func main() {
 	teleService := telebot.TeleBotServiceMod.Resolve()
 	zaloService := zalobot.ZaloBotServiceMod.Resolve()
 
-	reminderService, reminderStore := buildReminderService(cfg, teleService, zaloService)
+	zaloCompleter := buildZaloCompleter(cfg)
+	reminderService, reminderStore := buildReminderService(cfg, teleService, zaloService, zaloCompleter)
 	if reminderStore != nil {
 		defer reminderStore.Close()
 	}
@@ -45,10 +47,10 @@ func main() {
 	dueDateService := buildDueDateService(cfg)
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
-		teleChat = buildChatService(cfg, teleService)
+		teleChat = buildChatService(cfg, teleService, nil)
 	}
 	if zaloService != nil {
-		zaloChat = buildChatService(cfg, zaloService)
+		zaloChat = buildChatService(cfg, zaloService, zaloCompleter)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -80,7 +82,7 @@ func main() {
 	log.Printf("✅ Shutdown complete")
 }
 
-func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotService, zaloService *zalobot.ZaloBotService) (*reminder.Service, *reminder.Store) {
+func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotService, zaloService *zalobot.ZaloBotService, zaloLLM llm.Completer) (*reminder.Service, *reminder.Store) {
 	if !cfg.Reminder.Enabled {
 		log.Printf("Reminder service disabled in config")
 		return nil, nil
@@ -89,7 +91,8 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		log.Printf("Reminder service disabled: neither telegram nor zalo service available")
 		return nil, nil
 	}
-	if cfg.Reminder.OpenAIAPIKey == "" {
+	// The Anthropic key is only optional when Zalo (with its own provider) is the sole platform.
+	if cfg.Reminder.OpenAIAPIKey == "" && !(teleService == nil && zaloLLM != nil) {
 		log.Printf("Reminder service disabled: reminder.openai_api_key is empty")
 		return nil, nil
 	}
@@ -100,17 +103,30 @@ func buildReminderService(cfg *config.Config, teleService *telebot.TeleBotServic
 		return nil, nil
 	}
 
-	parser := reminder.NewOpenAIParser(cfg.Reminder.OpenAIAPIKey, cfg.Reminder.OpenAIModel, 0)
-	var defaultSender reminder.Sender // Telegram; stays a nil interface when unconfigured
+	var teleSender, zaloSender reminder.Sender // stay nil interfaces when unconfigured
 	if teleService != nil {
-		defaultSender = teleService
+		teleSender = teleService
 	}
-	svc := reminder.NewService(store, parser, defaultSender, time.Now)
 	if zaloService != nil {
-		svc.WithSender(reminder.PlatformZalo, zaloService)
+		zaloSender = zaloService
 	}
+	svc := newReminderService(cfg, store, teleSender, zaloSender, zaloLLM)
 	log.Printf("Reminder service initialized (db=%s, model=%s)", cfg.Reminder.DBPath, cfg.Reminder.OpenAIModel)
 	return svc, store
+}
+
+// newReminderService wires the Telegram path (Anthropic parser, default) and the
+// optional Zalo path (own sender; own parser when an OpenAI-compatible provider is set).
+func newReminderService(cfg *config.Config, store *reminder.Store, tele, zalo reminder.Sender, zaloLLM llm.Completer) *reminder.Service {
+	parser := reminder.NewOpenAIParser(cfg.Reminder.OpenAIAPIKey, cfg.Reminder.OpenAIModel, 0)
+	svc := reminder.NewService(store, parser, tele, time.Now)
+	if zalo != nil {
+		svc.WithSender(reminder.PlatformZalo, zalo)
+		if zaloLLM != nil {
+			svc.WithParser(reminder.PlatformZalo, reminder.NewLLMParser(zaloLLM))
+		}
+	}
+	return svc
 }
 
 func buildNewsService(cfg *config.Config, teleService *telebot.TeleBotService) (*news.Service, *news.Store) {
@@ -162,12 +178,27 @@ func buildDueDateService(cfg *config.Config) *duedate.Service {
 	return duedate.NewService(cfg.DueDate.CSVURL, cfg.DueDate.StatePath, time.Now)
 }
 
+// buildZaloCompleter returns the OpenAI-compatible LLM used for Zalo, or nil
+// when it is not configured (Zalo then falls back to the Anthropic client).
+func buildZaloCompleter(cfg *config.Config) llm.Completer {
+	c := cfg.LLMOpenAI
+	if c.BaseURL == "" || c.APIKey == "" {
+		return nil
+	}
+	log.Printf("Zalo LLM: OpenAI-compatible provider (model=%s)", c.Model)
+	return llm.NewOpenAIClient(c.BaseURL, c.APIKey, c.Model, 0)
+}
+
 // buildChatService builds one chat assistant bound to one platform's sender
 // (history is kept per assistant, so platforms never share context).
-func buildChatService(cfg *config.Config, sender chat.Sender) *chat.Service {
+func buildChatService(cfg *config.Config, sender chat.Sender, completer llm.Completer) *chat.Service {
 	if !cfg.Chat.Enabled {
 		log.Printf("Chat service disabled in config")
 		return nil
+	}
+	if completer != nil {
+		log.Printf("Chat service initialized (OpenAI-compatible provider)")
+		return chat.NewServiceWithCompleter(completer, sender)
 	}
 	apiKey := cfg.Chat.APIKey
 	if apiKey == "" {
@@ -203,7 +234,7 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 				if msg == nil || msg.Text == "" {
 					return
 				}
-				dispatchIncoming(ctx, svc, teleChat, toIncomingMessage(msg))
+				dispatchIncoming(ctx, svc, teleChat, toIncomingMessage(msg), false)
 			}
 			mux.Handle(path, telebot.NewWebhookHandler(cfg.Telegram.WebhookSecret, dispatcher))
 			log.Printf("Telegram webhook mounted at %s", path)
@@ -220,7 +251,7 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 				path = "/zalo-webhook"
 			}
 			dispatcher := func(ctx context.Context, msg zalobot.Message) {
-				dispatchIncoming(ctx, svc, zaloChat, toZaloIncomingMessage(msg))
+				dispatchIncoming(ctx, svc, zaloChat, toZaloIncomingMessage(msg), msg.Chat.ChatType == "GROUP")
 			}
 			mux.Handle(path, zalobot.NewWebhookHandler(cfg.Zalo.WebhookSecret, dispatcher))
 			log.Printf("Zalo webhook mounted at %s", path)
@@ -254,11 +285,19 @@ func startWebhookServer(cfg *config.Config, svc *reminder.Service,
 }
 
 // dispatchIncoming routes a normalized message: reminders take priority; chat
-// handles wake-word messages that aren't reminder commands.
-func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage) {
+// handles wake-word messages that aren't reminder commands. addressed means the
+// platform only delivers messages aimed at the bot (Zalo group @mention/reply),
+// so the chat assistant answers without requiring a wake word.
+func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage, addressed bool) {
 	if svc != nil && svc.Matches(incoming.Text) {
 		if err := svc.HandleIncoming(ctx, incoming); err != nil {
 			log.Printf("webhook dispatch error (%s): %v", incoming.Platform, err)
+		}
+		return
+	}
+	if chatSvc != nil && addressed {
+		if err := chatSvc.HandleAddressed(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
+			log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
 		}
 		return
 	}

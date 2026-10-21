@@ -84,6 +84,9 @@ See [Zalo Service](zalo-service.md).
 | `ZALO_ENABLED` | bool | false | Enable the Zalo bot |
 | `ZALO_BOT_TOKEN` | string | "" | Zalo Bot Platform token (secret) |
 | `ZALO_WEBHOOK_SECRET` | string | "" | Secret echoed in `X-Bot-Api-Secret-Token` |
+| `LLM_OPENAI_BASE_URL` | string | "" | OpenAI-compatible endpoint for Zalo AI (optional) |
+| `LLM_OPENAI_API_KEY` | string | "" | Its API key (secret) |
+| `LLM_OPENAI_MODEL` | string | codex-auto-review | Model id |
 
 ### Telegram Settings
 

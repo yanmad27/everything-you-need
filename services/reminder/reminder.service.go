@@ -34,6 +34,7 @@ type Service struct {
 	parser Parser
 	sender Sender // default (Telegram) sender
 	extra  map[string]Sender
+	parsers map[string]Parser // per-platform overrides of parser
 	now    func() time.Time
 }
 
@@ -44,6 +45,22 @@ func (s *Service) WithSender(platform string, sender Sender) *Service {
 	}
 	s.extra[platform] = sender
 	return s
+}
+
+// WithParser sets a platform-specific parser (e.g. a different LLM backend).
+func (s *Service) WithParser(platform string, p Parser) *Service {
+	if s.parsers == nil {
+		s.parsers = map[string]Parser{}
+	}
+	s.parsers[platform] = p
+	return s
+}
+
+func (s *Service) parserFor(platform string) Parser {
+	if p, ok := s.parsers[platform]; ok && p != nil {
+		return p
+	}
+	return s.parser
 }
 
 // senderFor returns the sender for a platform, or nil if none is configured.
@@ -124,7 +141,7 @@ func matchHelpCommand(text string) bool {
 }
 
 func (s *Service) handleCreate(ctx context.Context, msg IncomingMessage) error {
-	result, err := s.parser.Parse(ctx, s.now(), msg.Text)
+	result, err := s.parserFor(msg.Platform).Parse(ctx, s.now(), msg.Text)
 	if err != nil {
 		log.Printf("reminder parser error: %v", err)
 		return s.reply(ctx, msg, "⚠️ Mình đang bận, thử lại sau 1 phút nhé.")

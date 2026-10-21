@@ -188,14 +188,19 @@ func (s *Store) Cancel(ctx context.Context, id int64, _ string) error {
 	return s.cancelExisting(ctx, existing)
 }
 
-// CancelForChat cancels a reminder only if it belongs to the given platform + chat;
-// otherwise it reports ErrNotFound.
+// CancelForChat cancels a reminder by id. Telegram keeps its historical
+// semantics (any chat may cancel any telegram reminder); other platforms may
+// only cancel reminders of their own chat. A reminder of another platform
+// (or another chat, for non-Telegram) reports ErrNotFound.
 func (s *Store) CancelForChat(ctx context.Context, platform, chatID string, id int64) error {
 	existing, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if existing.Platform != platform || existing.ChatID != chatID {
+	if existing.Platform != platform {
+		return ErrNotFound
+	}
+	if platform != PlatformTelegram && existing.ChatID != chatID {
 		return ErrNotFound
 	}
 	return s.cancelExisting(ctx, existing)

@@ -12,6 +12,7 @@ type Config struct {
 	PriceSources PriceSourcesConfig `mapstructure:"price_sources"`
 	Telegram     TelegramConfig     `mapstructure:"telegram"`
 	Zalo         ZaloConfig         `mapstructure:"zalo"`
+	LLMOpenAI    LLMOpenAIConfig    `mapstructure:"llm_openai"`
 	App          AppConfig          `mapstructure:"app"`
 	Reminder     ReminderConfig     `mapstructure:"reminder"`
 	Server       ServerConfig       `mapstructure:"server"`
@@ -76,6 +77,10 @@ func setDefaults() {
 	viper.SetDefault("zalo.bot_token", "")
 	viper.SetDefault("zalo.webhook_secret", "")
 	viper.SetDefault("zalo.webhook_path", "/zalo-webhook")
+
+	viper.SetDefault("llm_openai.base_url", "")
+	viper.SetDefault("llm_openai.api_key", "")
+	viper.SetDefault("llm_openai.model", "codex-auto-review")
 
 	viper.SetDefault("reminder.enabled", false)
 	viper.SetDefault("reminder.db_path", "data/reminders.db")

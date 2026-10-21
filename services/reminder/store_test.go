@@ -295,7 +295,11 @@ func TestListAndCancelScopedByPlatformAndChat(t *testing.T) {
 		t.Errorf("cross-platform cancel: %v", err)
 	}
 	if err := store.CancelForChat(ctx, PlatformZalo, "other", zlID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("cross-chat cancel: %v", err)
+		t.Errorf("zalo cross-chat cancel: %v", err)
+	}
+	// Telegram keeps its historical semantics: any chat may cancel any telegram reminder.
+	if err := store.CancelForChat(ctx, PlatformTelegram, "some-other-chat", tgID); err != nil {
+		t.Errorf("telegram cross-chat cancel must still work: %v", err)
 	}
 	if err := store.CancelForChat(ctx, PlatformZalo, "same", zlID); err != nil {
 		t.Errorf("own cancel: %v", err)
