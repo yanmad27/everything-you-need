@@ -46,7 +46,7 @@ base64`). When a hash is rejected the log shows only its shape (source, length,
 
 `ADMIN_PASSWORD_HASH` (raw bcrypt) remains an alternative; it needs every `$`
 written as `$$` when the platform interpolates.
-Details for the raw form:
+Quote handling (applies to the raw form):
 One pair of surrounding single/double quotes and surrounding whitespace are
 tolerated and stripped from `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and
 `ADMIN_SESSION_SECRET`.
