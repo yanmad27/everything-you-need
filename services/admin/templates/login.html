@@ -1,0 +1,8 @@
+{{template "head" .}}
+<form class="login" method="post" action="/admin/login"><h1>Đăng nhập</h1>
+{{if .Data}}<p class="bad">Sai tên đăng nhập hoặc mật khẩu.</p>{{end}}
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label for="u">Tên đăng nhập</label><input id="u" name="username" autocomplete="username" required maxlength="100">
+<label for="p">Mật khẩu</label><input id="p" name="password" type="password" autocomplete="current-password" required maxlength="200">
+<button type="submit">Đăng nhập</button></form>
+{{template "foot" .}}

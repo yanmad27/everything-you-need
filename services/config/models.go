@@ -86,6 +86,14 @@ type DueDateConfig struct {
 	StatePath string `mapstructure:"state_path"`
 }
 
+// AdminConfig enables the read-only admin UI at /admin. Both Username and
+// PasswordHash (bcrypt, cost >= 10) must be set; there is no default password.
+type AdminConfig struct {
+	Username      string `mapstructure:"username"`
+	PasswordHash  string `mapstructure:"password_hash"`
+	SessionSecret string `mapstructure:"session_secret"`
+}
+
 // ConvoConfig controls the Zalo conversation store used by the admin UI.
 type ConvoConfig struct {
 	Enabled              bool    `mapstructure:"enabled"`

@@ -43,12 +43,13 @@ func (p Page) norm() (limit, offset int) {
 // activity (From inclusive, To exclusive); counts are then within that range.
 type ChatFilter struct {
 	Platform, ChatType string
-	Q                  string // substring of chat id, title or any message text
+	Q                  string // substring of chat id, title, a participant's display name or any message text
 	From, To           time.Time
 }
 
 type ChatSummary struct {
 	Platform, ChatID, ChatType, Title string
+	DisplayName                       string // title, else (private chats) the last inbound sender's name
 	FirstSeen, LastSeen               time.Time
 	Messages, ToolCalls               int
 	FirstActivity, LastActivity       time.Time // first/last message in range (zero when none)
@@ -113,8 +114,10 @@ func (s *Store) ListChats(ctx context.Context, f ChatFilter, p Page) ([]ChatSumm
 	if f.Q != "" {
 		like := likeEscape(f.Q)
 		q += ` AND (c.chat_id LIKE ? ESCAPE '\' OR c.title LIKE ? ESCAPE '\' OR EXISTS (
-			SELECT 1 FROM messages x WHERE x.platform = c.platform AND x.chat_id = c.chat_id AND x.text LIKE ? ESCAPE '\'))`
-		args = append(args, like, like, like)
+			SELECT 1 FROM messages x WHERE x.platform = c.platform AND x.chat_id = c.chat_id AND x.text LIKE ? ESCAPE '\')
+			OR EXISTS (SELECT 1 FROM messages y JOIN users u ON u.platform = y.platform AND u.user_id = y.user_id
+				WHERE y.platform = c.platform AND y.chat_id = c.chat_id AND u.display_name LIKE ? ESCAPE '\'))`
+		args = append(args, like, like, like, like)
 	}
 	var total int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) `+q, args...).Scan(&total); err != nil {
@@ -122,6 +125,10 @@ func (s *Store) ListChats(ctx context.Context, f ChatFilter, p Page) ([]ChatSumm
 	}
 	limit, offset := p.norm()
 	rows, err := s.db.QueryContext(ctx, `SELECT c.platform, c.chat_id, c.chat_type, c.title, c.first_seen, c.last_seen,
+		CASE WHEN c.title != '' THEN c.title WHEN c.chat_type = 'GROUP' THEN '' ELSE COALESCE((SELECT u.display_name FROM messages x
+			JOIN users u ON u.platform = x.platform AND u.user_id = x.user_id
+			WHERE x.platform = c.platform AND x.chat_id = c.chat_id AND x.direction = 'in' AND u.display_name != ''
+			ORDER BY x.created_at DESC, x.id DESC LIMIT 1), '') END,
 		COALESCE(m.n,0), COALESCE(t.n,0), COALESCE(m.f,0), COALESCE(m.l,0) `+q+
 		` ORDER BY c.last_seen DESC, c.platform, c.chat_id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
@@ -132,7 +139,7 @@ func (s *Store) ListChats(ctx context.Context, f ChatFilter, p Page) ([]ChatSumm
 	for rows.Next() {
 		var c ChatSummary
 		var fs, ls, fa, la int64
-		if err := rows.Scan(&c.Platform, &c.ChatID, &c.ChatType, &c.Title, &fs, &ls, &c.Messages, &c.ToolCalls, &fa, &la); err != nil {
+		if err := rows.Scan(&c.Platform, &c.ChatID, &c.ChatType, &c.Title, &fs, &ls, &c.DisplayName, &c.Messages, &c.ToolCalls, &fa, &la); err != nil {
 			return nil, 0, err
 		}
 		c.FirstSeen, c.LastSeen, c.FirstActivity, c.LastActivity = fromMS(fs), fromMS(ls), fromMS(fa), fromMS(la)

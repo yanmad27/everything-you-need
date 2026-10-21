@@ -58,6 +58,13 @@ reminder:
   max_lookahead_days: 365
 
 # Zalo conversation store for the admin UI (messages, tool calls, usage). Zalo only.
+# Read-only admin UI at /admin. Enabled only when BOTH are set; no default password.
+# Generate the hash with: go run ./cmd/adminhash
+admin:
+  username: "" # -> ADMIN_USERNAME
+  password_hash: "" # -> ADMIN_PASSWORD_HASH (bcrypt, cost >= 10)
+  session_secret: "" # -> ADMIN_SESSION_SECRET (optional; random per process if empty)
+
 convo:
   enabled: true # -> CONVO_ENABLED
   db_path: "data/convo.db" # -> CONVO_DB_PATH

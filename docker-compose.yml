@@ -20,6 +20,10 @@ services:
       - ZALO_WEBHOOK_SECRET=${ZALO_WEBHOOK_SECRET}
       - ZALO_WEBHOOK_PATH=${ZALO_WEBHOOK_PATH:-/zalo-webhook}
       - ZALO_PRIVATE_TOOL_CHATS=${ZALO_PRIVATE_TOOL_CHATS:-}
+      # Admin UI at /admin (off unless both username and bcrypt hash are set).
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-}
+      - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
       # Zalo conversation store for the admin UI (stored on the data volume).
       - CONVO_ENABLED=${CONVO_ENABLED:-true}
       - CONVO_RETENTION_DAYS=${CONVO_RETENTION_DAYS:-90}

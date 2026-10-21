@@ -265,6 +265,9 @@ func TestListChats(t *testing.T) {
 		t.Errorf("B = %+v", all[0])
 	}
 	a := all[1]
+	if a.DisplayName != "An" || all[0].DisplayName != "" {
+		t.Errorf("display names: %q %q", a.DisplayName, all[0].DisplayName)
+	}
 	if a.Messages != 4 || a.ToolCalls != 1 || a.FirstActivity.After(a.LastActivity) || !a.FirstSeen.Equal(a.FirstActivity) {
 		t.Errorf("A = %+v", a)
 	}
@@ -286,6 +289,7 @@ func TestListChats(t *testing.T) {
 	check("other platform", ChatFilter{Platform: "telegram"}, Page{}, "", 0)
 	check("type", ChatFilter{ChatType: "group"}, Page{}, "B", 1)
 	check("q text", ChatFilter{Q: "pink"}, Page{}, "A", 1)
+	check("q user name", ChatFilter{Q: "binh"}, Page{}, "B", 1)
 	check("q id", ChatFilter{Q: "B"}, Page{}, "B", 1)
 	check("q wildcard is literal", ChatFilter{Q: "%"}, Page{}, "B", 1) // only "100%" matches
 	check("q underscore literal", ChatFilter{Q: "_"}, Page{}, "", 0)

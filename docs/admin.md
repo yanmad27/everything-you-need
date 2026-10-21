@@ -22,3 +22,32 @@ Config (env): `CONVO_ENABLED`, `CONVO_DB_PATH`, `CONVO_RETENTION_DAYS`,
 Query API (`services/convo`, read-only): `ListChats`, `Timeline`, `UserStats`,
 `ChatStats`, `ToolStats`. Reminder-regex commands handled before the chat
 assistant are not recorded (only chat/tool turns).
+
+## Admin UI (`/admin`, read-only)
+
+Enabled only when `ADMIN_USERNAME` **and** `ADMIN_PASSWORD_HASH` (bcrypt, cost ≥ 10)
+are set and the convo store is up; otherwise `/admin` is not mounted (404) and the
+startup log says why. No default password. Optional `ADMIN_SESSION_SECRET` (HMAC
+key for login CSRF tokens; random per process if empty).
+
+Create the hash (password read from stdin, 12–72 bytes, never logged):
+`printf '%s' 'your password' | go run ./cmd/adminhash` — put the output in the env
+in single quotes (it contains `$`).
+
+Routes (all need a session except login; logged out: HTML → 302 `/admin/login`,
+`/admin/api/*` → 401):
+- `GET /admin`, `/admin/chats` — conversations (filters: platform, type, q, from, to; paging)
+- `GET /admin/chat?platform=&id=` — timeline (messages, tool calls, images as metadata)
+- `GET /admin/users`, `/admin/chat-stats` — user / chat insights
+- `GET /admin/tools` — tool success rate, p50/p95, recent failures
+- `GET /admin/api/{chats,timeline,users,chat-stats,tools}` — same data as JSON
+- `GET|POST /admin/login`, `POST /admin/logout` — the only state-changing routes (CSRF)
+
+Security: login CSRF (HMAC, 30 min) + 5 failed attempts / 15 min per client IP
+(`CF-Connecting-IP` else peer address) and 60 / 15 min globally → 429; bcrypt always
+runs; server-side sessions (32-byte random id, cookie `__Host-eyn_admin`, HttpOnly,
+Secure, SameSite=Strict), idle 2h, absolute 12h; no-store, nosniff, no-referrer,
+X-Frame-Options DENY, CSP `default-src 'none'` with a per-response style nonce and
+no scripts; html/template escaping everywhere. Sessions live in memory (restart logs
+everyone out). `CF-Connecting-IP` is trusted as-is, so keep the origin reachable
+only through the proxy.

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"everything-you-need/m/services/admin"
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/convo"
@@ -47,6 +48,7 @@ func main() {
 	}
 
 	dueDateService := buildDueDateService(cfg)
+	var convoStore *convo.Store
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
@@ -58,7 +60,7 @@ func main() {
 			zaloRem = reminderService
 		}
 		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
-		if convoStore := buildConvoStore(cfg); convoStore != nil {
+		if convoStore = buildConvoStore(cfg); convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
 			zaloTools.Model = cfg.LLMOpenAI.Model
@@ -80,7 +82,7 @@ func main() {
 	if zaloOn {
 		zaloSvc = reminderService
 	}
-	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat)
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -258,9 +260,15 @@ const (
 
 func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
-	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service) *http.Server {
+	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service,
+	extra ...func(*http.ServeMux) int) *http.Server {
 	mux := http.NewServeMux()
 	mounted := 0
+	for _, m := range extra {
+		if m != nil {
+			mounted += m(mux)
+		}
+	}
 
 	if teleService != nil && (teleSvc != nil || teleChat != nil) {
 		if cfg.Telegram.WebhookSecret == "" {
@@ -451,4 +459,28 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 	}
 	log.Printf("Convo store initialized (db=%s, retention_days=%d)", c.DBPath, c.RetentionDays)
 	return st
+}
+
+// adminMount returns a mux mounter for the admin UI, or nil when it is not
+// fully configured (credentials + conversation store). No default password.
+func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int {
+	a := cfg.Admin
+	if a.Username == "" || a.PasswordHash == "" {
+		log.Printf("Admin UI disabled: admin.username and admin.password_hash are not both set")
+		return nil
+	}
+	if store == nil {
+		log.Printf("Admin UI disabled: conversation store is not available")
+		return nil
+	}
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, SessionSecret: a.SessionSecret}, store, admin.Options{})
+	if err != nil {
+		log.Printf("Admin UI disabled: %v", err)
+		return nil
+	}
+	return func(mux *http.ServeMux) int {
+		h.Mount(mux)
+		log.Printf("Admin UI mounted at /admin")
+		return 1
+	}
 }
