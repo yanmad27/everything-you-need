@@ -97,8 +97,21 @@ func ValidateHash(h string) error {
 	return nil
 }
 
+// normalize trims whitespace and one matching pair of surrounding single or
+// double quotes, which some env-file/deploy platforms pass through literally.
+func normalize(v string) string {
+	v = strings.TrimSpace(v)
+	if n := len(v); n >= 2 && (v[0] == '\'' || v[0] == '"') && v[n-1] == v[0] {
+		v = strings.TrimSpace(v[1 : n-1])
+	}
+	return v
+}
+
 // New builds the handler, or returns an error (admin must then stay disabled).
 func New(cfg Config, data Data, opt Options) (*Handler, error) {
+	cfg.Username = normalize(cfg.Username)
+	cfg.PasswordHash = normalize(cfg.PasswordHash)
+	cfg.SessionSecret = normalize(cfg.SessionSecret)
 	if cfg.Username == "" || cfg.PasswordHash == "" {
 		return nil, errors.New("admin: username and password hash are required")
 	}

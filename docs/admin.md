@@ -31,8 +31,11 @@ startup log says why. No default password. Optional `ADMIN_SESSION_SECRET` (HMAC
 key for login CSRF tokens; random per process if empty).
 
 Create the hash (password read from stdin, 12–72 bytes, never logged):
-`printf '%s' 'your password' | go run ./cmd/adminhash` — put the output in the env
-in single quotes (it contains `$`).
+`printf '%s' 'your password' | go run ./cmd/adminhash` — paste the output into the
+env **without quotes** (in Dokploy and similar UIs the value is passed verbatim).
+One pair of surrounding single/double quotes and surrounding whitespace are
+tolerated and stripped from `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and
+`ADMIN_SESSION_SECRET`. If your platform interpolates `$`, write each `$` as `$$`.
 
 Routes (all need a session except login; logged out: HTML → 302 `/admin/login`,
 `/admin/api/*` → 401):
