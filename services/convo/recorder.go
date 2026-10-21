@@ -173,7 +173,8 @@ func SummarizeResult(name, outcome, raw string) string {
 	if outcome != "ok" {
 		return outcome
 	}
-	if name == "fetch_url" || name == "web_search" {
+	switch name { // web content and private/user data: size only
+	case "fetch_url", "web_search", "due_dates", "reminder_list", "news_recent":
 		return fmt.Sprintf("ok (%d chars)", utf8.RuneCountInString(raw))
 	}
 	raw = strings.TrimSpace(raw)
@@ -222,11 +223,13 @@ func (s *Store) flush(batch []op) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("convo: writer panic recovered")
+			s.dropped.Add(int64(len(batch)))
+			log.Printf("convo: writer panic recovered, dropped events=%d", len(batch))
 		}
 	}()
 	if err := s.write(batch); err != nil {
-		log.Printf("convo: write failed (batch=%d): %v", len(batch), err)
+		s.dropped.Add(int64(len(batch)))
+		log.Printf("convo: write failed, dropped events=%d", len(batch))
 	}
 }
 

@@ -70,6 +70,23 @@ func TestConvoRecordsFailureAndRateLimitAsSystem(t *testing.T) {
 	if notices != 1 {
 		t.Errorf("rate-limit notices recorded = %d", notices)
 	}
+	limited := 0
+	for _, c := range cr.convos {
+		if c.Direction == "in" && c.ErrTag == "rate_limited" {
+			limited++
+			if c.Text != "" {
+				t.Errorf("rate-limited text stored: %q", c.Text)
+			}
+		}
+	}
+	if limited == 0 {
+		t.Error("rate-limited inbound not counted")
+	}
+	for _, c := range cr.convos {
+		if c.Direction == "in" && c.ErrTag == "" && c.Text == "" {
+			t.Error("accepted inbound lost its text")
+		}
+	}
 }
 
 func TestConvoImageMetadataOnly(t *testing.T) {

@@ -63,7 +63,7 @@ func main() {
 		if convoStore = buildConvoStore(cfg); convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
-			zaloTools.Model = cfg.LLMOpenAI.Model
+			zaloTools.Model = zaloModel(cfg, zaloCompleter)
 		}
 		enableZaloTools(zaloChat, zaloCompleter, zaloTools)
 	}
@@ -483,4 +483,13 @@ func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int
 		log.Printf("Admin UI mounted at /admin")
 		return 1
 	}
+}
+
+// zaloModel names the model the Zalo assistant actually calls: the
+// OpenAI-compatible one when that completer is in use, else the Anthropic chat model.
+func zaloModel(cfg *config.Config, completer llm.Completer) string {
+	if completer != nil {
+		return cfg.LLMOpenAI.Model
+	}
+	return cfg.Chat.Model
 }

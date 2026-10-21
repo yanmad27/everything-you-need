@@ -17,3 +17,4 @@ button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}h
 .tool.err{border-color:var(--bad)}.tool code{color:var(--fg);word-break:break-all}
 .login{max-width:320px;margin:15vh auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px}
 .login label{display:block;margin:10px 0 2px}.login input{width:100%}.login button{margin-top:14px;width:100%}
+.sec{margin-top:20px}

@@ -171,8 +171,11 @@ func (s *Service) remember(chatID, prompt, reply string) {
 // reply. History keeps only the text turns.
 func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
 	ctx = newTurn(ctx)
-	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "text", Text: prompt})
+	in := ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "text", Text: prompt}
 	if ok, notice := s.limiter.allow(chatID); !ok {
+		// rate-limited: counted, but the text is not stored
+		in.Text, in.ErrTag = "", "rate_limited"
+		s.recordConvo(ctx, in)
 		log.Printf("chat: rate limited chat=%s notice=%t", maskChat(chatID), notice)
 		if notice {
 			s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgRateLimit, ErrTag: "rate_limited"})
@@ -180,6 +183,7 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 		}
 		return nil
 	}
+	s.recordConvo(ctx, in)
 	reply, err := s.completeTools(ctx, chatID, userID, userName, prompt)
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {

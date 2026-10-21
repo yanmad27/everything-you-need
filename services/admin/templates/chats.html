@@ -7,9 +7,9 @@
 <label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
 <button type="submit">Lọc</button></form>
 <table><tr><th>Tên</th><th>Loại</th><th>Nền tảng</th><th>Hoạt động đầu</th><th>Hoạt động cuối</th><th>Tin nhắn</th><th>Công cụ</th></tr>
-{{range .Data.Items}}<tr><td><a href="/admin/chat?platform={{enc .Platform}}&amp;id={{enc .ChatID}}">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.ChatID}}{{end}}</a>{{if .DisplayName}} <span class="mut">{{.ChatID}}</span>{{end}}</td>
+{{range .Data.Items}}<tr><td><a href="/admin/chat?platform={{.Platform}}&amp;id={{.ChatID}}">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.ChatID}}{{end}}</a>{{if .DisplayName}} <span class="mut">{{.ChatID}}</span>{{end}}</td>
 <td>{{.ChatType}}</td><td>{{.Platform}}</td><td>{{ftime .FirstActivity}}</td><td>{{ftime .LastActivity}}</td><td class="n">{{.Messages}}</td><td class="n">{{.ToolCalls}}</td></tr>
 {{else}}<tr><td colspan="7" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
 {{template "pager" .Data.Pager}}
 {{template "foot" .}}
-{{define "pager"}}<div class="pager">{{if .HasPrev}}<a href="{{.Prev}}">← Trước</a>{{end}}<span class="mut">Trang {{.Page}}/{{.Pages}}</span>{{if .HasNext}}<a href="{{.Next}}">Sau →</a>{{end}}</div>{{end}}
+{{define "pager"}}<div class="pager">{{if .HasPrev}}<a href="{{.Prev}}">{{.PrevLabel}}</a>{{end}}<span class="mut">Trang {{.Page}}/{{.Pages}}</span>{{if .HasNext}}<a href="{{.Next}}">{{.NextLabel}}</a>{{end}}</div>{{end}}

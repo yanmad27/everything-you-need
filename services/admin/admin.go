@@ -16,7 +16,6 @@ import (
 	"html/template"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -116,7 +115,7 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		opt.LoginAttempts = 5
 	}
 	if opt.GlobalLoginAttempt <= 0 {
-		opt.GlobalLoginAttempt = 60
+		opt.GlobalLoginAttempt = 300
 	}
 	if opt.LoginWindow <= 0 {
 		opt.LoginWindow = 15 * time.Minute
@@ -290,7 +289,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ip := clientIP(r)
-		if !h.ipLim.allow(ip) || !h.allLim.allow("*") {
+		if !h.ipLim.allow(ip) || h.allLim.full("*") {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
 			return
@@ -300,6 +299,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		userOK := subtle.ConstantTimeCompare(u[:], h.user[:]) == 1
 		pwOK := bcrypt.CompareHashAndPassword(h.hash, []byte(r.PostForm.Get("password"))) == nil
 		if !userOK || !pwOK {
+			h.allLim.add("*") // the global bucket counts failures only
 			h.renderLogin(w, r, http.StatusUnauthorized, true)
 			return
 		}
@@ -343,10 +343,17 @@ func randToken(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// clientIP prefers Cloudflare's header (the site is served through it), else the peer address.
+// clientIP prefers Cloudflare's header (the site is served through it), then
+// the last X-Forwarded-For hop (the one our own proxy appended), else the peer address.
 func clientIP(r *http.Request) string {
 	if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); v != "" {
 		if ip := net.ParseIP(v); ip != nil {
+			return ip.String()
+		}
+	}
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		parts := strings.Split(v, ",")
+		if ip := net.ParseIP(strings.TrimSpace(parts[len(parts)-1])); ip != nil {
 			return ip.String()
 		}
 	}
@@ -396,10 +403,29 @@ func (l *limiter) allow(key string) bool {
 	return true
 }
 
+// full reports whether key is at its limit without recording an attempt.
+func (l *limiter) full(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := l.now()
+	c := 0
+	for _, t := range l.hits[key] {
+		if n.Sub(t) <= l.window {
+			c++
+		}
+	}
+	return c >= l.max
+}
+
+// add records an attempt unconditionally.
+func (l *limiter) add(key string) {
+	l.mu.Lock()
+	l.hits[key] = append(l.hits[key], l.now())
+	l.mu.Unlock()
+}
+
 func (l *limiter) reset(key string) {
 	l.mu.Lock()
 	delete(l.hits, key)
 	l.mu.Unlock()
 }
-
-var _ = url.Values{}

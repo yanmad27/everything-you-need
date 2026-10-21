@@ -424,7 +424,7 @@ func TestToolStats(t *testing.T) {
 		t.Fatalf("rep=%+v err=%v", rep, err)
 	}
 	rc := rep.Tools[0]
-	if rc.Name != "reminder_create" || rc.Calls != 10 || rc.OK != 8 || math.Abs(rc.SuccessRate-0.8) > 1e-9 || rc.P50MS != 50 || rc.P95MS != 100 {
+	if rc.Name != "reminder_create" || rc.Calls != 10 || rc.OK != 8 || math.Abs(rc.SuccessRate-0.8) > 1e-9 || rc.P50MS != 50 || rc.P95MS != 90 || rc.Errors != 1 || rc.Timeouts != 1 {
 		t.Errorf("reminder_create = %+v", rc)
 	}
 	gp := rep.Tools[1]

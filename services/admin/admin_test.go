@@ -181,14 +181,50 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 }
 
-func TestGlobalRateLimit(t *testing.T) {
+func TestGlobalRateLimitCountsFailuresOnly(t *testing.T) {
 	c := &clk{t: time.Now()}
 	h, _ := New(Config{Username: "owner", PasswordHash: testHash}, fixture{}, Options{Now: c.now, GlobalLoginAttempt: 3})
-	for i := 0; i < 3; i++ {
-		login(t, h, "owner", "bad", "CF-Connecting-IP", "198.51.100."+string(rune('1'+i)))
+	for i := 0; i < 5; i++ { // successful logins never consume the global bucket
+		if w := login(t, h, "owner", testPass, "CF-Connecting-IP", "198.51.100."+string(rune('1'+i))); w.Code != 302 {
+			t.Fatalf("success %d: %d", i, w.Code)
+		}
 	}
-	if w := login(t, h, "owner", testPass, "CF-Connecting-IP", "198.51.100.99"); w.Code != 429 {
-		t.Errorf("global: %d", w.Code)
+	for i := 0; i < 3; i++ {
+		login(t, h, "owner", "bad", "CF-Connecting-IP", "198.51.101."+string(rune('1'+i)))
+	}
+	if w := login(t, h, "owner", testPass, "CF-Connecting-IP", "198.51.102.9"); w.Code != 429 {
+		t.Errorf("after global failures: %d", w.Code)
+	}
+	c.add(16 * time.Minute)
+	if w := login(t, h, "owner", testPass, "CF-Connecting-IP", "198.51.102.9"); w.Code != 302 {
+		t.Errorf("after window: %d", w.Code)
+	}
+}
+
+func TestDefaultGlobalLimitIsGenerous(t *testing.T) {
+	h, _ := newH(t)
+	if h.allLim.max != 300 || h.ipLim.max != 5 {
+		t.Errorf("limits ip=%d global=%d", h.ipLim.max, h.allLim.max)
+	}
+}
+
+func TestClientIPOrder(t *testing.T) {
+	mk := func(remote string, hdr ...string) string {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = remote
+		for i := 0; i+1 < len(hdr); i += 2 {
+			r.Header.Set(hdr[i], hdr[i+1])
+		}
+		return clientIP(r)
+	}
+	if got := mk("10.0.0.1:1", "CF-Connecting-IP", "198.51.100.1", "X-Forwarded-For", "1.1.1.1, 2.2.2.2"); got != "198.51.100.1" {
+		t.Errorf("cf: %s", got)
+	}
+	if got := mk("10.0.0.1:1", "X-Forwarded-For", "6.6.6.6, 2.2.2.2"); got != "2.2.2.2" { // last hop, not client-supplied first
+		t.Errorf("xff: %s", got)
+	}
+	if got := mk("10.0.0.1:1", "CF-Connecting-IP", "junk", "X-Forwarded-For", "nonsense"); got != "10.0.0.1" {
+		t.Errorf("fallback: %s", got)
 	}
 }
 

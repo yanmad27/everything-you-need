@@ -43,11 +43,22 @@ Routes (all need a session except login; logged out: HTML → 302 `/admin/login`
 - `GET /admin/api/{chats,timeline,users,chat-stats,tools}` — same data as JSON
 - `GET|POST /admin/login`, `POST /admin/logout` — the only state-changing routes (CSRF)
 
-Security: login CSRF (HMAC, 30 min) + 5 failed attempts / 15 min per client IP
-(`CF-Connecting-IP` else peer address) and 60 / 15 min globally → 429; bcrypt always
+Security: login CSRF (HMAC, 30 min) + 5 attempts / 15 min per client IP
+(`CF-Connecting-IP`, else the last `X-Forwarded-For` hop, else the peer address) → 429,
+and a global cap of 300 *failed* attempts / 15 min (successful logins never count); bcrypt always
 runs; server-side sessions (32-byte random id, cookie `__Host-eyn_admin`, HttpOnly,
 Secure, SameSite=Strict), idle 2h, absolute 12h; no-store, nosniff, no-referrer,
 X-Frame-Options DENY, CSP `default-src 'none'` with a per-response style nonce and
 no scripts; html/template escaping everywhere. Sessions live in memory (restart logs
-everyone out). `CF-Connecting-IP` is trusted as-is, so keep the origin reachable
-only through the proxy.
+everyone out). **Deployment note:** the client-IP headers are trusted as sent, so the origin must be
+reachable only through Cloudflare (firewall the origin to Cloudflare's ranges or use a
+tunnel); otherwise the per-IP limit can be evaded by spoofing them.
+
+Data notes: the DB file is created `0600` (its directory `0700` only if we create it).
+Prune runs ~10s after start and daily, then truncates the WAL; `Dropped()` also counts
+events lost to failed writes. `due_dates`, `reminder_list`, `news_recent`, `fetch_url`
+and `web_search` store only `ok (N chars)` as the result. Insights: **Errors** = tool
+calls with outcome error/timeout + failed bot replies (attributed to the turn's user);
+rate-limit / image-too-large replies are **Notices**. Tool success rate =
+ok/(ok+error+timeout), blocked shown separately, p50/p95 over ok calls. Timeline pages
+count from the newest (page 1 = latest 100 entries).

@@ -94,6 +94,7 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 	caption = strings.Join(strings.Fields(caption), " ")
 	in := ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "image", Text: caption}
 	if ok, notice := s.limiter.allow(chatID); !ok {
+		in.Text, in.ErrTag = "", "rate_limited"
 		s.recordConvo(ctx, in)
 		if notice {
 			s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "system", Text: msgRateLimit, ErrTag: "rate_limited"})

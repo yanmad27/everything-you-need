@@ -56,3 +56,13 @@ func TestAdminMountGating(t *testing.T) {
 		}
 	}
 }
+
+func TestZaloModelLabel(t *testing.T) {
+	cfg := &config.Config{LLMOpenAI: config.LLMOpenAIConfig{Model: "gpt-x"}, Chat: config.ChatConfig{Model: "claude-y"}}
+	if got := zaloModel(cfg, buildZaloCompleter(&config.Config{LLMOpenAI: config.LLMOpenAIConfig{BaseURL: "http://x", APIKey: "k", Model: "gpt-x"}})); got != "gpt-x" {
+		t.Errorf("openai: %q", got)
+	}
+	if got := zaloModel(cfg, nil); got != "claude-y" {
+		t.Errorf("fallback: %q", got)
+	}
+}

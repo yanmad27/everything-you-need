@@ -5,10 +5,10 @@
 <label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
 <label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
 <button type="submit">Lọc</button></form>
-<table><tr><th>Công cụ</th><th>Số lần gọi</th><th>Thành công</th><th>p50 (ms)</th><th>p95 (ms)</th></tr>
-{{range .Data.Tools}}<tr><td>{{.Name}}</td><td class="n">{{.Calls}}</td><td class="n">{{pct .SuccessRate}}</td><td class="n">{{.P50MS}}</td><td class="n">{{.P95MS}}</td></tr>
-{{else}}<tr><td colspan="5" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
-<h1 style="margin-top:20px">Lỗi gần đây</h1>
+<table><tr><th>Công cụ</th><th>Số lần gọi</th><th>Thành công</th><th>Lỗi</th><th>Timeout</th><th>Bị chặn</th><th>p50 ok (ms)</th><th>p95 ok (ms)</th></tr>
+{{range .Data.Tools}}<tr><td>{{.Name}}</td><td class="n">{{.Calls}}</td><td class="n">{{pct .SuccessRate}}</td><td class="n">{{.Errors}}</td><td class="n">{{.Timeouts}}</td><td class="n">{{.Blocked}}</td><td class="n">{{.P50MS}}</td><td class="n">{{.P95MS}}</td></tr>
+{{else}}<tr><td colspan="8" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+<h1 class="sec">Lỗi gần đây</h1>
 <table><tr><th>Thời gian</th><th>Công cụ</th><th>Kết quả</th><th>Args</th><th>Chat</th><th>ms</th></tr>
 {{range .Data.RecentFailures}}<tr><td>{{ftime .At}}</td><td>{{.Name}}</td><td class="bad">{{.Outcome}}</td><td><code>{{.ArgsSummary}}</code></td><td>{{.ChatID}}</td><td class="n">{{.LatencyMS}}</td></tr>
 {{else}}<tr><td colspan="6" class="mut">Không có lỗi.</td></tr>{{end}}</table>

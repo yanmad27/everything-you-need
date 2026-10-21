@@ -6,10 +6,10 @@
 <label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
 <label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
 <button type="submit">Lọc</button></form>
-<table><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th>Tin nhắn</th><th>Ngày hoạt động</th><th>Lần cuối</th><th>Nhắc nhở</th><th>Ảnh</th><th>Công cụ hàng đầu</th><th>Lỗi</th><th>Token (in/out/tổng)</th><th>Chi phí ước tính</th></tr>
+<table><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th>Tin nhắn</th><th>Ngày hoạt động</th><th>Lần cuối</th><th>Nhắc nhở</th><th>Ảnh</th><th>Công cụ hàng đầu</th><th>Lỗi</th><th>Thông báo</th><th>Token (in/out/tổng)</th><th>Chi phí ước tính</th></tr>
 {{range .Data.Items}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.ID}}</span>{{else}}{{.ID}}{{end}} <span class="mut">{{.Platform}}</span></td>
 <td class="n">{{.Messages}}</td><td class="n">{{.ActiveDays}}</td><td>{{ftime .LastSeen}}</td><td class="n">{{.RemindersCreated}}</td><td class="n">{{.ImagesSent}}</td>
-<td>{{range .TopTools}}{{.Name}}×{{.Count}} {{end}}</td><td class="n{{if .Errors}} bad{{end}}">{{.Errors}}</td>
+<td>{{range .TopTools}}{{.Name}}×{{.Count}} {{end}}</td><td class="n{{if .Errors}} bad{{end}}">{{.Errors}}</td><td class="n">{{.Notices}}</td>
 <td class="n">{{.PromptTokens}}/{{.CompletionTokens}}/{{.TotalTokens}}</td><td class="n">{{if .EstCost}}{{cost .EstCost}}{{else}}<span class="mut">—</span>{{end}}</td></tr>
-{{else}}<tr><td colspan="10" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+{{else}}<tr><td colspan="11" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
 {{template "foot" .}}

@@ -43,18 +43,24 @@ type Options struct {
 	PriceCompletionPer1K float64
 	// Now is injectable for tests.
 	Now func() time.Time
+	// StartupPruneDelay is how long after Open the first prune runs (default 10s).
+	StartupPruneDelay time.Duration
+	// OnPrune, if set, is called after each background prune (tests).
+	OnPrune func(deleted int64, err error)
 	// NoBackground disables the writer's periodic prune and drop-log tickers (tests).
 	NoBackground bool
 }
 
 // Store is both the recorder (write path) and the read-only query API.
 type Store struct {
-	db   *sql.DB
-	opt  Options
-	now  func() time.Time
-	ch   chan op
-	done chan struct{} // closed when the writer has drained
-	stop chan struct{} // closed by Close to stop tickers
+	db     *sql.DB
+	opt    Options
+	now    func() time.Time
+	ch     chan op
+	done   chan struct{}   // closed when the writer has drained
+	stop   chan struct{}   // closed by Close to stop tickers
+	ctx    context.Context // cancelled by Close so a running prune doesn't hold up shutdown
+	cancel context.CancelFunc
 
 	mu      sync.RWMutex // guards closed vs. sends on ch
 	closed  bool
@@ -83,10 +89,23 @@ func Open(path string, opt Options) (*Store, error) {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
+	if opt.StartupPruneDelay <= 0 {
+		opt.StartupPruneDelay = 10 * time.Second
+	}
+	// Only directories we create get 0700 (MkdirAll never chmods an existing
+	// one); the database file itself is always 0600 (SQLite gives -wal/-shm the same mode).
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("convo: create dir: %w", err)
 		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("convo: create db file: %w", err)
+	}
+	_ = f.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("convo: chmod db file: %w", err)
 	}
 	q := url.Values{}
 	q.Add("_pragma", "busy_timeout(5000)")
@@ -101,7 +120,8 @@ func Open(path string, opt Options) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, opt: opt, now: opt.Now,
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Store{db: db, opt: opt, now: opt.Now, ctx: ctx, cancel: cancel,
 		ch: make(chan op, opt.QueueSize), done: make(chan struct{}), stop: make(chan struct{})}
 	go s.writer()
 	if !opt.NoBackground {
@@ -197,6 +217,7 @@ func (s *Store) Close() error {
 	s.closed = true
 	close(s.ch)
 	close(s.stop)
+	s.cancel()
 	s.mu.Unlock()
 
 	select {
@@ -230,11 +251,37 @@ func (s *Store) Prune(ctx context.Context) (int64, error) {
 		n, _ := res.RowsAffected()
 		total += n
 	}
+	if total > 0 { // reclaim the WAL after a big delete
+		if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+			return total, fmt.Errorf("convo: checkpoint: %w", err)
+		}
+	}
 	return total, nil
 }
 
 func (s *Store) pruneLoop() {
 	defer s.wg.Done()
+	run := func() {
+		ctx, cancel := context.WithTimeout(s.ctx, time.Minute)
+		defer cancel()
+		n, err := s.Prune(ctx)
+		if s.opt.OnPrune != nil {
+			s.opt.OnPrune(n, err)
+		}
+		if err != nil {
+			log.Printf("convo: prune failed")
+		} else if n > 0 {
+			log.Printf("convo: pruned rows=%d", n)
+		}
+	}
+	first := time.NewTimer(s.opt.StartupPruneDelay)
+	defer first.Stop()
+	select {
+	case <-s.stop:
+		return
+	case <-first.C:
+		run()
+	}
 	t := time.NewTicker(pruneEvery)
 	defer t.Stop()
 	for {
@@ -242,14 +289,7 @@ func (s *Store) pruneLoop() {
 		case <-s.stop:
 			return
 		case <-t.C:
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			n, err := s.Prune(ctx)
-			cancel()
-			if err != nil {
-				log.Printf("convo: prune failed")
-			} else {
-				log.Printf("convo: pruned rows=%d", n)
-			}
+			run()
 		}
 	}
 }

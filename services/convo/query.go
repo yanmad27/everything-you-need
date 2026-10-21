@@ -88,6 +88,13 @@ func timeClause(col string, from, to time.Time, args *[]any) string {
 	return sb.String()
 }
 
+// chatNameExpr is the display name of chat alias c: its title, else (non-group
+// chats) the last inbound sender's name.
+const chatNameExpr = `CASE WHEN c.title != '' THEN c.title WHEN c.chat_type = 'GROUP' THEN '' ELSE COALESCE((SELECT u.display_name FROM messages x
+			JOIN users u ON u.platform = x.platform AND u.user_id = x.user_id
+			WHERE x.platform = c.platform AND x.chat_id = c.chat_id AND x.direction = 'in' AND u.display_name != ''
+			ORDER BY x.created_at DESC, x.id DESC LIMIT 1), '') END`
+
 // ListChats returns chats (newest activity first) with message/tool counts and
 // the total number of matching chats.
 func (s *Store) ListChats(ctx context.Context, f ChatFilter, p Page) ([]ChatSummary, int, error) {
@@ -125,10 +132,7 @@ func (s *Store) ListChats(ctx context.Context, f ChatFilter, p Page) ([]ChatSumm
 	}
 	limit, offset := p.norm()
 	rows, err := s.db.QueryContext(ctx, `SELECT c.platform, c.chat_id, c.chat_type, c.title, c.first_seen, c.last_seen,
-		CASE WHEN c.title != '' THEN c.title WHEN c.chat_type = 'GROUP' THEN '' ELSE COALESCE((SELECT u.display_name FROM messages x
-			JOIN users u ON u.platform = x.platform AND u.user_id = x.user_id
-			WHERE x.platform = c.platform AND x.chat_id = c.chat_id AND x.direction = 'in' AND u.display_name != ''
-			ORDER BY x.created_at DESC, x.id DESC LIMIT 1), '') END,
+		`+chatNameExpr+`,
 		COALESCE(m.n,0), COALESCE(t.n,0), COALESCE(m.f,0), COALESCE(m.l,0) `+q+
 		` ORDER BY c.last_seen DESC, c.platform, c.chat_id LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
@@ -230,6 +234,9 @@ func (s *Store) Timeline(ctx context.Context, platform, chatID string, p Page) (
 type StatsFilter struct {
 	Platform string
 	ChatID   string // restrict to one chat (UserStats/ToolStats)
+	// Q narrows UserStats to users whose name or id contains it, and ChatStats
+	// to chats whose id, title or participant name contains it (case-insensitive).
+	Q        string
 	From, To time.Time
 }
 
@@ -250,7 +257,11 @@ type Stat struct {
 	RemindersCreated int // reminder_create calls with outcome ok
 	ImagesSent       int // inbound image messages
 	TopTools         []ToolCount
-	Errors           int // tool calls with outcome error/timeout, plus failed replies (per-chat only: bot replies have no user)
+	// Errors = tool calls with outcome error|timeout + failed bot replies (error
+	// tag set, notices excluded). Failed replies are attributed to the user of
+	// the turn, so user and chat views agree.
+	Errors           int
+	Notices          int // rate-limit / image-too-large replies sent (not errors)
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
@@ -268,21 +279,24 @@ func (s *Store) ChatStats(ctx context.Context, f StatsFilter) ([]Stat, error) {
 	return s.stats(ctx, f, "chat_id")
 }
 
+// noticeTags are fixed system notices, counted separately from errors.
+const noticeTags = `('rate_limited','image_too_large')`
+
 // stats groups by col, which is only ever the literal "user_id" or "chat_id".
 func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, error) {
-	where := func(extra string) (string, []any) {
+	where := func(prefix string) (string, []any) {
 		var a []any
 		w := "1=1"
 		if f.Platform != "" {
-			w += " AND platform = ?"
+			w += " AND " + prefix + "platform = ?"
 			a = append(a, f.Platform)
 		}
 		if f.ChatID != "" && col == "user_id" {
-			w += " AND chat_id = ?"
+			w += " AND " + prefix + "chat_id = ?"
 			a = append(a, f.ChatID)
 		}
-		w += timeClause("created_at", f.From, f.To, &a)
-		return w + extra, a
+		w += timeClause(prefix+"created_at", f.From, f.To, &a)
+		return w, a
 	}
 	type key struct{ platform, id string }
 	m := map[key]*Stat{}
@@ -295,35 +309,46 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 		}
 		return st
 	}
-	// messages: inbound counts, images, active days, last seen, error replies.
-	w, a := where(" AND " + col + " IS NOT NULL AND " + col + " != ''")
-	rows, err := s.db.QueryContext(ctx, `SELECT platform, `+col+`,
+	// messages. Bot replies carry no user, so for per-user stats a reply takes
+	// the user of the inbound message in the same turn.
+	grp := "chat_id"
+	inner := "*"
+	if col == "user_id" {
+		grp = "eff_user"
+		inner = `*, COALESCE(user_id, (SELECT i.user_id FROM messages i WHERE i.turn_id = messages.turn_id AND messages.turn_id != ''
+			AND i.platform = messages.platform AND i.direction = 'in' LIMIT 1)) AS eff_user`
+	}
+	w, a := where("")
+	rows, err := s.db.QueryContext(ctx, `SELECT platform, `+grp+`,
 		SUM(direction='in'), SUM(direction='in' AND kind='image'),
 		COUNT(DISTINCT CASE WHEN direction='in' THEN date(created_at/1000,'unixepoch','+7 hours') END),
-		MAX(created_at), SUM(error_tag != '')
-		FROM messages WHERE `+w+` GROUP BY platform, `+col, a...)
+		MAX(CASE WHEN direction='in' THEN created_at ELSE 0 END),
+		SUM(direction='out' AND error_tag != '' AND error_tag NOT IN `+noticeTags+`),
+		SUM(direction='out' AND error_tag IN `+noticeTags+`)
+		FROM (SELECT `+inner+` FROM messages WHERE `+w+`) WHERE `+grp+` IS NOT NULL AND `+grp+` != ''
+		GROUP BY platform, `+grp, a...)
 	if err != nil {
 		return nil, fmt.Errorf("convo: stats messages: %w", err)
 	}
 	for rows.Next() {
 		var pf, id string
-		var in, img, days, last, errs int64
-		if err := rows.Scan(&pf, &id, &in, &img, &days, &last, &errs); err != nil {
+		var in, img, days, last, errs, notes int64
+		if err := rows.Scan(&pf, &id, &in, &img, &days, &last, &errs, &notes); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		st := get(pf, id)
-		st.Messages, st.ImagesSent, st.ActiveDays, st.LastSeen, st.Errors = int(in), int(img), int(days), fromMS(last), int(errs)
+		st.Messages, st.ImagesSent, st.ActiveDays, st.LastSeen, st.Errors, st.Notices = int(in), int(img), int(days), fromMS(last), int(errs), int(notes)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	// tool calls: reminders, errors, per-tool counts.
-	w, a = where(" AND " + col + " != ''")
+	w, a = where("")
 	rows, err = s.db.QueryContext(ctx, `SELECT platform, `+col+`, name, COUNT(*),
 		SUM(name='reminder_create' AND outcome='ok'), SUM(outcome IN ('error','timeout'))
-		FROM tool_calls WHERE `+w+` GROUP BY platform, `+col+`, name`, a...)
+		FROM tool_calls WHERE `+w+` AND `+col+` != '' GROUP BY platform, `+col+`, name`, a...)
 	if err != nil {
 		return nil, fmt.Errorf("convo: stats tools: %w", err)
 	}
@@ -345,9 +370,9 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 		return nil, err
 	}
 	// usage tokens.
-	w, a = where(" AND " + col + " != ''")
+	w, a = where("")
 	rows, err = s.db.QueryContext(ctx, `SELECT platform, `+col+`, SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens)
-		FROM usage WHERE `+w+` GROUP BY platform, `+col, a...)
+		FROM usage WHERE `+w+` AND `+col+` != '' GROUP BY platform, `+col, a...)
 	if err != nil {
 		return nil, fmt.Errorf("convo: stats usage: %w", err)
 	}
@@ -366,10 +391,10 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// names.
+	// names (chats use the same fallback as ListChats).
 	nameQ := `SELECT platform, user_id, display_name FROM users`
 	if col == "chat_id" {
-		nameQ = `SELECT platform, chat_id, title FROM chats`
+		nameQ = `SELECT c.platform, c.chat_id, ` + chatNameExpr + ` FROM chats c`
 	}
 	rows, err = s.db.QueryContext(ctx, nameQ)
 	if err != nil {
@@ -386,8 +411,38 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 		}
 	}
 	rows.Close()
+	// Q filter.
+	var qChats map[key]bool
+	needle := strings.ToLower(strings.TrimSpace(f.Q))
+	if needle != "" && col == "chat_id" {
+		like := likeEscape(needle)
+		rows, err = s.db.QueryContext(ctx, `SELECT c.platform, c.chat_id FROM chats c WHERE c.chat_id LIKE ? ESCAPE '\' OR c.title LIKE ? ESCAPE '\'
+			OR EXISTS (SELECT 1 FROM messages y JOIN users u ON u.platform = y.platform AND u.user_id = y.user_id
+				WHERE y.platform = c.platform AND y.chat_id = c.chat_id AND u.display_name LIKE ? ESCAPE '\')`, like, like, like)
+		if err != nil {
+			return nil, fmt.Errorf("convo: stats filter: %w", err)
+		}
+		qChats = map[key]bool{}
+		for rows.Next() {
+			var pf, id string
+			if err := rows.Scan(&pf, &id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			qChats[key{pf, id}] = true
+		}
+		rows.Close()
+	}
 	out := make([]Stat, 0, len(m))
 	for k, st := range m {
+		if needle != "" {
+			if col == "chat_id" && !qChats[k] {
+				continue
+			}
+			if col == "user_id" && !strings.Contains(strings.ToLower(st.Name), needle) && !strings.Contains(strings.ToLower(st.ID), needle) {
+				continue
+			}
+		}
 		tc := tools[k]
 		sort.Slice(tc, func(i, j int) bool {
 			if tc[i].Count != tc[j].Count {
@@ -414,11 +469,16 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 }
 
 type ToolStat struct {
-	Name         string
-	Calls        int
-	OK           int
-	SuccessRate  float64 // OK/Calls, 0..1
-	P50MS, P95MS int64   // nearest-rank latency percentiles
+	Name     string
+	Calls    int // all calls
+	OK       int
+	Errors   int // outcome error
+	Timeouts int
+	Blocked  int // refused by the exfiltration/fetch guards; not part of SuccessRate
+	// SuccessRate = OK/(OK+Errors+Timeouts), 0..1 (0 when there are none).
+	SuccessRate float64
+	// P50MS/P95MS are nearest-rank latencies over ok calls only.
+	P50MS, P95MS int64
 }
 
 type ToolFailure struct {
@@ -448,7 +508,7 @@ func (s *Store) ToolStats(ctx context.Context, f StatsFilter) (ToolReport, error
 	}
 	w += timeClause("created_at", f.From, f.To, &a)
 
-	rows, err := s.db.QueryContext(ctx, `SELECT name, outcome='ok', latency_ms FROM tool_calls WHERE `+w+` ORDER BY name, latency_ms`, a...)
+	rows, err := s.db.QueryContext(ctx, `SELECT name, outcome, latency_ms FROM tool_calls WHERE `+w+` ORDER BY name, latency_ms`, a...)
 	if err != nil {
 		return ToolReport{}, fmt.Errorf("convo: tool stats: %w", err)
 	}
@@ -459,15 +519,17 @@ func (s *Store) ToolStats(ctx context.Context, f StatsFilter) (ToolReport, error
 		if cur == nil {
 			return
 		}
-		cur.SuccessRate = float64(cur.OK) / float64(cur.Calls)
+		if d := cur.OK + cur.Errors + cur.Timeouts; d > 0 {
+			cur.SuccessRate = float64(cur.OK) / float64(d)
+		}
 		cur.P50MS, cur.P95MS = percentile(lat, 0.50), percentile(lat, 0.95)
 		rep.Tools = append(rep.Tools, *cur)
 	}
 	for rows.Next() {
 		var name string
-		var ok bool
+		var outcome string
 		var l int64
-		if err := rows.Scan(&name, &ok, &l); err != nil {
+		if err := rows.Scan(&name, &outcome, &l); err != nil {
 			rows.Close()
 			return ToolReport{}, err
 		}
@@ -476,10 +538,17 @@ func (s *Store) ToolStats(ctx context.Context, f StatsFilter) (ToolReport, error
 			cur, lat = &ToolStat{Name: name}, lat[:0]
 		}
 		cur.Calls++
-		if ok {
+		switch outcome {
+		case "ok":
 			cur.OK++
+			lat = append(lat, l)
+		case "error":
+			cur.Errors++
+		case "timeout":
+			cur.Timeouts++
+		case "blocked":
+			cur.Blocked++
 		}
-		lat = append(lat, l)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {

@@ -37,7 +37,6 @@ var funcs = template.FuncMap{
 	},
 	"pct":  func(f float64) string { return strconv.FormatFloat(f*100, 'f', 0, 64) + "%" },
 	"cost": func(f float64) string { return strconv.FormatFloat(f, 'f', 4, 64) },
-	"enc":  url.QueryEscape,
 }
 
 type page struct {
@@ -103,7 +102,7 @@ func clip(s string, n int) string {
 }
 
 func statsFilter(q url.Values) convo.StatsFilter {
-	return convo.StatsFilter{Platform: clip(q.Get("platform"), 20), ChatID: clip(q.Get("chat"), 100),
+	return convo.StatsFilter{Platform: clip(q.Get("platform"), 20), ChatID: clip(q.Get("chat"), 100), Q: clip(q.Get("q"), 100),
 		From: parseDay(q.Get("from"), false), To: parseDay(q.Get("to"), true)}
 }
 
@@ -135,7 +134,7 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 			return
 		}
 		base.Title, base.Nav = "Hội thoại", "chats"
-		base.Data = map[string]any{"Items": items, "Total": total, "Pager": pager(q, "/admin/chats", pg, chatsPerPage, total)}
+		base.Data = map[string]any{"Items": items, "Total": total, "Pager": pager(q, "/admin/chats", pg, chatsPerPage, total, "← Trước", "Sau →")}
 		h.render(w, r, http.StatusOK, "chats.html", base)
 	case "/admin/chat", "/admin/api/timeline":
 		platform, chatID := clip(q.Get("platform"), 20), clip(q.Get("id"), 100)
@@ -143,23 +142,15 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 			http.Error(w, "missing platform or id", http.StatusBadRequest)
 			return
 		}
-		_, total, err := h.data.Timeline(ctx, platform, chatID, convo.Page{Limit: 1})
+		// Page 1 is the newest window; "older" pages follow. One query per view.
+		pg := atoi(q.Get("page"), 1)
+		items, total, err := h.data.Timeline(ctx, platform, chatID, convo.Page{Limit: timelinePage, Offset: (pg - 1) * timelinePage, Desc: true})
 		if err != nil {
 			fail(err)
 			return
 		}
-		last := (total + timelinePage - 1) / timelinePage
-		if last < 1 {
-			last = 1
-		}
-		pg := last // newest page first
-		if q.Get("page") != "" {
-			pg = atoi(q.Get("page"), last)
-		}
-		items, total, err := h.data.Timeline(ctx, platform, chatID, convo.Page{Limit: timelinePage, Offset: (pg - 1) * timelinePage})
-		if err != nil {
-			fail(err)
-			return
+		for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 { // show chronologically within the page
+			items[i], items[j] = items[j], items[i]
 		}
 		if api {
 			writeJSON(w, map[string]any{"total": total, "page": pg, "items": items})
@@ -167,7 +158,7 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 		}
 		base.Title, base.Nav = "Chi tiết hội thoại", "chats"
 		base.Data = map[string]any{"Items": items, "Total": total, "Platform": platform, "ChatID": chatID,
-			"Pager": pager(q, "/admin/chat", pg, timelinePage, total)}
+			"Pager": pager(q, "/admin/chat", pg, timelinePage, total, "← Mới hơn", "Cũ hơn →")}
 		h.render(w, r, http.StatusOK, "chat.html", base)
 	case "/admin/users", "/admin/api/users", "/admin/chat-stats", "/admin/api/chat-stats":
 		byChat := strings.Contains(path, "chat-stats")
@@ -181,15 +172,6 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 		if err != nil {
 			fail(err)
 			return
-		}
-		if needle := strings.ToLower(strings.TrimSpace(clip(q.Get("q"), 100))); needle != "" {
-			kept := st[:0]
-			for _, x := range st {
-				if strings.Contains(strings.ToLower(x.Name), needle) || strings.Contains(strings.ToLower(x.ID), needle) {
-					kept = append(kept, x)
-				}
-			}
-			st = kept
 		}
 		if api {
 			writeJSON(w, map[string]any{"items": st})
@@ -224,12 +206,13 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 }
 
 type pagerData struct {
-	Page, Pages      int
-	Prev, Next       string
-	HasPrev, HasNext bool
+	Page, Pages          int
+	Prev, Next           string
+	HasPrev, HasNext     bool
+	PrevLabel, NextLabel string
 }
 
-func pager(q url.Values, path string, pg, size, total int) pagerData {
+func pager(q url.Values, path string, pg, size, total int, prevLabel, nextLabel string) pagerData {
 	pages := (total + size - 1) / size
 	if pages < 1 {
 		pages = 1
@@ -242,7 +225,7 @@ func pager(q url.Values, path string, pg, size, total int) pagerData {
 		v.Set("page", fmt.Sprint(n))
 		return path + "?" + v.Encode()
 	}
-	p := pagerData{Page: pg, Pages: pages, HasPrev: pg > 1, HasNext: pg < pages}
+	p := pagerData{PrevLabel: prevLabel, NextLabel: nextLabel, Page: pg, Pages: pages, HasPrev: pg > 1, HasNext: pg < pages}
 	if p.HasPrev {
 		p.Prev = link(pg - 1)
 	}
