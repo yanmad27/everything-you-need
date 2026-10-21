@@ -403,25 +403,40 @@ func (l *limiter) allow(key string) bool {
 	return true
 }
 
+// live drops entries outside the window (l.mu held) and returns what is left.
+func (l *limiter) live(key string) []time.Time {
+	n := l.now()
+	keep := l.hits[key][:0]
+	for _, t := range l.hits[key] {
+		if n.Sub(t) <= l.window {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		delete(l.hits, key)
+		return nil
+	}
+	l.hits[key] = keep
+	return keep
+}
+
 // full reports whether key is at its limit without recording an attempt.
 func (l *limiter) full(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	n := l.now()
-	c := 0
-	for _, t := range l.hits[key] {
-		if n.Sub(t) <= l.window {
-			c++
-		}
-	}
-	return c >= l.max
+	return len(l.live(key)) >= l.max
 }
 
-// add records an attempt unconditionally.
+// add records an attempt unconditionally; stored attempts stay bounded by
+// max (the oldest are dropped) so a flood cannot grow the slice.
 func (l *limiter) add(key string) {
 	l.mu.Lock()
-	l.hits[key] = append(l.hits[key], l.now())
-	l.mu.Unlock()
+	defer l.mu.Unlock()
+	keep := append(l.live(key), l.now())
+	if len(keep) > l.max {
+		keep = keep[len(keep)-l.max:]
+	}
+	l.hits[key] = keep
 }
 
 func (l *limiter) reset(key string) {

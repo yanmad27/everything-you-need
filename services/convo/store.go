@@ -167,6 +167,7 @@ func migrate(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(platform, chat_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(platform, user_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_turn ON messages(platform, turn_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at)`,
 		`CREATE TABLE IF NOT EXISTS tool_calls (
 			id             INTEGER PRIMARY KEY AUTOINCREMENT,

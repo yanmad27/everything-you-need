@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"everything-you-need/m/services/convo"
 )
@@ -73,5 +74,24 @@ func TestNoInlineStyleAttributes(t *testing.T) {
 		if strings.Contains(do(h, "GET", p, nil, ck).Body.String(), ` style="`) {
 			t.Errorf("%s has an inline style attribute", p)
 		}
+	}
+}
+
+func TestGlobalLimiterBounded(t *testing.T) {
+	c := &clk{t: time.Now()}
+	l := newLimiter(3, time.Minute, c.now)
+	for i := 0; i < 1000; i++ {
+		l.add("*")
+	}
+	if n := len(l.hits["*"]); n != 3 || !l.full("*") {
+		t.Errorf("stored=%d full=%v", n, l.full("*"))
+	}
+	c.add(2 * time.Minute)
+	if l.full("*") || len(l.hits["*"]) != 0 {
+		t.Errorf("not trimmed after window: %d", len(l.hits["*"]))
+	}
+	l.add("*")
+	if len(l.hits["*"]) != 1 {
+		t.Error("add after expiry")
 	}
 }
