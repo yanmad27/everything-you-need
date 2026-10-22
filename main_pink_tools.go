@@ -92,7 +92,8 @@ func (a reminderAdapter) Cancel(ctx context.Context, platform, chatID string, id
 // service that is not configured is left nil, which omits its tool.
 func buildZaloTools(cfg *config.Config, prices *pricetracker.PriceTrackerService, newsStore *news.Store,
 	due *duedate.Service, rem *reminder.Service) chat.Tools {
-	tl := chat.Tools{Platform: reminder.PlatformZalo, DueChats: strings.Split(cfg.Zalo.PrivateToolChats, ",")}
+	tl := chat.Tools{Platform: reminder.PlatformZalo, DueChats: strings.Split(cfg.Zalo.PrivateToolChats, ","),
+		FetchAllowDomains: strings.Split(cfg.Chat.FetchAllowDomains, ",")}
 	if prices != nil {
 		tl.Prices = priceAdapter{pricetracker.NewCachedPriceReader(prices, 2*time.Minute)}
 	}

@@ -120,25 +120,60 @@ func htmlToText(raw string) string {
 }
 
 var (
-	mdLinkOnlyRe = regexp.MustCompile(`^\s*(?:[*+-]\s+)?!?\[[^\]]*\]\([^)]*\)\s*$`)
+	mdListLinkRe = regexp.MustCompile(`^([*+-])\s+\[([^\]]+)\]\([^)]*\)\s*$`)
+	mdLinkOnlyRe = regexp.MustCompile(`^!?\[[^\]]*\]\([^)]*\)$`)
 	mdImageRe    = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
 )
 
-// maxReaderLine drops giant lines (mega-menus, inlined data) from reader output.
-const maxReaderLine = 1500
+const (
+	// maxReaderLine truncates giant lines (mega-menus, inlined data) from reader
+	// output; kept small so one such line cannot push the content past the caps.
+	maxReaderLine = 600
+	// minCondensed: below this the condensed text is not trusted (a link-only
+	// page) and the uncondensed text is used instead.
+	minCondensed = 200
+	// maxListLinks: above this many list-item links they are treated as menus and dropped.
+	maxListLinks = 40
+)
 
-// condenseReader removes blank lines, link-only lines, images and huge lines so
-// the cap keeps page content instead of a site's navigation menu.
+// condenseReader removes blank lines, bare links, images and the tail of huge
+// lines so the cap keeps page content instead of a site's navigation menu.
+// List-item links keep their text ("- [Title](url)" -> "- Title").
 func condenseReader(s string) string {
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		l = strings.TrimSpace(l)
-		if l == "" || len(l) > maxReaderLine || mdLinkOnlyRe.MatchString(l) {
-			continue
-		}
-		if l = strings.TrimSpace(mdImageRe.ReplaceAllString(l, "")); l != "" {
-			out = append(out, l)
+	s = strings.TrimSpace(s)
+	lines := strings.Split(s, "\n")
+	links := 0
+	for _, l := range lines {
+		if mdListLinkRe.MatchString(strings.TrimSpace(l)) {
+			links++
 		}
 	}
-	return strings.Join(out, "\n")
+	keepLinks := links <= maxListLinks // a page that is mostly link lists is menus, not content
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if m := mdListLinkRe.FindStringSubmatch(l); m != nil {
+			if keepLinks {
+				out = append(out, m[1]+" "+m[2])
+			}
+			continue
+		}
+		if mdLinkOnlyRe.MatchString(l) {
+			continue
+		}
+		if l = strings.TrimSpace(mdImageRe.ReplaceAllString(l, "")); l == "" || l == "*" || l == "-" || l == "+" {
+			continue
+		}
+		if len(l) > maxReaderLine {
+			l = strings.ToValidUTF8(l[:maxReaderLine], "") + "…"
+		}
+		out = append(out, l)
+	}
+	if c := strings.Join(out, "\n"); len(c) >= minCondensed {
+		return c
+	}
+	return s
 }

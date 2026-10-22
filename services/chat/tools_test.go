@@ -665,11 +665,11 @@ func TestToolCallIDsAnsweredExactlyOnce(t *testing.T) {
 }
 
 func TestFetchUntaintedModelURL(t *testing.T) {
-	// untainted turn: model-proposed public URL is allowed, bare host normalised, query/fragment stripped
+	// untainted turn: allowlisted model-proposed URL allowed, bare host normalised, query/fragment stripped
 	for in, want := range map[string]string{
-		"github.com/trending":                        "page of https://github.com/trending",
-		"https://github.com/trending?since=weekly#a": "page of https://github.com/trending\n",
-		"http://example.org/a?d=secret":              "page of http://example.org/a\n",
+		"github.com/trending":                                "page of https://github.com/trending\n",
+		"https://github.com/trending?since=weekly#a":         "page of https://github.com/trending\n",
+		"https://en.wikipedia.org/wiki/Go_language?d=secret": "page of https://en.wikipedia.org/wiki/Go_language\n",
 	} {
 		r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"`+in+`"}`)), textStep("ok"))
 		r.ask("GitHub trending hôm nay có gì?")
@@ -677,24 +677,76 @@ func TestFetchUntaintedModelURL(t *testing.T) {
 			t.Errorf("%q -> %q", in, got)
 		}
 	}
-	// URL from user text or search keeps its query
+	// URL from user text or search keeps its query (even off the allowlist)
 	r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"e.test/x?a=1"}`)), textStep("ok"))
 	r.ask("xem https://e.test/x?a=1 nhé")
 	if got := r.toolResult(1); !strings.Contains(got, "page of https://e.test/x?a=1") {
 		t.Errorf("user URL query lost: %q", got)
 	}
-	r = newRig(t, func(tl *Tools) { tl.Search = &fakeSearch{} }, toolStep(call("1", "web_search", `{"query":"q"}`)), toolStep(call("2", "fetch_url", `{"url":"https://x.test/a"}`)), textStep("ok"))
+	r = newRig(t, nil, toolStep(call("1", "web_search", `{"query":"q"}`)), toolStep(call("2", "fetch_url", `{"url":"https://x.test/a"}`)), textStep("ok"))
 	r.ask("tìm")
 	if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "page of https://x.test/a") {
 		t.Errorf("search URL refused: %q", got)
 	}
-	// invalid inputs
-	for _, in := range []string{"localhost", "ftp://x.test/a", "https://u:p@x.test/", "https://x.test:8080/", "a b.com"} {
+	// invalid inputs, including IP literals and local names
+	for _, in := range []string{"localhost", "ftp://x.test/a", "https://u:p@x.test/", "https://x.test:8080/", "a b.com",
+		"http://127.0.0.1/", "http://127.1/", "http://0x7f.1/", "http://2130706433/", "http://[::1]/", "http://a.local/", "http://db.internal/", "http://nas.lan/", "http://localhost.evil.com.local/"} {
 		r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"`+in+`"}`)), textStep("ok"))
 		r.ask("hi")
 		if got := r.toolResult(1); !strings.Contains(got, "URL không hợp lệ") {
 			t.Errorf("%q accepted: %q", in, got)
 		}
+	}
+}
+
+func TestFetchModelURLRestrictions(t *testing.T) {
+	blocked := func(name, ask string, steps ...func([]llm.ChatMessage, []llm.ToolDef) (llm.ToolResponse, error)) {
+		t.Helper()
+		r := newRig(t, nil, steps...)
+		r.ask(ask)
+		if got := lastTool(r.sc.calls[len(r.sc.calls)-1]); !strings.Contains(got, "chỉ đọc link") {
+			t.Errorf("%s: not blocked: %q", name, got)
+		}
+	}
+	f := func(u string) llm.ToolCall { return call("f", "fetch_url", `{"url":"`+u+`"}`) }
+	blocked("non-allowlisted", "hi", toolStep(f("https://evil.test/a")), textStep("ok"))
+	blocked("lookalike host", "hi", toolStep(f("https://github.com.evil.test/a")), textStep("ok"))
+	blocked("percent", "hi", toolStep(f("https://github.com/a%2Fb")), textStep("ok"))
+	blocked("segments", "hi", toolStep(f("https://github.com/a/b/c/d/e/f")), textStep("ok"))
+	blocked("long path", "hi", toolStep(f("https://github.com/"+strings.Repeat("a", 81))), textStep("ok"))
+	blocked("odd chars", "hi", toolStep(f("https://github.com/a;b")), textStep("ok"))
+	blocked("idn host", "hi", toolStep(f("https://github.com/x"), f("https://gıthub.com/x")), textStep("ok"))
+	blocked("after search", "hi", toolStep(call("s", "web_search", `{"query":"q"}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
+	blocked("after news", "hi", toolStep(call("s", "news_recent", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
+	// private data already read in this turn
+	r := newRig(t, nil, toolStep(call("d", "due_dates", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
+	r.ask("hi")
+	if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "chỉ đọc link") {
+		t.Errorf("fetch after due_dates allowed: %q", got)
+	}
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	r = newRig(t, nil, toolStep(call("d", "due_dates", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
+	r.ask("hi")
+	if !strings.Contains(buf.String(), "outcome=blocked reason=private_seen") {
+		t.Errorf("log: %s", buf.String())
+	}
+	// custom allowlist replaces the default
+	r = newRig(t, func(tl *Tools) { tl.FetchAllowDomains = []string{" Example.org "} }, toolStep(f("https://a.example.org/x")), toolStep(f("https://github.com/trending")), textStep("ok"))
+	r.ask("hi")
+	if got := r.toolResult(1); !strings.Contains(got, "page of https://a.example.org/x") {
+		t.Errorf("custom allowlist: %q", got)
+	}
+	if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "chỉ đọc link") {
+		t.Errorf("default list still active: %q", got)
+	}
+	// a URL seen only in earlier history does not authorise a model fetch
+	r = newRig(t, nil, textStep("noted"), toolStep(f("https://evil.test/a")), textStep("ok"))
+	r.ask("xem https://evil.test/a")
+	r.ask("đọc lại đi")
+	if got := lastTool(r.sc.calls[len(r.sc.calls)-1]); !strings.Contains(got, "chỉ đọc link") {
+		t.Errorf("history URL allowed: %q", got)
 	}
 }
 
@@ -753,9 +805,32 @@ func TestPromptHasLiveWebRule(t *testing.T) {
 }
 
 func TestCondenseReader(t *testing.T) {
-	in := "## Navigation Menu\n\n[](https://github.com/)\n*   [Sign in](https://x/y)\n" + strings.Repeat("x", 2000) + "\n## [a / b](https://github.com/a/b)\ndesc ![i](https://img/1.png) end\n"
-	got := condenseReader(in)
-	if got != "## Navigation Menu\n## [a / b](https://github.com/a/b)\ndesc  end" {
-		t.Errorf("got %q", got)
+	// GitHub-trending-shaped: nav list links, a huge line, then repo headings
+	var b strings.Builder
+	b.WriteString("Title: GitHub\n\n## Navigation Menu\n[](https://github.com/)\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "*   [Nav %d](https://github.com/n%d)\n", i, i)
+	}
+	b.WriteString(strings.Repeat("x", 5000) + "\n")
+	b.WriteString("## [vllm-project / vllm](https://github.com/vllm-project/vllm)\nA high-throughput inference engine ![i](https://img/1.png) end\nPython[1,000](https://github.com/x/stargazers)\n")
+	b.WriteString("## [Comfy-Org / ComfyUI](https://github.com/Comfy-Org/ComfyUI)\nThe most powerful diffusion GUI\n")
+	got := condenseReader(b.String())
+	for _, w := range []string{"## [vllm-project / vllm]", "## [Comfy-Org / ComfyUI]", "high-throughput inference engine", "most powerful diffusion"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("lost %q in %q", w, got)
+		}
+	}
+	if strings.Contains(got, "Nav 5") || strings.Contains(got, "img/1.png") || len(got) > 1500 {
+		t.Errorf("boilerplate kept (len %d)", len(got))
+	}
+	// few list links keep their text
+	few := "- [Alpha story](https://a.test/1)\n- [Beta story](https://a.test/2)\n" + strings.Repeat("some body text. ", 20)
+	if got := condenseReader(few); !strings.Contains(got, "- Alpha story") || strings.Contains(got, "https://a.test") {
+		t.Errorf("list links: %q", got)
+	}
+	// nearly-empty result falls back to the raw text
+	raw := "[a](https://x.test/1)\n[b](https://x.test/2)"
+	if got := condenseReader(raw); got != raw {
+		t.Errorf("fallback: %q", got)
 	}
 }

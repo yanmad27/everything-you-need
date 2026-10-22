@@ -76,6 +76,9 @@ type Tools struct {
 
 	// DueChats lists the chat ids allowed to use due_dates (private data); empty disables it.
 	DueChats []string
+	// FetchAllowDomains: domains (exact or subdomain) the model may fetch on its
+	// own; empty = defaultFetchAllow.
+	FetchAllowDomains []string
 	// SearchPerHour is the per-process web_search budget (default 200).
 	SearchPerHour int
 
@@ -286,7 +289,7 @@ func (s *Service) buildTools() []toolImpl {
 			if err := json.Unmarshal(raw, &a); err != nil || a.URL == "" {
 				return "", withReason("invalid_args", userError("invalid arguments: url required"))
 			}
-			target, err := t.fetchTarget(a.URL)
+			target, err := t.fetchTarget(preFrom(ctx), a.URL, s.fetchAllow)
 			if err != nil {
 				return "", err
 			}

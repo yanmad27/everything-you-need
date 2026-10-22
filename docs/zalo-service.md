@@ -187,15 +187,28 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
 - Once untrusted content enters a message (`fetch_url`, `web_search`, `news_recent`, or an image),
   `due_dates` and all `reminder_*` tools are disabled for the rest of that message.
 - `fetch_url` reads links the user sent or that `web_search` returned in the same message (query
-  string kept). It also accepts a bare host/path (`github.com/trending`, normalised to `https://`;
-  ports other than 80/443 and userinfo are rejected). A *model-proposed* public URL is allowed only
-  while the message is still untainted (no `fetch_url`/`web_search`/`news_recent` yet, not an image
-  turn); its query string and fragment are stripped so data cannot be smuggled out. After the first
-  tool that taints, unknown URLs are refused again. Reader output has nav boilerplate (link-only
-  lines, images, lines >1500 chars) dropped before the 12k cap.
+  kept; history never counts). A bare host/path (`github.com/trending`) is normalised to `https://`.
+  Rejected for every URL: non-http(s), userinfo, ports other than 80/443, IP-literal hosts (v4/v6,
+  odd forms like `127.1`, `0x7f.1`), `localhost*`, `*.local/.internal/.lan/...` (netguard still
+  applies at dial time).
+- A *model-proposed* URL (anything else) is allowed only if **all** hold: the turn was untainted
+  before the call (no `fetch_url`/`web_search`/`news_recent` yet, not an image turn); no private tool
+  (`due_dates`, `reminder_*`) has run in the turn (else `reason=private_seen`); the host is on the
+  allowlist (exact or subdomain; ASCII/non-IDN only); and the path has no `%`, ≤80 chars, ≤5 segments
+  of `[A-Za-z0-9._~-]`. Query and fragment are stripped. Otherwise `outcome=blocked
+  reason=url_not_allowed`. Default allowlist: github.com, wikipedia.org, news.ycombinator.com,
+  vnexpress.net, tuoitre.vn, thanhnien.vn, dantri.com.vn, cafef.vn, coingecko.com, reuters.com,
+  bbc.com, apnews.com. Override (replaces the default) with `chat.fetch_allow_domains` / env
+  `CHAT_FETCH_ALLOW_DOMAINS` (comma-separated).
+- Reader output is condensed before the 12k cap: bare links/images dropped, list-item links kept as
+  text unless the page has >40 of them (then they are menus and dropped), lines truncated at 600
+  chars, and if <200 chars remain the raw text is used.
 - Tool failures log `chat tool: name=… outcome=… reason=<tag>` (fixed tags such as
   `serper_status_400`, `invalid_url`, `url_not_allowed`, `fetch_failed`, `fetch_refused`,
   `tool_timeout`; never URLs, queries or keys). The user/model still only see a generic "tool failed".
+- `web_search` needs the Serper key to have credits: while it is out ("Not enough credits",
+  HTTP 400, logged as `reason=serper_status_400`) the tool fails until topped up; `fetch_url` of
+  allowlisted pages works regardless.
 - `web_search`: ≤3 per message and a per-process budget of 200/hour.
 - `reminder_create` needs reminder wording in the user's own text; `reminder_cancel` needs cancel
   wording (huỷ/xoá/bỏ/cancel/dừng nhắc). Only one successful create/cancel per message; refused or

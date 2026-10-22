@@ -85,6 +85,15 @@ func (s *Service) WithTools(tc llm.ToolCompleter, tl Tools) *Service {
 	s.tools = tl
 	s.limiter = newLimiter(tl.RateBurst, tl.RatePerMinute, tl.Now)
 	s.searchBudget = &searchBudget{limit: orInt(tl.SearchPerHour, defSearchPerHour)}
+	s.fetchAllow = nil
+	for _, d := range tl.FetchAllowDomains {
+		if d = strings.ToLower(strings.Trim(strings.TrimSpace(d), ".")); d != "" {
+			s.fetchAllow = append(s.fetchAllow, d)
+		}
+	}
+	if len(s.fetchAllow) == 0 {
+		s.fetchAllow = defaultFetchAllow
+	}
 	s.dueChats = map[string]bool{}
 	for _, c := range tl.DueChats {
 		if c = strings.TrimSpace(c); c != "" {
@@ -114,7 +123,7 @@ type turn struct {
 	searches     int
 	remMutations int
 	urls         map[string]bool // URLs returned by web_search this turn
-	preTaint     bool            // the turn was already tainted when the current call started
+	private      bool            // a sensitive tool has run in this turn
 }
 
 func (t *turn) taint() { t.mu.Lock(); t.untrusted = true; t.mu.Unlock() }
@@ -141,13 +150,24 @@ func (t *turn) addURLs(hits []WebHit) {
 	}
 }
 
+// preState is a per-call snapshot of the turn taken before the call's own
+// taint, carried to the tool through the context.
+type preState struct{ tainted, private bool }
+
+type preKey struct{}
+
+func preFrom(ctx context.Context) preState {
+	p, _ := ctx.Value(preKey{}).(preState)
+	return p
+}
+
 // fetchTarget decides what fetch_url may read and returns the URL to fetch.
-// A URL the user sent or web_search returned is fetched as is (query kept).
-// Any other public URL the model proposes is allowed only while the turn was
-// still untainted when the call started, and its query string and fragment
-// are dropped so the model cannot smuggle data out in them. Once tainted,
-// unknown URLs are refused.
-func (t *turn) fetchTarget(raw string) (string, error) {
+// A URL the user sent or web_search returned this turn is fetched as is (query
+// kept). A URL the model proposes itself is allowed only if, before this call,
+// the turn was untainted and no private tool had run, the host is on the
+// allowlist and the path is short and plain; its query and fragment are
+// dropped. Anything else is refused.
+func (t *turn) fetchTarget(pre preState, raw string, allow []string) (string, error) {
 	u, ok := normalizeURL(raw)
 	if !ok {
 		return "", withReason("invalid_url", userError("URL không hợp lệ; cần dạng https://tên-miền/đường-dẫn"))
@@ -167,8 +187,12 @@ func (t *turn) fetchTarget(raw string) (string, error) {
 			return u.String(), nil
 		}
 	}
-	if t.preTaint {
-		return "", withReason("url_not_allowed", userError("chỉ đọc link người dùng gửi hoặc từ kết quả tìm kiếm"))
+	refuse := userError("chỉ đọc link người dùng gửi, từ kết quả tìm kiếm, hoặc trang công khai quen thuộc")
+	switch {
+	case pre.private:
+		return "", blockedReason("private_seen", refuse)
+	case pre.tainted, !modelURLOK(u, allow):
+		return "", blockedReason("url_not_allowed", refuse)
 	}
 	u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
 	return u.String(), nil
@@ -396,12 +420,16 @@ func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolIm
 		outcome, reason = "blocked", "tainted_turn"
 		return errResult(call.Name, "this tool is disabled after web, news or image content entered this message; ask the user to repeat the request")
 	}
+	t.mu.Lock()
+	pre := preState{tainted: t.untrusted, private: t.private}
 	if ti.taints {
-		t.mu.Lock()
-		t.preTaint = t.untrusted
 		t.untrusted = true
-		t.mu.Unlock()
 	}
+	if ti.sensitive {
+		t.private = true // set at start: a timed-out call may still have read data
+	}
+	t.mu.Unlock()
+	ctx = context.WithValue(ctx, preKey{}, pre)
 	args := json.RawMessage(strings.TrimSpace(call.Arguments))
 	if len(args) == 0 {
 		args = json.RawMessage("{}")
@@ -435,8 +463,12 @@ func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolIm
 	}
 	if res.err != nil {
 		var ue userError
+		var re *reasonErr
 		reason = reasonOf(res.err)
 		switch {
+		case errors.As(res.err, &re) && re.blocked:
+			outcome = "blocked"
+			return errResult(call.Name, re.err.Error())
 		case errors.Is(res.err, errFetchRefused):
 			outcome = "blocked"
 			return errResult(call.Name, errFetchRefused.Error())
