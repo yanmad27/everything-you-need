@@ -1,11 +1,14 @@
 {{template "head" .}}<div class="ph"><div><a class="back" href="/admin/bots">← Danh sách bot</a>
-<span class="eyebrow">05 / CẤU HÌNH BOT</span><h1>{{.Title}}</h1><p class="chips">{{template "plat" .Data.Platform}}{{if .Data.Enabled}}<span class="pill ok">đang bật</span>{{else}}<span class="pill timeout">tạm dừng</span>{{end}}</p></div>
+<span class="eyebrow">CẤU HÌNH BOT</span><h1>{{.Title}}</h1><p class="chips">{{template "plat" .Data.Platform}}{{if .Data.Enabled}}<span class="pill ok">đang bật</span>{{else}}<span class="pill timeout">tạm dừng</span>{{end}}</p></div>
 <div class="legend"><span><span class="badge source-env">env</span> giá trị mặc định</span><span><span class="badge source-ui">UI</span> đã đổi trên UI</span><span><span class="badge sensitive">nhạy cảm</span> cần mật khẩu</span></div></div>
 {{with .Data.Flash}}<p class="alert flash {{if eq .Kind "ok"}}ok{{else}}bad{{end}} {{.Kind}}" role="status">{{.Text}}</p>{{end}}
 {{if .Data.SecretsDisabled}}<p class="alert warn banner-secrets" role="alert">Chưa đặt BOTCONFIG_SECRET (≥32 ký tự): không thể lưu khoá bí mật (API key). Các cài đặt khác vẫn dùng được.</p>{{end}}
 {{if .Data.Problems}}<div class="alert bad banner-problems" role="alert">Một số giá trị đã lưu không dùng được, đang dùng mặc định: <span class="chips">{{range .Data.Problems}}<code>{{.}}</code>{{end}}</span></div>{{end}}
 {{with .Data.FormError}}<p class="alert bad form-error" role="alert">{{.}}</p>{{end}}
-<aside class="card provider-slot" aria-label="Nhà cung cấp"><div><h2>Nhà cung cấp</h2><p>LLM &amp; Serper · dùng nút kiểm tra kết nối bên dưới.</p></div><span class="pill blocked">Chưa có dữ liệu trạng thái</span></aside>
+<section class="card provider-slot" aria-labelledby="providers-title"><div class="provider-head"><h2 id="providers-title">Nhà cung cấp</h2><p>Trạng thái ghi nhận từ hoạt động của bot.</p></div>
+{{range .Data.Providers}}<div class="provider-row"><div class="provider-copy"><h3>{{if eq .Name "serper"}}Serper{{else}}{{.Name}}{{end}}</h3><p>{{.Detail}}</p>{{if not .Since.IsZero}}<p class="provider-since">Từ {{ftime .Since}}</p>{{end}}</div>
+<span class="pill {{if eq .State "ok"}}ok{{else if eq .State "no_credit"}}timeout{{else if or (eq .State "auth") (eq .State "error")}}error{{else}}blocked{{end}}">{{if eq .State "ok"}}hoạt động{{else if eq .State "no_credit"}}hết credit{{else if eq .State "auth"}}lỗi khoá{{else if eq .State "error"}}lỗi{{else}}chưa rõ{{end}}</span></div>
+{{else}}<div class="provider-row"><div class="provider-copy"><p>Trạng thái xuất hiện sau lần tìm kiếm đầu tiên.</p></div><span class="pill blocked">Chưa có dữ liệu trạng thái</span></div>{{end}}</section>
 <nav class="section-nav" aria-label="Các mục cài đặt"><a href="#sec-st"><b>01</b> Trạng thái</a><a href="#sec-llm"><b>02</b> LLM</a><a href="#sec-tools"><b>03</b> Công cụ</a><a href="#sec-web"><b>04</b> Web</a><a href="#sec-lim"><b>05</b> Giới hạn</a><a href="#sec-persona"><b>06</b> Persona</a><a href="#h-test">Kết nối ↗</a></nav>
 <form class="cfg-form" method="post" action="{{.Data.PostURL}}">
 <input type="hidden" name="csrf" value="{{.CSRF}}">

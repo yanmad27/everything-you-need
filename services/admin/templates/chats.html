@@ -1,4 +1,4 @@
-{{template "head" .}}<div class="ph"><div><span class="eyebrow">01 / HỘI THOẠI</span><h1>Hội thoại <span class="count">{{num .Data.Total}}</span></h1><p class="mut">Mọi cuộc trò chuyện của bot, mới hoạt động nhất trước.</p></div></div>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">HỘI THOẠI</span><h1>Hội thoại <span class="count">{{num .Data.Total}}</span></h1><p class="mut">Mọi cuộc trò chuyện của bot, mới hoạt động nhất trước.</p></div></div>
 <form class="card filters" method="get">
 {{template "platform" (.Q.Get "platform")}}
 <label>Loại<select name="type"><option value="">Tất cả</option><option value="PRIVATE"{{if eq (.Q.Get "type") "PRIVATE"}} selected{{end}}>Riêng tư</option><option value="GROUP"{{if eq (.Q.Get "type") "GROUP"}} selected{{end}}>Nhóm</option></select></label>

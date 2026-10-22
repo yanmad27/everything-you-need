@@ -1,4 +1,4 @@
-{{template "head" .}}<div class="ph"><div><span class="eyebrow">03 / HIỆU NĂNG</span><h1>Công cụ <span class="count">{{len .Data.Tools}}</span></h1><p class="mut">Số lần gọi, tỉ lệ thành công và độ trễ của từng công cụ.</p></div></div>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">HIỆU NĂNG</span><h1>Công cụ <span class="count">{{len .Data.Tools}}</span></h1><p class="mut">Số lần gọi, tỉ lệ thành công và độ trễ của từng công cụ.</p></div></div>
 <form class="card filters" method="get">
 {{template "platform" (.Q.Get "platform")}}
 <label class="grow">Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>

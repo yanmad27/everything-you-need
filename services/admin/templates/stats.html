@@ -1,4 +1,4 @@
-{{template "head" .}}<div class="ph"><div><span class="eyebrow">02 / PHÂN TÍCH HOẠT ĐỘNG</span><h1>{{.Title}} <span class="count">{{len .Data.Items}}</span></h1><p class="mut">{{if .Data.ByChat}}Hoạt động, lỗi và chi phí theo từng nhóm/chat.{{else}}Hoạt động, lỗi và chi phí theo từng người dùng.{{end}}</p></div></div>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">PHÂN TÍCH HOẠT ĐỘNG</span><h1>{{.Title}} <span class="count">{{len .Data.Items}}</span></h1><p class="mut">{{if .Data.ByChat}}Hoạt động, lỗi và chi phí theo từng nhóm/chat.{{else}}Hoạt động, lỗi và chi phí theo từng người dùng.{{end}}</p></div></div>
 <form class="card filters" method="get">
 {{template "platform" (.Q.Get "platform")}}
 <label class="grow">Tìm (tên/id)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
