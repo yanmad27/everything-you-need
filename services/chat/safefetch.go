@@ -21,7 +21,7 @@ var safeHTTP = netguard.NewSafeClient(30 * time.Second)
 func fetchPageTextSafe(ctx context.Context, rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return "", errors.New("unsupported url")
+		return "", errUnsupportedURL
 	}
 	if text, err := getText(ctx, safeHTTP, "https://r.jina.ai/"+rawURL, false); err == nil {
 		return text, nil
@@ -32,7 +32,7 @@ func fetchPageTextSafe(ctx context.Context, rawURL string) (string, error) {
 		if errors.Is(err, netguard.ErrBlocked) {
 			return "", errFetchRefused
 		}
-		return "", errors.New("fetch failed")
+		return "", errFetchFailed
 	}
 	return text, nil
 }

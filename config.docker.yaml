@@ -108,6 +108,7 @@ chat:
   enabled: true
   api_key: "" # -> CHAT_OPENAI_API_KEY (falls back to reminder.openai_api_key)
   model: "claude-haiku-4-5"
+  fetch_allow_domains: "" # -> CHAT_FETCH_ALLOW_DOMAINS (comma-separated; empty = built-in public list)
 
 # Daily 08:00 ICT scan of the wedding MASTER PLAN sheet's Due Date column.
 # Posts a Telegram digest for tasks due in 1 month / 2 weeks / 1 week / 3 days /

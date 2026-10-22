@@ -121,6 +121,7 @@ func setDefaults() {
 	viper.SetDefault("chat.enabled", true)
 	viper.SetDefault("chat.api_key", "")
 	viper.SetDefault("chat.model", "claude-haiku-4-5")
+	viper.SetDefault("chat.fetch_allow_domains", "")
 
 	viper.SetDefault("news.feeds", []string{
 		"https://news.ycombinator.com/rss",

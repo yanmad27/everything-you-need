@@ -65,6 +65,7 @@ type Service struct {
 	last         map[string]lastText
 	searchBudget *searchBudget
 	dueChats     map[string]bool
+	fetchAllow   []string // domains the model may fetch unprompted
 }
 
 func NewService(token, model string, sender Sender) *Service {

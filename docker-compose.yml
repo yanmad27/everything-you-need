@@ -20,6 +20,7 @@ services:
       - ZALO_WEBHOOK_SECRET=${ZALO_WEBHOOK_SECRET}
       - ZALO_WEBHOOK_PATH=${ZALO_WEBHOOK_PATH:-/zalo-webhook}
       - ZALO_PRIVATE_TOOL_CHATS=${ZALO_PRIVATE_TOOL_CHATS:-}
+      - CHAT_FETCH_ALLOW_DOMAINS=${CHAT_FETCH_ALLOW_DOMAINS:-}
       # Admin UI at /admin (off unless both username and bcrypt hash are set).
       - ADMIN_USERNAME=${ADMIN_USERNAME:-}
       - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-}
