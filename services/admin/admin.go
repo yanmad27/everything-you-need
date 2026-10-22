@@ -79,7 +79,8 @@ type Config struct {
 	PasswordHashB64 string
 	SessionSecret   string // optional HMAC key for login CSRF tokens; random per process if empty
 	// ResetPassword clears the stored (UI-changed) hash at startup so the env hash applies again.
-	ResetPassword bool
+	// Only the exact value "true" resets; any other non-empty value is ignored (logged).
+	ResetPassword string
 }
 
 // Options tunes limits and the clock (tests).
@@ -112,8 +113,9 @@ type Handler struct {
 	username string
 	creds    CredStore
 	usage    UsageData
-	pwSess   *limiter // failed password-change attempts per session
-	pwIP     *limiter // ... per client IP
+	credMu   sync.RWMutex // password change holds it exclusively; login holds it shared from compare to session start
+	pwSess   *limiter     // failed password-change attempts per session
+	pwIP     *limiter     // ... per client IP
 
 	mu       sync.Mutex
 	sessions map[[32]byte]*session
@@ -205,7 +207,9 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 	}
 	creds, _ := data.(CredStore)
 	usage, _ := data.(UsageData)
-	if cfg.ResetPassword && creds != nil {
+	if rp := normalize(cfg.ResetPassword); rp != "" && rp != "true" {
+		log.Printf("admin: ADMIN_PASSWORD_RESET is set but not exactly \"true\" (len=%d): ignored", len(rp))
+	} else if rp == "true" && creds != nil {
 		cleared, err := creds.ClearAdminPasswordHash(context.Background())
 		if err != nil {
 			return nil, fmt.Errorf("admin: ADMIN_PASSWORD_RESET failed: %w", err)
@@ -389,17 +393,22 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		// Always run both comparisons so timing does not reveal which part was wrong.
 		u := sha256.Sum256([]byte(r.PostForm.Get("username")))
 		userOK := subtle.ConstantTimeCompare(u[:], h.user[:]) == 1
+		// Shared lock: a password change cannot complete between this compare and
+		// the session start, so an old-password login never outlives the change.
+		h.credMu.RLock()
 		hash, herr := h.activeHash(r.Context())
 		pwOK := herr == nil && bcrypt.CompareHashAndPassword(hash, []byte(r.PostForm.Get("password"))) == nil
 		if !userOK || !pwOK {
+			h.credMu.RUnlock()
 			h.allLim.add("*") // the global bucket counts failures only
 			h.audit(r, "login_fail")
 			h.renderLogin(w, r, http.StatusUnauthorized, true)
 			return
 		}
+		id, _ := h.startSession()
+		h.credMu.RUnlock()
 		h.ipLim.reset(ip)
 		h.audit(r, "login_ok")
-		id, _ := h.startSession()
 		http.SetCookie(w, h.cookie(id, int(absTimeout/time.Second)))
 		http.Redirect(w, r, "/admin", http.StatusFound)
 	default:

@@ -101,7 +101,9 @@ func (s *Store) UsageByDay(ctx context.Context, f UsageFilter) ([]UsageDay, erro
 	}
 	if !f.From.IsZero() && !f.To.IsZero() && f.To.Sub(f.From) <= 366*24*time.Hour {
 		ict := time.FixedZone("ICT", 7*3600)
-		for d := f.From.In(ict); d.Before(f.To); d = d.AddDate(0, 0, 1) {
+		d := f.From.In(ict)
+		d = time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, ict) // whole ICT days, even for non-midnight bounds
+		for ; d.Before(f.To); d = d.AddDate(0, 0, 1) {
 			if k := d.Format("2006-01-02"); m[k] == nil {
 				m[k] = &UsageDay{Day: k}
 			}

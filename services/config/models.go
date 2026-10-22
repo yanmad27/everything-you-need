@@ -95,7 +95,7 @@ type AdminConfig struct {
 	SessionSecret   string `mapstructure:"session_secret"`
 	// PasswordReset (ADMIN_PASSWORD_RESET=true) clears the UI-changed password at
 	// startup so the env hash applies again.
-	PasswordReset bool `mapstructure:"password_reset"`
+	PasswordReset string `mapstructure:"password_reset"`
 }
 
 // ConvoConfig controls the Zalo conversation store used by the admin UI.

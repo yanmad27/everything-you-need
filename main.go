@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -451,9 +452,9 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 	if !c.Enabled {
 		return nil
 	}
-	prices, err := convoPrices(c, os.Getenv("CONVO_PRICES"))
-	if err != nil {
-		log.Printf("Convo prices ignored: %v", err)
+	prices, badPrices := convoPrices(c, os.Getenv("CONVO_PRICES"))
+	for _, b := range badPrices {
+		log.Printf("Convo price skipped: %s", b)
 	}
 	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
 		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K,
@@ -468,9 +469,9 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 
 // convoPrices merges the config-file prices with CONVO_PRICES
 // ("model:prompt:completion,..." per 1M tokens); the env entry wins per model.
-// On a malformed env value only the file prices are returned, with the error.
-func convoPrices(c config.ConvoConfig, env string) ([]convo.Price, error) {
-	var out []convo.Price
+// Invalid entries (either source) are skipped, the rest are kept; bad describes
+// each skipped entry (index and reason, never the value).
+func convoPrices(c config.ConvoConfig, env string) (out []convo.Price, bad []string) {
 	idx := map[string]int{}
 	put := func(p convo.Price) {
 		k := strings.ToLower(p.Model)
@@ -481,19 +482,22 @@ func convoPrices(c config.ConvoConfig, env string) ([]convo.Price, error) {
 		idx[k] = len(out)
 		out = append(out, p)
 	}
-	for _, p := range c.Prices {
-		if strings.TrimSpace(p.Model) != "" {
-			put(convo.Price{Model: strings.TrimSpace(p.Model), PromptPer1M: p.PromptPer1M, CompletionPer1M: p.CompletionPer1M})
+	for i, p := range c.Prices {
+		cp := convo.Price{Model: strings.TrimSpace(p.Model), PromptPer1M: p.PromptPer1M, CompletionPer1M: p.CompletionPer1M}
+		if err := cp.Valid(); err != nil {
+			bad = append(bad, fmt.Sprintf("convo.prices[%d]: %v", i, err))
+			continue
 		}
+		put(cp)
 	}
-	envP, err := convo.ParsePrices(env)
-	if err != nil {
-		return out, err
-	}
+	envP, envBad := convo.ParsePrices(env)
 	for _, p := range envP {
 		put(p)
 	}
-	return out, nil
+	for _, b := range envBad {
+		bad = append(bad, "CONVO_PRICES "+b)
+	}
+	return out, bad
 }
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not

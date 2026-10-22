@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -36,23 +38,49 @@ var funcs = template.FuncMap{
 		}
 		return strconv.Itoa(k) + " KB"
 	},
-	"pct":   func(f float64) string { return strconv.FormatFloat(f*100, 'f', 0, 64) + "%" },
-	"cost":  func(f float64) string { return strconv.FormatFloat(f, 'f', 4, 64) },
-	"money": money,
-	"num":   num,
+	"pct":     func(f float64) string { return strconv.FormatFloat(f*100, 'f', 0, 64) + "%" },
+	"cost":    func(f float64) string { return strconv.FormatFloat(f, 'f', 4, 64) },
+	"money":   money,
+	"estcost": estCost,
+	"num":     num,
 }
 
-// money renders an optional cost: nil → "price not configured"; partial costs
-// are marked as a lower bound.
+// money renders an optional cost: nil → "chưa cấu hình giá" (price not
+// configured); partial costs are marked as a lower bound with "≥ … (một phần)".
+// Decimals scale with magnitude: ≥0.01 → 2, below → 6 significant digits,
+// below 0.000001 → "<0.000001".
 func money(c *float64, partial bool) string {
 	if c == nil {
-		return "price not configured"
+		return "chưa cấu hình giá"
 	}
-	s := strconv.FormatFloat(*c, 'f', 4, 64)
+	s := fmtMoney(*c)
 	if partial {
-		return "≥ " + s + " (partial)"
+		return "≥ " + s + " (một phần)"
 	}
 	return s
+}
+
+func fmtMoney(v float64) string {
+	switch {
+	case v <= 0:
+		return "0"
+	case v < 0.000001:
+		return "<0.000001"
+	case v >= 0.01:
+		return strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	dec := 5 - int(math.Floor(math.Log10(v)))
+	s := strconv.FormatFloat(v, 'f', dec, 64)
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
+}
+
+// estCost renders convo.Stat's EstCost: with unpriced tokens and nothing priced
+// it is "chưa cấu hình giá"; a priced zero is "0".
+func estCost(v float64, partial bool) string {
+	if partial && v == 0 {
+		return money(nil, true)
+	}
+	return money(&v, partial)
 }
 
 // num groups digits by thousands: 1234567 → 1,234,567.
@@ -108,8 +136,14 @@ func (h *Handler) renderLogin(w http.ResponseWriter, r *http.Request, status int
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(v); err != nil {
+		log.Printf("admin: json encode failed: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "encode failed")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
@@ -357,8 +391,20 @@ func (h *Handler) usageView(ctx context.Context, q url.Values) (UsageView, error
 	if v.Chats, v.ChatsTotal, err = h.usage.UsageByChat(ctx, f, convo.Page{Limit: usagePerPage, Offset: (v.ChatsPage - 1) * usagePerPage}); err != nil {
 		return v, err
 	}
+	if last := lastPage(v.ChatsTotal, usagePerPage); v.ChatsPage > last { // clamp out-of-range pages
+		v.ChatsPage = last
+		if v.Chats, _, err = h.usage.UsageByChat(ctx, f, convo.Page{Limit: usagePerPage, Offset: (last - 1) * usagePerPage}); err != nil {
+			return v, err
+		}
+	}
 	if v.Users, v.UsersTotal, err = h.usage.UsageByUser(ctx, f, convo.Page{Limit: usagePerPage, Offset: (v.UsersPage - 1) * usagePerPage}); err != nil {
 		return v, err
+	}
+	if last := lastPage(v.UsersTotal, usagePerPage); v.UsersPage > last {
+		v.UsersPage = last
+		if v.Users, _, err = h.usage.UsageByUser(ctx, f, convo.Page{Limit: usagePerPage, Offset: (last - 1) * usagePerPage}); err != nil {
+			return v, err
+		}
 	}
 	for _, d := range v.Days {
 		if d.TotalTokens > v.MaxDayTokens {
@@ -371,4 +417,11 @@ func (h *Handler) usageView(ctx context.Context, q url.Values) (UsageView, error
 	v.ChatsPager = pagerKey(q, "/admin/usage", "chat_page", v.ChatsPage, usagePerPage, v.ChatsTotal, "← Trước", "Sau →")
 	v.UsersPager = pagerKey(q, "/admin/usage", "user_page", v.UsersPage, usagePerPage, v.UsersTotal, "← Trước", "Sau →")
 	return v, nil
+}
+
+func lastPage(total, size int) int {
+	if n := (total + size - 1) / size; n > 1 {
+		return n
+	}
+	return 1
 }

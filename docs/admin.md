@@ -25,14 +25,16 @@ Prices are **per model, per 1,000,000 tokens**, prompt and completion separately
 with `convo.currency` / `CONVO_CURRENCY` (default `USD`, label only). Two equivalent forms:
 
 - env: `CONVO_PRICES="gpt-6-sol:1.25:10,claude-haiku-4-5:1:5"` — comma-separated
-  `model:prompt:completion` (model match is case-insensitive). A malformed value is logged
-  and ignored (file prices still apply).
+  `model:prompt:completion` (model match is case-insensitive; split from the right, so model
+  names may contain `:`). Entries are parsed independently: each bad one (missing field,
+  non-number, negative, NaN/Inf) is skipped and logged by index, the good ones are kept.
+  The same validation applies to yaml entries.
 - yaml: `convo.prices: [{model: gpt-6-sol, prompt_per_1m: 1.25, completion_per_1m: 10}]`.
 
 The env entry overrides the yaml entry for the same model. The old
 `price_prompt_per_1k` / `price_completion_per_1k` keys still work as a **fallback for models
 with no entry** (per-1K × 1000 = per-1M). **There are no default prices.** A model with no
-price (and no legacy fallback) has cost *nil* — shown as "price not configured", never `0`.
+price (and no legacy fallback) has cost *nil* — shown as "chưa cấu hình giá" (price not configured), never `0`.
 
 Aggregation rule: a group's `Cost` is the cost of its **priced** tokens; `PartialPricing` is
 true when some tokens in the group belong to an unpriced model (so `Cost` is a lower bound),
@@ -117,7 +119,7 @@ On success a bcrypt (cost 12) hash is stored in the convo SQLite DB (`admin_cred
 row) and takes precedence over the env hash from then on (the env hash stays as the
 bootstrap/fallback; the username always comes from `ADMIN_USERNAME`). **All** sessions are
 invalidated and the current one gets a new id/cookie. Attempts are limited to 5 failures per
-15 minutes per session and per client IP (→ 429); a wrong current password counts. Env
+15 minutes per session and per client IP (→ 429); only a wrong current password counts (new-password policy/mismatch errors do not). Password POSTs are serialised, so parallel requests cannot exceed the limit, and a login cannot create a session across a password change. Env
 `ADMIN_USERNAME` / hash must still be set for the UI to mount.
 
 Audit: table `admin_audit(at, event, ip)` with `login_ok`, `login_fail`, `password_changed`,
@@ -126,7 +128,7 @@ hashes are never stored in it or logged. Rows are pruned with the retention wind
 
 ### Lockout recovery
 
-Set `ADMIN_PASSWORD_RESET=true` and restart: the stored hash is deleted at startup (logged as
+Set `ADMIN_PASSWORD_RESET=true` (exactly `true`; any other value, e.g. `1` or `TRUE`, is ignored and logged) and restart: the stored hash is deleted at startup (logged as
 `admin: ADMIN_PASSWORD_RESET is set…`) and the env hash (`ADMIN_PASSWORD_HASH_B64` /
 `ADMIN_PASSWORD_HASH`) applies again. Unset the flag afterwards (while it is set, every restart
 clears a password changed in the UI). Without a restart, with sqlite3 on the data volume:
@@ -139,7 +141,7 @@ Every template receives `page` (`services/admin/views.go`): `.Title`, `.Nav` (le
 empty on login), **`.Username`** (signed-in admin; empty on login), `.CSRF` (session token, empty on
 login page where it is the login token), `.Nonce`, `.CSS`, `.Q` (`url.Values` of the current
 filters), `.Data`. Template funcs: `ftime`, `kb`, `pct`, `cost`, `money *float64 partial`
-("price not configured" for nil, `≥ x (partial)` when partial), `num int` (1,234,567).
+("chưa cấu hình giá" for nil, `≥ x (một phần)` when partial; 2 decimals from 0.01, 6 significant digits below, `<0.000001` floor), `estcost float partial` (for `convo.Stat`), `num int` (1,234,567).
 
 `password.html` — `.Data` is `PasswordView`: `.Saved` bool (show success), `.Error` string
 (empty = none), `.MinLen` int (chars), `.MaxLen` int (bytes), `.Hint` string. Form: POST
@@ -157,4 +159,4 @@ filters), `.Data`. Template funcs: `ftime`, `kb`, `pct`, `cost`, `money *float64
   `Cost *float64` (nil = price not configured), `PartialPricing bool`.
 
 `GET /admin/api/usage` returns the same `UsageView` as JSON (snake_case keys, `cost: null` when unpriced).
-`stats.html` rows (`convo.Stat`) gain `PartialPricing`; `EstCost` is now the per-model priced cost.
+`stats.html` rows (`convo.Stat`) gain `PartialPricing`; `EstCost` is the per-model priced cost (shown with `estcost`). Out-of-range `chat_page`/`user_page` are clamped to the last page.

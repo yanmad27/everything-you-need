@@ -122,33 +122,40 @@ func (h *Handler) password(w http.ResponseWriter, r *http.Request, s *session) {
 			sk = string(k[:])
 		}
 		ip := clientIP(r)
+		cur, np, confirm := r.PostForm.Get("current"), r.PostForm.Get("new"), r.PostForm.Get("confirm")
+		// Exclusive for the whole attempt: concurrent POSTs are serialised, so the
+		// lockout check below always sees every earlier failure before bcrypt runs,
+		// and no login can slip between the hash swap and the session drop.
+		h.credMu.Lock()
+		defer h.credMu.Unlock()
 		if h.pwSess.full(sk) || h.pwIP.full(ip) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
 			return
 		}
-		cur, np, confirm := r.PostForm.Get("current"), r.PostForm.Get("new"), r.PostForm.Get("confirm")
 		hash, err := h.activeHash(r.Context())
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		fail := func(msg string) {
-			h.pwSess.add(sk)
-			h.pwIP.add(ip)
+		fail := func(msg string, count bool) {
+			if count { // only a wrong current password counts toward the lockout
+				h.pwSess.add(sk)
+				h.pwIP.add(ip)
+			}
 			h.audit(r, "password_change_fail")
 			h.passwordPage(w, r, s, http.StatusBadRequest, false, msg)
 		}
 		if bcrypt.CompareHashAndPassword(hash, []byte(cur)) != nil {
-			fail("Mật khẩu hiện tại không đúng.")
+			fail("Mật khẩu hiện tại không đúng.", true)
 			return
 		}
 		if np != confirm {
-			fail("Mật khẩu xác nhận không khớp.")
+			fail("Mật khẩu xác nhận không khớp.", false)
 			return
 		}
 		if msg := checkNewPassword(np, cur); msg != "" {
-			fail(msg)
+			fail(msg, false)
 			return
 		}
 		nh, err := bcrypt.GenerateFromPassword([]byte(np), newPassCost)

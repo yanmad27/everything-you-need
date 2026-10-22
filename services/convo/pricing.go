@@ -2,6 +2,7 @@ package convo
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -14,28 +15,51 @@ type Price struct {
 	CompletionPer1M float64 `mapstructure:"completion_per_1m" json:"completion_per_1m"`
 }
 
+// Valid reports why a price is unusable (blank model, negative, NaN or infinite rate).
+func (p Price) Valid() error {
+	if strings.TrimSpace(p.Model) == "" {
+		return fmt.Errorf("empty model")
+	}
+	for _, v := range []float64{p.PromptPer1M, p.CompletionPer1M} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return fmt.Errorf("invalid rate")
+		}
+	}
+	return nil
+}
+
 // ParsePrices parses the env form "model:prompt:completion,model:prompt:completion"
-// (rates per 1M tokens), e.g. "gpt-6-sol:1.25:10,claude-haiku-4-5:1:5". Blank
-// input yields no prices; any malformed entry is an error.
-func ParsePrices(spec string) ([]Price, error) {
-	var out []Price
-	for _, part := range strings.Split(spec, ",") {
+// (rates per 1M tokens), e.g. "gpt-6-sol:1.25:10,claude-haiku-4-5:1:5". Entries
+// are independent: good ones are returned, each bad one adds a description to
+// bad (entry number and reason only). The split is from the right, so model
+// names may contain ':'.
+func ParsePrices(spec string) (prices []Price, bad []string) {
+	for i, part := range strings.Split(spec, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		f := strings.Split(part, ":")
-		if len(f) != 3 || strings.TrimSpace(f[0]) == "" {
-			return nil, fmt.Errorf("convo: price %q must be model:prompt:completion", part)
+		j := strings.LastIndexByte(part, ':')
+		k := -1
+		if j > 0 {
+			k = strings.LastIndexByte(part[:j], ':')
 		}
-		p, err1 := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-		c, err2 := strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
-		if err1 != nil || err2 != nil || p < 0 || c < 0 {
-			return nil, fmt.Errorf("convo: price %q has an invalid rate", part)
+		if k < 1 {
+			bad = append(bad, fmt.Sprintf("entry %d: want model:prompt:completion", i+1))
+			continue
 		}
-		out = append(out, Price{Model: strings.TrimSpace(f[0]), PromptPer1M: p, CompletionPer1M: c})
+		p, err1 := strconv.ParseFloat(strings.TrimSpace(part[k+1:j]), 64)
+		c, err2 := strconv.ParseFloat(strings.TrimSpace(part[j+1:]), 64)
+		pr := Price{Model: strings.TrimSpace(part[:k]), PromptPer1M: p, CompletionPer1M: c}
+		if err1 != nil || err2 != nil {
+			bad = append(bad, fmt.Sprintf("entry %d: rate is not a number", i+1))
+		} else if err := pr.Valid(); err != nil {
+			bad = append(bad, fmt.Sprintf("entry %d: %v", i+1, err))
+		} else {
+			prices = append(prices, pr)
+		}
 	}
-	return out, nil
+	return prices, bad
 }
 
 // priceFor returns the rate for model: an exact (case-insensitive) match, else
@@ -56,7 +80,7 @@ func (s *Store) priceFor(model string) (Price, bool) {
 func (s *Store) Currency() string { return s.opt.Currency }
 
 // Prices returns the configured per-model rates (without the legacy fallback).
-func (s *Store) Prices() []Price { return append([]Price(nil), s.opt.Prices...) }
+func (s *Store) Prices() []Price { return append([]Price{}, s.opt.Prices...) }
 
 // UsageSum aggregates token usage. Cost covers only the priced part of the
 // usage and is nil when none of it could be priced; PartialPricing is true when

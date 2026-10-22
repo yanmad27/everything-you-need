@@ -10,6 +10,6 @@
 {{range .Data.Items}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.ID}}</span>{{else}}{{.ID}}{{end}} <span class="mut">{{.Platform}}</span></td>
 <td class="n">{{.Messages}}</td><td class="n">{{.ActiveDays}}</td><td>{{ftime .LastSeen}}</td><td class="n">{{.RemindersCreated}}</td><td class="n">{{.ImagesSent}}</td>
 <td>{{range .TopTools}}{{.Name}}×{{.Count}} {{end}}</td><td class="n{{if .Errors}} bad{{end}}">{{.Errors}}</td><td class="n">{{.Notices}}</td>
-<td class="n">{{.PromptTokens}}/{{.CompletionTokens}}/{{.TotalTokens}}</td><td class="n">{{if .EstCost}}{{cost .EstCost}}{{else}}<span class="mut">—</span>{{end}}</td></tr>
+<td class="n">{{.PromptTokens}}/{{.CompletionTokens}}/{{.TotalTokens}}</td><td class="n">{{estcost .EstCost .PartialPricing}}</td></tr>
 {{else}}<tr><td colspan="11" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
 {{template "foot" .}}

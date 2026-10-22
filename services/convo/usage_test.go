@@ -2,7 +2,9 @@ package convo
 
 import (
 	"context"
+	"math"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,18 +139,42 @@ func TestStatsUnpricedFlagged(t *testing.T) {
 	}
 }
 
-func TestParsePrices(t *testing.T) {
-	got, err := ParsePrices(" gpt-6-sol:1.25:10, claude-haiku-4-5:1:5 ,")
-	if err != nil || len(got) != 2 || got[0] != (Price{"gpt-6-sol", 1.25, 10}) || got[1] != (Price{"claude-haiku-4-5", 1, 5}) {
-		t.Fatalf("%+v %v", got, err)
+func TestParsePricesPerEntry(t *testing.T) {
+	got, bad := ParsePrices(" gpt-6-sol:1.25:10, claude-haiku-4-5:1:5 ,")
+	if len(bad) != 0 || len(got) != 2 || got[0] != (Price{"gpt-6-sol", 1.25, 10}) || got[1] != (Price{"claude-haiku-4-5", 1, 5}) {
+		t.Fatalf("%+v %v", got, bad)
 	}
-	if got, err := ParsePrices(""); err != nil || got != nil {
+	if got, bad := ParsePrices(""); got != nil || bad != nil {
 		t.Fatal("blank")
 	}
-	for _, bad := range []string{"m:1", "m:a:2", ":1:2", "m:-1:2", "m:1:2:3"} {
-		if _, err := ParsePrices(bad); err == nil {
-			t.Errorf("%q should fail", bad)
+	// model names may contain ':'; split from the right.
+	got, bad = ParsePrices("ns:model:v2:2:20")
+	if len(bad) != 0 || len(got) != 1 || got[0] != (Price{"ns:model:v2", 2, 20}) {
+		t.Fatalf("%+v %v", got, bad)
+	}
+	// bad entries are skipped individually, good ones kept; nothing echoes the value.
+	got, bad = ParsePrices("good:1:2,m:1,m:a:2,:1:2,m:-1:2,m:NaN:1,m:1:Inf,also-good:3:4,m:1:2e999")
+	if len(got) != 2 || got[0].Model != "good" || got[1].Model != "also-good" || len(bad) != 7 {
+		t.Fatalf("%+v %v", got, bad)
+	}
+	for _, b := range bad {
+		if strings.Contains(b, "NaN") || strings.Contains(b, "Inf") {
+			t.Fatalf("value echoed: %s", b)
 		}
+	}
+	for _, p := range []Price{{"m", math.NaN(), 1}, {"m", 1, math.Inf(1)}, {"m", -1, 1}, {" ", 1, 1}} {
+		if p.Valid() == nil {
+			t.Errorf("%+v valid", p)
+		}
+	}
+}
+
+func TestZeroFillNonMidnightBounds(t *testing.T) {
+	s, c := usageStore(t, Options{})
+	rec(t, s, c, time.Date(2026, 10, 2, 10, 0, 0, 0, ictZ), "c1", "u1", "x", 1, 1)
+	days, _ := s.UsageByDay(context.Background(), UsageFilter{From: time.Date(2026, 10, 1, 13, 0, 0, 0, ictZ), To: time.Date(2026, 10, 3, 5, 0, 0, 0, ictZ)})
+	if len(days) != 3 || days[0].Day != "2026-10-01" || days[2].Day != "2026-10-03" {
+		t.Fatalf("%+v", days)
 	}
 }
 

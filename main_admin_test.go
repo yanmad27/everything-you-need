@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -69,15 +70,19 @@ func TestZaloModelLabel(t *testing.T) {
 
 func TestConvoPricesMerge(t *testing.T) {
 	c := config.ConvoConfig{Prices: []config.ModelPrice{{Model: "A", PromptPer1M: 1, CompletionPer1M: 2}, {Model: "b", PromptPer1M: 3, CompletionPer1M: 4}}}
-	got, err := convoPrices(c, "a:5:6,c:7:8")
-	if err != nil || len(got) != 3 || got[0] != (convo.Price{Model: "a", PromptPer1M: 5, CompletionPer1M: 6}) || got[1].Model != "b" || got[2].Model != "c" {
-		t.Fatalf("%+v %v", got, err)
+	got, bad0 := convoPrices(c, "a:5:6,c:7:8")
+	if len(bad0) != 0 || len(got) != 3 || got[0] != (convo.Price{Model: "a", PromptPer1M: 5, CompletionPer1M: 6}) || got[1].Model != "b" || got[2].Model != "c" {
+		t.Fatalf("%+v %v", got, bad0)
 	}
-	got, err = convoPrices(c, "broken")
-	if err == nil || len(got) != 2 {
-		t.Fatalf("malformed env must keep file prices and report: %+v %v", got, err)
+	got, bad := convoPrices(c, "broken,ok:1:2,x:NaN:1")
+	if len(bad) != 2 || len(got) != 3 || got[2].Model != "ok" {
+		t.Fatalf("bad entries must be skipped, good kept: %+v %v", got, bad)
 	}
-	if got, err := convoPrices(config.ConvoConfig{}, ""); err != nil || len(got) != 0 {
+	c.Prices = append(c.Prices, config.ModelPrice{Model: "n", PromptPer1M: math.NaN()}, config.ModelPrice{Model: "neg", CompletionPer1M: -1}, config.ModelPrice{Model: " "})
+	if got, bad := convoPrices(c, ""); len(got) != 2 || len(bad) != 3 {
+		t.Fatalf("yaml validation: %+v %v", got, bad)
+	}
+	if got, bad := convoPrices(config.ConvoConfig{}, ""); len(bad) != 0 || len(got) != 0 {
 		t.Fatal("no prices by default")
 	}
 }

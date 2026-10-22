@@ -109,7 +109,7 @@ func setDefaults() {
 	viper.SetDefault("admin.password_hash", "")
 	viper.SetDefault("admin.password_hash_b64", "")
 	viper.SetDefault("admin.session_secret", "")
-	viper.SetDefault("admin.password_reset", false)
+	viper.SetDefault("admin.password_reset", "")
 
 	viper.SetDefault("convo.enabled", true)
 	viper.SetDefault("convo.db_path", "data/convo.db")

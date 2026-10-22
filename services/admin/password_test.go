@@ -5,11 +5,14 @@ import (
 	"context"
 	"html/template"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -226,7 +229,7 @@ func TestPasswordResetFlagClearsStoredHash(t *testing.T) {
 	var logs bytes.Buffer
 	log.SetOutput(&logs)
 	defer log.SetOutput(log.Writer())
-	h2, err := New(Config{Username: "owner", PasswordHash: testHash, ResetPassword: true}, st, Options{})
+	h2, err := New(Config{Username: "owner", PasswordHash: testHash, ResetPassword: "true"}, st, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,6 +241,125 @@ func TestPasswordResetFlagClearsStoredHash(t *testing.T) {
 	}
 	if login(t, h2, "owner", testPass).Code != http.StatusFound || login(t, h2, "owner", newPass).Code != http.StatusUnauthorized {
 		t.Fatal("env hash must apply again")
+	}
+}
+
+func TestPasswordResetOnlyExactTrue(t *testing.T) {
+	for _, v := range []string{"1", "TRUE", "True", "yes", "false"} {
+		h, st, _ := realH(t, Config{}, Options{})
+		ck := loginSession(t, h)
+		do(h, "POST", "/admin/password", pwForm(sessCSRF(t, h, ck), testPass, newPass, newPass), ck)
+		var logs bytes.Buffer
+		log.SetOutput(&logs)
+		_, err := New(Config{Username: "owner", PasswordHash: testHash, ResetPassword: v}, st, Options{})
+		log.SetOutput(os.Stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok, _ := st.AdminPasswordHash(context.Background()); !ok {
+			t.Errorf("%q must not reset", v)
+		}
+		if !strings.Contains(logs.String(), "ignored") || strings.Contains(logs.String(), `"`+v+`"`) {
+			t.Errorf("%q: log %q", v, logs.String())
+		}
+	}
+}
+
+func TestPolicyErrorsDoNotCountTowardLockout(t *testing.T) {
+	h, _, _ := realH(t, Config{}, Options{PasswordAttempts: 2})
+	ck := loginSession(t, h)
+	csrf := sessCSRF(t, h, ck)
+	for i := 0; i < 6; i++ {
+		if w := do(h, "POST", "/admin/password", pwForm(csrf, testPass, "short", "short"), ck); w.Code != http.StatusBadRequest {
+			t.Fatalf("policy failure %d: %d", i, w.Code)
+		}
+		if w := do(h, "POST", "/admin/password", pwForm(csrf, testPass, newPass, newPass+"x"), ck); w.Code != http.StatusBadRequest {
+			t.Fatalf("mismatch %d: %d", i, w.Code)
+		}
+	}
+	if w := do(h, "POST", "/admin/password", pwForm(csrf, testPass, newPass, newPass), ck); w.Code != http.StatusFound {
+		t.Fatalf("still allowed expected: %d", w.Code)
+	}
+}
+
+func TestConcurrentWrongAttemptsLimited(t *testing.T) {
+	h, st, _ := realH(t, Config{}, Options{PasswordAttempts: 5})
+	ck := loginSession(t, h)
+	csrf := sessCSRF(t, h, ck)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	codes := map[int]int{}
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := do(h, "POST", "/admin/password", pwForm(csrf, "wrong", newPass, newPass), ck)
+			mu.Lock()
+			codes[w.Code]++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	if codes[400] != 5 || codes[429] != 7 {
+		t.Fatalf("expected exactly 5 bcrypt checks (400) and 7 limited: %v", codes)
+	}
+	ev, _ := st.AdminAudit(context.Background())
+	fails := 0
+	for _, e := range ev {
+		if e.Event == "password_change_fail" {
+			fails++
+		}
+	}
+	if fails != 5 {
+		t.Fatalf("audited fails %d", fails)
+	}
+}
+
+func TestConcurrentChangesSerialisedAndOldLoginCannotSurvive(t *testing.T) {
+	h, st, _ := realH(t, Config{}, Options{PasswordAttempts: 50})
+	ck := loginSession(t, h)
+	csrf := sessCSRF(t, h, ck)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ok := 0
+	for i := 0; i < 3; i++ { // three racing changes, same valid current password
+		np := newPass + string(rune('a'+i))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if w := do(h, "POST", "/admin/password", pwForm(csrf, testPass, np, np), ck); w.Code == http.StatusFound {
+				mu.Lock()
+				ok++
+				mu.Unlock()
+			}
+		}()
+	}
+	// Old-password logins racing the change must end up with no live session.
+	var cookies []*http.Cookie
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if w := login(t, h, "owner", testPass); w.Code == http.StatusFound {
+				mu.Lock()
+				cookies = append(cookies, cookieOf(t, w))
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if ok != 1 {
+		t.Fatalf("exactly one change must win (others see the changed password as wrong): %d", ok)
+	}
+	if _, has, _ := st.AdminPasswordHash(context.Background()); !has {
+		t.Fatal("not stored")
+	}
+	for _, c := range cookies {
+		if do(h, "GET", "/admin/chats", nil, c).Code == 200 {
+			// A login that completed before the change is dropped by it; one that
+			// started after the change fails. Either way no old-password session lives.
+			t.Fatal("old-password session survived the change")
+		}
 	}
 }
 
@@ -263,7 +385,7 @@ func TestUsagePageAndAPI(t *testing.T) {
 
 	w := do(h, "GET", "/admin/usage", nil, ck)
 	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, "2.0000") || !strings.Contains(body, "price not configured") || !strings.Contains(body, "≥ 2.0000 (partial)") {
+	if w.Code != 200 || !strings.Contains(body, "2.00") || !strings.Contains(body, "chưa cấu hình giá") || !strings.Contains(body, "≥ 2.00 (một phần)") {
 		t.Fatalf("usage page %d:\n%s", w.Code, body)
 	}
 	w = do(h, "GET", "/admin/api/usage?platform=zalo&from=2026-10-01&to=2026-10-31", nil, ck)
@@ -292,5 +414,54 @@ func TestActiveAndUsernameInLayoutData(t *testing.T) {
 	h.render(w, r, 200, "probe.html", page{}) // login page: not signed in
 	if w.Body.String() != "|" {
 		t.Errorf("login: %q", w.Body.String())
+	}
+}
+
+func TestMoneyFormatting(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	for _, c := range []struct {
+		in      *float64
+		partial bool
+		want    string
+	}{
+		{nil, false, "chưa cấu hình giá"}, {nil, true, "chưa cấu hình giá"},
+		{f(0), false, "0"}, {f(2.5), false, "2.50"}, {f(1234.5678), false, "1234.57"}, {f(0.01), false, "0.01"},
+		{f(0.00123456789), false, "0.00123457"}, {f(0.000004), false, "0.000004"}, {f(0.0000004), false, "<0.000001"},
+		{f(2), true, "≥ 2.00 (một phần)"},
+	} {
+		if got := money(c.in, c.partial); got != c.want {
+			t.Errorf("money(%v,%v)=%q want %q", c.in, c.partial, got, c.want)
+		}
+	}
+	if estCost(0, false) != "0" || estCost(0, true) != "chưa cấu hình giá" || estCost(1.5, true) != "≥ 1.50 (một phần)" {
+		t.Fatal("estCost")
+	}
+}
+
+func TestWriteJSONEncodeErrorIs500(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeJSON(w, map[string]any{"x": math.NaN()})
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "encode failed") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUsagePagesClampedAndPricesNotNull(t *testing.T) {
+	h, st, _ := realH(t, Config{}, Options{})
+	st.RecordMessage(context.Background(), chat.MessageEvent{Platform: "zalo", ChatID: "c1", UserID: "u1", TurnID: "t", Model: "m-a", PromptTokens: 1, Total: 1})
+	_ = st.Flush(context.Background())
+	ck := loginSession(t, h)
+	w := do(h, "GET", "/admin/api/usage?chat_page=99&user_page=-3", nil, ck)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"chats_page":1`) || !strings.Contains(w.Body.String(), `"c1"`) {
+		t.Fatalf("clamp: %s", w.Body.String())
+	}
+}
+
+func TestStatsPageCostCells(t *testing.T) {
+	h, _ := newH(t)
+	ck := loginSession(t, h)
+	// fixture row: EstCost 0.5, not partial → "0.50"
+	if b := do(h, "GET", "/admin/users", nil, ck).Body.String(); !strings.Contains(b, "0.50") {
+		t.Fatalf("priced cost missing: %s", b)
 	}
 }
