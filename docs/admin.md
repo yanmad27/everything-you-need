@@ -182,7 +182,7 @@ Overrides int, Problems []string, Note ("không quản lý ở đây" for telegr
 FormError string, PasswordField ("admin_password"), PostURL, TestURL, Providers []ProviderStatus}`.
 `ProviderStatus{Name ("serper"), State ("ok"|"no_credit"|"auth"|"error"|"unknown"), Since time.Time (zero when "unknown"),
 Detail (fixed Vietnamese text; never upstream body text or keys)}` is the web-search provider health as last seen by the bot's tools
-(process-wide, in memory; resets when the Serper key changes). On `no_credit` (Serper 400/402) or `auth` (401/403) the bot stops
+(process-wide, in memory; resets when the Serper key changes). On `no_credit` (Serper 402, or 400 whose body mentions credits) or `auth` (401/403) the bot stops
 offering `web_search` for 30 minutes (log `reason=provider_unavailable`, once per cooldown), then probes again; `error` is
 informational only. JSON field names: `name`, `state`, `since`, `detail`.
 `BotSettingRow` embeds `botconfig.SettingView{Key, Label, Kind ("bool|string|text|int|list|prices|secret"), Secret, Sensitive,

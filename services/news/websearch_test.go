@@ -117,4 +117,19 @@ func TestWebSearcherStatusClass(t *testing.T) {
 	if err == nil || err.Error() != "serper status 400" {
 		t.Fatalf("err=%v", err)
 	}
+	var c interface{ CreditsExhausted() bool }
+	if !errors.As(err, &c) || !c.CreditsExhausted() {
+		t.Error("credits body not detected")
+	}
+	// another 400 is not a credit failure
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"message":"Bad query"}`))
+	}))
+	defer srv2.Close()
+	w.baseURL = srv2.URL
+	_, err = w.Search(context.Background(), "q", 1)
+	if !errors.As(err, &c) || c.CreditsExhausted() || err.Error() != "serper status 400" {
+		t.Errorf("plain 400: %v", err)
+	}
 }

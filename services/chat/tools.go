@@ -306,7 +306,11 @@ func (s *Service) buildTools() []toolImpl {
 			if fetch == nil {
 				fetch = fetchPageTextSafe
 			}
-			return fetch(ctx, target)
+			text, err := fetch(ctx, target)
+			if err == nil {
+				t.addFetchedLinks(text, liveFrom(ctx).fetchAllowOr(s.fetchAllow))
+			}
+			return text, err
 		},
 	})
 	if tl.Due != nil {

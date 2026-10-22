@@ -49,6 +49,13 @@ func fetchTrending(ctx context.Context, client *http.Client, rawURL string) (str
 	return out, out != ""
 }
 
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
 func cleanHTMLText(s string) string {
 	s = tagRe.ReplaceAllString(s, " ")
 	return strings.Join(strings.Fields(html.UnescapeString(s)), " ")
@@ -66,26 +73,26 @@ func parseTrending(page string) string {
 			continue
 		}
 		n++
-		fmt.Fprintf(&b, "%d. %s", n, r[1])
+		fmt.Fprintf(&b, "%d. https://github.com/%s", n, r[1])
 		if d := trendDescRe.FindStringSubmatch(art); d != nil {
 			if t := cleanHTMLText(d[1]); t != "" {
-				if rs := []rune(t); len(rs) > 160 {
-					t = string(rs[:160]) + "…"
+				if rs := []rune(t); len(rs) > 120 {
+					t = string(rs[:120]) + "…"
 				}
 				fmt.Fprintf(&b, " — %s", t)
 			}
 		}
 		var meta []string
 		if l := trendLangRe.FindStringSubmatch(art); l != nil {
-			meta = append(meta, strings.TrimSpace(html.UnescapeString(l[1])))
+			meta = append(meta, clip(strings.TrimSpace(html.UnescapeString(l[1])), 30))
 		}
 		if t := trendTotalRe.FindStringSubmatch(art); t != nil {
 			if v := cleanHTMLText(t[1]); v != "" {
-				meta = append(meta, "★"+v)
+				meta = append(meta, "★"+clip(v, 20))
 			}
 		}
 		if t := trendTodayRe.FindStringSubmatch(art); t != nil {
-			meta = append(meta, "+"+t[1]+" "+t[2])
+			meta = append(meta, "+"+clip(t[1], 20)+" "+t[2])
 		}
 		if len(meta) > 0 {
 			fmt.Fprintf(&b, " [%s]", strings.Join(meta, ", "))

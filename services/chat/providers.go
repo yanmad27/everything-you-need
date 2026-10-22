@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"log"
 	"reflect"
 	"sync"
@@ -76,10 +77,17 @@ func (p *providerHealth) track(c WebSearch) {
 	}
 }
 
-// classifyProviderErr maps a search reason tag to a state worth a cooldown.
-func classifyProviderErr(reason string) string {
-	switch reason {
-	case "serper_status_400", "serper_status_402":
+// classifyProviderErr maps a search error to a state; only credit and auth
+// classes earn a cooldown. A 400 counts as out-of-credits only when the
+// provider error says so (the body is inspected upstream, never kept here).
+func classifyProviderErr(err error) string {
+	switch reason := reasonOf(err); reason {
+	case "serper_status_400":
+		var c interface{ CreditsExhausted() bool }
+		if errors.As(err, &c) && c.CreditsExhausted() {
+			return ProviderNoCredit
+		}
+	case "serper_status_402":
 		return ProviderNoCredit
 	case "serper_status_401", "serper_status_403":
 		return ProviderAuth
@@ -93,7 +101,7 @@ func (p *providerHealth) record(c WebSearch, err error, now time.Time) {
 	p.track(c)
 	st := ProviderOK
 	if err != nil {
-		st = classifyProviderErr(reasonOf(err))
+		st = classifyProviderErr(err)
 	}
 	if st != p.state {
 		p.state, p.since, p.logged = st, now, false

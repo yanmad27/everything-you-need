@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -122,6 +123,7 @@ type turn struct {
 	untrusted    bool // untrusted content (web, news, image) has entered the turn
 	searches     int
 	fetches      int // fetch_url targets accepted this turn
+	fetchedLinks int // links collected from fetched pages
 	remMutations int
 	urls         map[string]bool // URLs returned by web_search this turn
 	private      bool            // a sensitive tool has run in this turn
@@ -195,14 +197,82 @@ func (t *turn) fetchTarget(pre preState, raw string, allow []string) (string, er
 		}
 	}
 	refuse := userError("chỉ đọc link người dùng gửi, từ kết quả tìm kiếm, hoặc trang công khai quen thuộc")
-	switch {
-	case pre.private:
+	if pre.private {
 		return "", blockedReason("private_seen", refuse)
-	case !modelURLOK(u, allow):
+	}
+	root := &url.URL{Scheme: "https", Host: u.Host, Path: "/"}
+	known := modelURLOK(root, allow) && knownPath(u) // allowlisted host + fixed well-known page
+	if !known && !modelURLOK(u, allow) {
 		return "", blockedReason("url_not_allowed", refuse)
 	}
 	u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
+	if pre.tainted && !known && !t.seenLocked(u) {
+		// Untrusted content is in the turn: the URL must come from what this
+		// turn saw or be a fixed well-known page, so injected text cannot
+		// steer it to an attacker-chosen path.
+		return "", blockedReason("url_not_allowed", refuse)
+	}
 	return u.String(), nil
+}
+
+// seenLocked reports whether u (query/fragment stripped) is a link this turn
+// already saw in search results or fetched pages. Callers hold t.mu.
+func (t *turn) seenLocked(u *url.URL) bool {
+	for h := range t.urls {
+		if n, ok := normalizeURL(h); ok {
+			n.RawQuery, n.Fragment, n.ForceQuery = "", "", false
+			if n.String() == u.String() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var trendLangPathRe = regexp.MustCompile(`^[a-z0-9+#.-]{1,30}$`)
+
+// knownPath: github.com/trending[/<lang>] or the root of a host (already
+// allowlisted by the caller).
+func knownPath(u *url.URL) bool {
+	p := strings.Trim(u.EscapedPath(), "/")
+	if p == "" {
+		return true
+	}
+	if h := strings.ToLower(u.Hostname()); h != "github.com" {
+		return false
+	}
+	if p == "trending" {
+		return true
+	}
+	lang, ok := strings.CutPrefix(p, "trending/")
+	return ok && trendLangPathRe.MatchString(lang)
+}
+
+// maxFetchedLinks bounds the links collected from fetched pages per turn.
+const maxFetchedLinks = 200
+
+// addFetchedLinks records allowlisted, plain-path URLs found in fetched page
+// text so a follow-up fetch of a listed item is possible after taint.
+func (t *turn) addFetchedLinks(text string, allow []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.urls == nil {
+		t.urls = map[string]bool{}
+	}
+	for _, m := range urlRe.FindAllString(text, -1) {
+		if t.fetchedLinks >= maxFetchedLinks {
+			return
+		}
+		u, ok := normalizeURL(strings.TrimRight(m, ").,;:!?]*"))
+		if !ok || !modelURLOK(u, allow) {
+			continue
+		}
+		u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
+		if k := u.String(); !t.urls[k] {
+			t.urls[k] = true
+			t.fetchedLinks++
+		}
+	}
 }
 
 // searchBudget is a simple per-process hourly cap on Serper calls.

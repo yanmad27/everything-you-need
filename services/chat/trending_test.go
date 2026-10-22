@@ -2,6 +2,7 @@ package chat
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"time"
@@ -21,7 +22,7 @@ func TestParseTrendingFixture(t *testing.T) {
 	if n := strings.Count(got, "\n"); n < 4 || n > maxTrendingItems+1 {
 		t.Fatalf("lines=%d:\n%s", n, got)
 	}
-	for _, w := range []string{"1. cloudflare/security-audit-skill — A coding-agent skill", "JavaScript", "★36,977", "+2,012 today"} {
+	for _, w := range []string{"1. https://github.com/cloudflare/security-audit-skill — A coding-agent skill", "JavaScript", "★36,977", "+2,012 today"} {
 		if !strings.Contains(got, w) {
 			t.Errorf("missing %q in:\n%s", w, got)
 		}
@@ -30,7 +31,7 @@ func TestParseTrendingFixture(t *testing.T) {
 		t.Errorf("not compact (len %d):\n%s", len(got), got)
 	}
 	// the first repo sits within the result cap
-	if i := strings.Index(got, "cloudflare/"); i < 0 || i > defMaxResult/10 {
+	if i := strings.Index(got, "github.com/cloudflare/"); i < 0 || i > defMaxResult/10 {
 		t.Errorf("first repo at %d", i)
 	}
 	if parseTrending("<html>nothing</html>") != "" {
@@ -92,7 +93,7 @@ func TestSearchProviderCooldown(t *testing.T) {
 		state string
 		down  bool
 	}{
-		{"serper status 400", ProviderNoCredit, true}, {"serper status 402", ProviderNoCredit, true},
+		{"serper status 400", ProviderError, false}, {"serper status 402", ProviderNoCredit, true},
 		{"serper status 401", ProviderAuth, true}, {"serper status 403", ProviderAuth, true},
 		{"serper status 500", ProviderError, false},
 	} {
@@ -136,7 +137,7 @@ func TestSearchProviderRecoversOnKeyChange(t *testing.T) {
 		offered = append(offered, offersSearch(defs))
 		return textStep("ok")(nil, nil)
 	}
-	bad := errSearch{errors.New("serper status 400")}
+	bad := errSearch{errors.New("serper status 401")}
 	r := newRig(t, func(tl *Tools) { tl.Search = bad; tl.Now = func() time.Time { return now } },
 		toolStep(call("1", "web_search", `{"query":"q"}`)), textStep("a"), probe, probe)
 	r.ask("tìm")
@@ -148,5 +149,46 @@ func TestSearchProviderRecoversOnKeyChange(t *testing.T) {
 	}
 	if st := ProviderStatuses()[0]; st.State != ProviderUnknown {
 		t.Errorf("state after key change: %+v", st)
+	}
+}
+
+type creditErr struct{ credits bool }
+
+func (creditErr) Error() string            { return "serper status 400" }
+func (e creditErr) CreditsExhausted() bool { return e.credits }
+
+func TestSearch400OnlyWithCreditsCools(t *testing.T) {
+	for credits, want := range map[bool]string{true: ProviderNoCredit, false: ProviderError} {
+		r := newRig(t, func(tl *Tools) { tl.Search = errSearch{creditErr{credits}} }, toolStep(call("1", "web_search", `{"query":"q"}`)), textStep("ok"))
+		r.ask("tìm")
+		if st := ProviderStatuses()[0]; st.State != want {
+			t.Errorf("credits=%v state=%s", credits, st.State)
+		}
+	}
+}
+
+func TestTaintedFetchOnlySeenOrKnown(t *testing.T) {
+	trending := func(_ context.Context, u string) (string, error) {
+		if u == "https://github.com/trending" {
+			return "1. https://github.com/o/seen-repo — d\n2. https://evil.test/x — d\n", nil
+		}
+		return "page of " + u, nil
+	}
+	f := func(u string) llm.ToolCall { return call("f", "fetch_url", `{"url":"`+u+`"}`) }
+	ok := map[string]bool{"https://github.com/o/seen-repo": true, "https://github.com/o/seen-repo?q=SECRET": true,
+		"https://github.com/trending/python": true, "https://github.com/trending/c++": true, "https://github.com": true,
+		"https://github.com/attacker/abc123secret": false, "https://github.com/trending/Python%20x": false,
+		"https://github.com/trending/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": false, "https://evil.test/x": false,
+		"https://en.wikipedia.org/wiki/Secret": false, "https://github.com/o/seen-repo/issues/1": false}
+	for u, want := range ok {
+		r := newRig(t, func(tl *Tools) { tl.Fetch = trending }, toolStep(f("https://github.com/trending")), toolStep(f(u)), textStep("ok"))
+		r.ask("trending có gì")
+		got := lastTool(r.sc.calls[2])
+		if allowed := strings.Contains(got, "page of "); allowed != want || (want && strings.Contains(got, "SECRET")) {
+			t.Errorf("%s: allowed=%v want %v: %q", u, allowed, want, got)
+		}
+		if !want && !strings.Contains(got, "chỉ đọc link") {
+			t.Errorf("%s: wrong refusal %q", u, got)
+		}
 	}
 }

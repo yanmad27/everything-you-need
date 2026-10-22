@@ -721,9 +721,9 @@ func TestFetchModelURLRestrictions(t *testing.T) {
 	blocked("non-allowlisted after fetch", "hi", toolStep(f("https://github.com/trending")), toolStep(f("https://evil.test/a")), textStep("ok"))
 	// public content earlier in the turn does not block an allowlisted follow-up
 	for _, first := range []llm.ToolCall{call("s", "web_search", `{"query":"q"}`), call("s", "news_recent", `{}`), f("https://github.com/trending")} {
-		r := newRig(t, nil, toolStep(first), toolStep(f("https://github.com/torvalds/linux?x=1#y")), textStep("ok"))
+		r := newRig(t, nil, toolStep(first), toolStep(f("https://github.com/trending/go?x=1#y")), textStep("ok"))
 		r.ask("hi")
-		if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "page of https://github.com/torvalds/linux\n") {
+		if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "page of https://github.com/trending/go\n") {
 			t.Errorf("follow-up after %s refused: %q", first.Name, got)
 		}
 	}
