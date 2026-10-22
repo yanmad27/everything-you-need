@@ -27,6 +27,8 @@ services:
       - ADMIN_PASSWORD_HASH_B64=${ADMIN_PASSWORD_HASH_B64:-}
       - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
       - ADMIN_PASSWORD_RESET=${ADMIN_PASSWORD_RESET:-}
+      # Key material for secrets edited in /admin bot settings (>=32 chars; empty = secrets cannot be saved).
+      - BOTCONFIG_SECRET=${BOTCONFIG_SECRET:-}
       # Zalo conversation store for the admin UI (stored on the data volume).
       - CONVO_ENABLED=${CONVO_ENABLED:-true}
       - CONVO_RETENTION_DAYS=${CONVO_RETENTION_DAYS:-90}
