@@ -38,6 +38,15 @@ func NewOpenAIClient(baseURL, apiKey, model string, timeout time.Duration) *Open
 	return &OpenAIClient{baseURL: base, apiKey: apiKey, model: model, http: &http.Client{Timeout: timeout}}
 }
 
+// WithHTTPClient replaces the HTTP client (e.g. an SSRF-guarded one for base
+// URLs that came from the admin UI). The client's Timeout applies as set.
+func (c *OpenAIClient) WithHTTPClient(h *http.Client) *OpenAIClient {
+	if h != nil {
+		c.http = h
+	}
+	return c
+}
+
 type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`

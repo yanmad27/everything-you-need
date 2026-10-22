@@ -403,3 +403,52 @@ func TestBotsRegistry(t *testing.T) {
 		t.Fatal("telegram must be listed, unmanaged")
 	}
 }
+
+func TestEmptyBaseURLAndDuplicatePricesRejected(t *testing.T) {
+	st := newStore(t)
+	p := newProv(t, st, secretA)
+	ctx := context.Background()
+	for k, v := range map[string]string{KeyLLMBaseURL: "  ", KeyLLMAPIKey: "", KeyPrices: "a:1:2, A:3:4"} {
+		if err := p.Save(ctx, "zalo", map[string]string{k: v}, "o"); err == nil {
+			t.Errorf("%s=%q accepted", k, v)
+		}
+	}
+	// an empty prices override is valid: it means "built-in defaults only"
+	if err := p.Save(ctx, "zalo", map[string]string{KeyPrices: ""}, "o"); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Snapshot("zalo").Overridden(KeyPrices) || len(p.Snapshot("zalo").Prices()) != 0 {
+		t.Fatal("empty prices override")
+	}
+	for _, sp := range Specs("zalo") {
+		want := map[string]bool{KeyPersona: true, KeyRetentionDays: true, KeyLLMBaseURL: true, KeyLLMAPIKey: true, KeySerperAPIKey: true, KeyFetchAllow: true,
+			KeyPrivateChats: true, KeyToolFetch: true, KeyToolWebSearch: true}[sp.Key]
+		if sp.Sensitive != want {
+			t.Errorf("%s sensitive=%v want %v", sp.Key, sp.Sensitive, want)
+		}
+	}
+}
+
+func TestApplyChangesAndResetsAtomically(t *testing.T) {
+	st := newStore(t)
+	p := newProv(t, st, secretA)
+	ctx := context.Background()
+	_ = p.Save(ctx, "zalo", map[string]string{KeyLLMModel: "m1", KeyRatePerMin: "10"}, "o")
+	before := p.Snapshot("zalo")
+	if err := p.Apply(ctx, "zalo", map[string]string{KeyRatePerMin: "20"}, []string{KeyLLMModel}, "o"); err != nil {
+		t.Fatal(err)
+	}
+	after := p.Snapshot("zalo")
+	if after == before || after.Zalo().RateLimitPerMin != 20 || after.Overridden(KeyLLMModel) {
+		t.Fatal("apply")
+	}
+	// invalid change: the reset must not happen either
+	_ = p.Save(ctx, "zalo", map[string]string{KeyLLMModel: "m2"}, "o")
+	if err := p.Apply(ctx, "zalo", map[string]string{KeyRatePerMin: "0"}, []string{KeyLLMModel}, "o"); err == nil || !p.Snapshot("zalo").Overridden(KeyLLMModel) {
+		t.Fatal("partial apply")
+	}
+	// a key in both lists is reset, not written
+	if err := p.Apply(ctx, "zalo", map[string]string{KeyLLMModel: "m3"}, []string{KeyLLMModel}, "o"); err != nil || p.Snapshot("zalo").Overridden(KeyLLMModel) {
+		t.Fatal("reset wins")
+	}
+}

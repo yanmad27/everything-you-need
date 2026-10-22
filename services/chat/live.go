@@ -15,9 +15,12 @@ type Live struct {
 	Set    bool
 	Paused bool // answer nothing
 
-	Client llm.ToolCompleter // nil = the service's static client
-	Model  string            // recorded with usage; "" = static
-	// Persona replaces the built-in system prompt base when non-empty.
+	// Client, when set, serves this turn instead of the static one; Model names
+	// the model behind it (recorded with usage) and is set only together with Client.
+	Client llm.ToolCompleter
+	Model  string
+	// Persona replaces only the character/base part of the system prompt when
+	// non-empty; the fixed tool, safety and formatting rules always follow it.
 	Persona string
 
 	// DisabledTools holds tool names that must not be offered.
@@ -26,7 +29,7 @@ type Live struct {
 
 	// Search overrides the web-search backend (built from the current key); nil = static.
 	Search WebSearch
-	// FetchAllow / DueChats replace the static lists when Set.
+	// FetchAllow / DueChats replace the static lists (an empty FetchAllow means the built-in defaults).
 	FetchAllow []string
 	DueChats   []string
 
@@ -69,17 +72,15 @@ func (s *Service) CaptureLive(ctx context.Context) (context.Context, Live) {
 }
 
 // NotePaused records (outcome=paused) an inbound message that is not answered.
-func (s *Service) NotePaused(ctx context.Context, chatID, userID, userName, text string) {
+// Like a rate-limited message it is counted but its text is not stored.
+func (s *Service) NotePaused(ctx context.Context, chatID, userID, userName string) {
 	log.Printf("chat: paused chat=%s outcome=paused", maskChat(chatID))
 	if s == nil || s.tools.Recorder == nil {
 		return
 	}
 	ctx = newTurn(ctx)
-	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "text", Text: text, ErrTag: "paused"})
+	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "text", ErrTag: "paused"})
 }
-
-// toolEnabled reports whether the named tool may be offered this turn.
-func (lv Live) toolEnabled(name string) bool { return !lv.DisabledTools[name] }
 
 func (lv Live) fetchAllowOr(static []string) []string {
 	if !lv.Set {

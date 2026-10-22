@@ -139,10 +139,29 @@ func (p *Provider) build(platform string, rows []convo.BotSettingRow) *Snapshot 
 // Save validates every change (key → textual value), writes them in one
 // transaction and then swaps the snapshot. On any failure nothing changes.
 func (p *Provider) Save(ctx context.Context, platform string, changes map[string]string, actor string) error {
+	return p.Apply(ctx, platform, changes, nil, actor)
+}
+
+// Reset deletes the override of key so the env/config default applies again.
+func (p *Provider) Reset(ctx context.Context, platform, key, actor string) error {
+	return p.Apply(ctx, platform, nil, []string{key}, actor)
+}
+
+// Apply validates every change, then writes the changes and the resets in ONE
+// transaction followed by ONE snapshot swap. A key in both lists is reset.
+func (p *Provider) Apply(ctx context.Context, platform string, changes map[string]string, resets []string, actor string) error {
 	if p.snaps[platform] == nil {
 		return fmt.Errorf("botconfig: platform %q is not managed", platform)
 	}
 	bad := map[string]string{}
+	reset := map[string]bool{}
+	for _, k := range resets {
+		if _, ok := specFor(platform, k); !ok {
+			bad[k] = "unknown setting"
+			continue
+		}
+		reset[k] = true
+	}
 	var puts []convo.BotSettingRow
 	keys := make([]string, 0, len(changes))
 	for k := range changes {
@@ -150,6 +169,9 @@ func (p *Provider) Save(ctx context.Context, platform string, changes map[string
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		if reset[k] {
+			continue
+		}
 		sp, ok := specFor(platform, k)
 		if !ok {
 			bad[k] = "unknown setting"
@@ -181,25 +203,14 @@ func (p *Provider) Save(ctx context.Context, platform string, changes map[string
 	if len(bad) > 0 {
 		return &ValidationError{bad}
 	}
+	var dels []string
+	for k := range reset {
+		dels = append(dels, k)
+	}
+	sort.Strings(dels)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if err := p.be.ApplyBotSettings(ctx, platform, puts, nil, actor); err != nil {
-		return err
-	}
-	return p.reload(ctx, platform)
-}
-
-// Reset deletes the override of key so the env/config default applies again.
-func (p *Provider) Reset(ctx context.Context, platform, key, actor string) error {
-	if p.snaps[platform] == nil {
-		return fmt.Errorf("botconfig: platform %q is not managed", platform)
-	}
-	if _, ok := specFor(platform, key); !ok {
-		return &ValidationError{map[string]string{key: "unknown setting"}}
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if err := p.be.ApplyBotSettings(ctx, platform, nil, []string{key}, actor); err != nil {
+	if err := p.be.ApplyBotSettings(ctx, platform, puts, dels, actor); err != nil {
 		return err
 	}
 	return p.reload(ctx, platform)

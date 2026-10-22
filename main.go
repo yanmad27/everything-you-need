@@ -401,11 +401,7 @@ func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 		// One settings snapshot per inbound message; paused = log + record, no answer.
 		var lv chat.Live
 		if ctx, lv = chatSvc.CaptureLive(ctx); lv.Paused {
-			text := msg.Text
-			if msg.Kind == "image" {
-				text = ""
-			}
-			chatSvc.NotePaused(ctx, msg.Chat.ID, msg.From.ID, msg.From.DisplayName, text)
+			chatSvc.NotePaused(ctx, msg.Chat.ID, msg.From.ID, msg.From.DisplayName)
 			log.Printf("zalo dispatch: result=paused outcome=paused chat=%s", zalobot.MaskID(msg.Chat.ID))
 			return
 		}

@@ -276,12 +276,8 @@ func TestBotConnectionTestClassesNoLeak(t *testing.T) {
 	h, _, _, fake := botsH(t, botSecret, Options{TestAttempts: 100})
 	ck := loginSession(t, h)
 	csrf := botCSRF(t, h, ck)
-	do1 := func(what string, kv ...string) string {
-		f := url.Values{"csrf": {csrf}}
-		for i := 0; i+1 < len(kv); i += 2 {
-			f.Set(kv[i], kv[i+1])
-		}
-		w := do(h, "POST", "/admin/bots/zalo/test?what="+what, f, ck)
+	run := func(what string) string {
+		w := do(h, "POST", "/admin/bots/zalo/test?what="+what, url.Values{"csrf": {csrf}}, ck)
 		if w.Code != 302 {
 			t.Fatalf("test status %d", w.Code)
 		}
@@ -305,42 +301,106 @@ func TestBotConnectionTestClassesNoLeak(t *testing.T) {
 		{func(*http.Request) (*http.Response, error) { return nil, errors.New("dial: blocked destination") }, "test_llm_network"},
 	} {
 		fake.fn = c.fn
-		if loc := do1("llm", "s.llm_api_key", botSentinel); !strings.HasSuffix(loc, "flash="+c.want) {
+		if loc := run("llm"); !strings.HasSuffix(loc, "flash="+c.want) {
 			t.Errorf("want %s, got %s", c.want, loc)
 		}
 	}
-	// request shape: just-entered key and the snapshot base URL/model, tiny completion
 	fake.fn = respond(200)
-	do1("llm", "s.llm_api_key", botSentinel)
-	if fake.last.URL.String() != "https://llm.example.com/v1/chat/completions" || fake.last.Header.Get("Authorization") != "Bearer "+botSentinel {
+	run("llm")
+	if fake.last.URL.String() != "https://llm.example.com/v1/chat/completions" || fake.last.Header.Get("Authorization") != "Bearer env-key-abcdefghijklmnop" {
 		t.Fatalf("request: %s", fake.last.URL)
 	}
-	// serper uses the stored key when none entered; not set → not_set
-	if loc := do1("serper"); !strings.HasSuffix(loc, "flash=test_serper_not_set") {
+	if loc := run("serper"); !strings.HasSuffix(loc, "flash=test_serper_not_set") {
 		t.Fatalf("serper not set: %s", loc)
 	}
-	if loc := do1("serper", "s.serper_api_key", botSentinel+"x"); !strings.HasSuffix(loc, "flash=test_serper_ok") || fake.last.URL.String() != "https://google.serper.dev/search" || fake.last.Header.Get("X-API-KEY") != botSentinel+"x" {
+	postBot(h, ck, csrf, "s.serper_api_key", botSentinel+"x", "admin_password", testPass)
+	if loc := run("serper"); !strings.HasSuffix(loc, "flash=test_serper_ok") || fake.last.URL.String() != "https://google.serper.dev/search" || fake.last.Header.Get("X-API-KEY") != botSentinel+"x" {
 		t.Fatalf("serper: %s %s", loc, fake.last.URL)
 	}
-	// unknown flash codes are ignored (no reflection)
 	if p := do(h, "GET", "/admin/bots/zalo?flash=%3Cscript%3E", nil, ck).Body.String(); strings.Contains(p, "<script>") {
 		t.Fatal("flash reflected")
 	}
 }
 
-func TestBotTestRefusesPrivateBaseURL(t *testing.T) {
-	h, _, _, fake := botsH(t, botSecret, Options{})
+func TestBotLLMTestRetriesWithMaxCompletionTokens(t *testing.T) {
+	h, _, _, fake := botsH(t, botSecret, Options{TestAttempts: 100})
 	ck := loginSession(t, h)
 	csrf := botCSRF(t, h, ck)
+	var bodies []string
+	fake.fn = func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if strings.Contains(string(b), `"max_tokens"`) {
+			return &http.Response{StatusCode: 400, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."}}`))}, nil
+		}
+		return respond(200)(r)
+	}
+	w := do(h, "POST", "/admin/bots/zalo/test?what=llm", url.Values{"csrf": {csrf}}, ck)
+	if !strings.HasSuffix(w.Header().Get("Location"), "flash=test_llm_ok") || len(bodies) != 2 || !strings.Contains(bodies[1], `"max_completion_tokens":5`) || strings.Contains(bodies[1], `"max_tokens"`) {
+		t.Fatalf("%s %v", w.Header().Get("Location"), bodies)
+	}
+}
+
+func TestBotTestIgnoresFormValuesAndRefusesPrivateBase(t *testing.T) {
+	h, _, _, fake := botsH(t, botSecret, Options{TestAttempts: 100})
+	ck := loginSession(t, h)
+	csrf := botCSRF(t, h, ck)
+	f := url.Values{"csrf": {csrf}, "s.llm_base_url": {"https://attacker.example.net"}, "s.llm_api_key": {botSentinel}, "s.llm_model": {"evil"}}
+	w := do(h, "POST", "/admin/bots/zalo/test?what=llm", f, ck)
+	if !strings.HasSuffix(w.Header().Get("Location"), "flash=test_llm_ok") || fake.last.URL.Host != "llm.example.com" || strings.Contains(fake.last.Header.Get("Authorization"), botSentinel) {
+		t.Fatalf("form override honoured: %s %s", w.Header().Get("Location"), fake.last.URL)
+	}
+	before := fake.calls.Load()
 	for _, base := range []string{"https://127.0.0.1", "https://10.1.2.3", "http://llm.example.com", "https://localhost", "https://169.254.169.254"} {
-		f := url.Values{"csrf": {csrf}, "s.llm_base_url": {base}, "s.llm_api_key": {botSentinel}}
-		w := do(h, "POST", "/admin/bots/zalo/test?what=llm", f, ck)
-		if !strings.HasSuffix(w.Header().Get("Location"), "flash=test_llm_blocked") {
-			t.Errorf("%s: %s", base, w.Header().Get("Location"))
+		if got := h.testLLM(context.Background(), base, "k", "m"); got != "blocked" {
+			t.Errorf("%s: %s", base, got)
 		}
 	}
-	if fake.calls.Load() != 0 {
+	if fake.calls.Load() != before {
 		t.Fatal("outbound call made for a private base URL")
+	}
+}
+
+func TestBotPersonaEditsDetectedAndSensitive(t *testing.T) {
+	h, prov, _, _ := botsH(t, botSecret, Options{})
+	ck := loginSession(t, h)
+	csrf := botCSRF(t, h, ck)
+	if r := postBot(h, ck, csrf, "s.persona", "Bạn là A.\n\nVui vẻ"); r.StatusCode != 400 || prov.Snapshot("zalo").Overridden(botconfig.KeyPersona) {
+		t.Fatalf("persona without password: %d", r.StatusCode)
+	}
+	if r := postBot(h, ck, csrf, "s.retention_days", "30"); r.StatusCode != 400 {
+		t.Fatalf("retention without password: %d", r.StatusCode)
+	}
+	base := "Bạn là A.\n\nVui vẻ, ngắn gọn"
+	if r := postBot(h, ck, csrf, "s.persona", base, "admin_password", testPass); r.StatusCode != 302 {
+		t.Fatal("save persona")
+	}
+	if r := postBot(h, ck, csrf, "s.persona", strings.ReplaceAll(base, "\n", "\r\n")); r.StatusCode != 302 || !strings.Contains(r.Header.Get("Location"), "nochange") {
+		t.Fatalf("CRLF fold: %s", r.Header.Get("Location"))
+	}
+	for name, edited := range map[string]string{"blank line": "Bạn là A.\nVui vẻ, ngắn gọn", "comma spacing": "Bạn là A.\n\nVui vẻ,ngắn gọn", "trailing space": base + " "} {
+		if r := postBot(h, ck, csrf, "s.persona", edited, "admin_password", testPass); r.StatusCode != 302 || !strings.Contains(r.Header.Get("Location"), "saved") || prov.Snapshot("zalo").Zalo().Persona != edited {
+			t.Fatalf("%s edit not saved: %s", name, r.Header.Get("Location"))
+		}
+	}
+}
+
+func TestBotSaveWithResetIsOneApply(t *testing.T) {
+	h, prov, _, _ := botsH(t, botSecret, Options{})
+	ck := loginSession(t, h)
+	csrf := botCSRF(t, h, ck)
+	postBot(h, ck, csrf, "s.llm_model", "m1")
+	postBot(h, ck, csrf, "s.rate_limit_per_min", "20")
+	before := prov.Snapshot("zalo")
+	if r := postBot(h, ck, csrf, "s.rate_limit_burst", "5", "reset.llm_model", "1"); r.StatusCode != 302 {
+		t.Fatalf("%d", r.StatusCode)
+	}
+	after := prov.Snapshot("zalo")
+	if after == before || after.Zalo().RateLimitBurst != 5 || after.Overridden(botconfig.KeyLLMModel) || after.Zalo().RateLimitPerMin != 20 {
+		t.Fatal("combined apply")
+	}
+	if r := postBot(h, ck, csrf, "s.rate_limit_burst", "999", "reset.rate_limit_per_min", "1"); r.StatusCode != 400 || !prov.Snapshot("zalo").Overridden(botconfig.KeyRatePerMin) {
+		t.Fatalf("an invalid change must block the reset in the same request: %d", r.StatusCode)
 	}
 }
 
