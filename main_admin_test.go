@@ -66,3 +66,18 @@ func TestZaloModelLabel(t *testing.T) {
 		t.Errorf("fallback: %q", got)
 	}
 }
+
+func TestConvoPricesMerge(t *testing.T) {
+	c := config.ConvoConfig{Prices: []config.ModelPrice{{Model: "A", PromptPer1M: 1, CompletionPer1M: 2}, {Model: "b", PromptPer1M: 3, CompletionPer1M: 4}}}
+	got, err := convoPrices(c, "a:5:6,c:7:8")
+	if err != nil || len(got) != 3 || got[0] != (convo.Price{Model: "a", PromptPer1M: 5, CompletionPer1M: 6}) || got[1].Model != "b" || got[2].Model != "c" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = convoPrices(c, "broken")
+	if err == nil || len(got) != 2 {
+		t.Fatalf("malformed env must keep file prices and report: %+v %v", got, err)
+	}
+	if got, err := convoPrices(config.ConvoConfig{}, ""); err != nil || len(got) != 0 {
+		t.Fatal("no prices by default")
+	}
+}

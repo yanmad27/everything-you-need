@@ -109,12 +109,14 @@ func setDefaults() {
 	viper.SetDefault("admin.password_hash", "")
 	viper.SetDefault("admin.password_hash_b64", "")
 	viper.SetDefault("admin.session_secret", "")
+	viper.SetDefault("admin.password_reset", false)
 
 	viper.SetDefault("convo.enabled", true)
 	viper.SetDefault("convo.db_path", "data/convo.db")
 	viper.SetDefault("convo.retention_days", 90)
 	viper.SetDefault("convo.price_prompt_per_1k", 0.0)
 	viper.SetDefault("convo.price_completion_per_1k", 0.0)
+	viper.SetDefault("convo.currency", "USD")
 
 	viper.SetDefault("chat.enabled", true)
 	viper.SetDefault("chat.api_key", "")

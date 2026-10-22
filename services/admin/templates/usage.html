@@ -1,0 +1,33 @@
+{{template "head" .}}<h1>{{.Title}}</h1>
+<form class="f" method="get">
+<label>Nền tảng<select name="platform"><option value="">tất cả</option><option value="zalo"{{if eq .Data.Platform "zalo"}} selected{{end}}>zalo</option><option value="telegram"{{if eq .Data.Platform "telegram"}} selected{{end}}>telegram</option></select></label>
+<label>Từ ngày<input type="date" name="from" value="{{.Data.From}}"></label>
+<label>Đến ngày<input type="date" name="to" value="{{.Data.To}}"></label>
+<button type="submit">Lọc</button></form>
+
+<h2>Tổng</h2>
+<table><tr><th>Lượt</th><th>Prompt</th><th>Completion</th><th>Tổng token</th><th>Chi phí ({{.Data.Currency}})</th></tr>
+<tr><td class="n">{{num .Data.Totals.Turns}}</td><td class="n">{{num .Data.Totals.PromptTokens}}</td><td class="n">{{num .Data.Totals.CompletionTokens}}</td><td class="n">{{num .Data.Totals.TotalTokens}}</td><td class="n">{{money .Data.Totals.Cost .Data.Totals.PartialPricing}}</td></tr></table>
+
+<h2>Theo ngày (GMT+7)</h2>
+<table><tr><th>Ngày</th><th>Lượt</th><th>Prompt</th><th>Completion</th><th>Tổng token</th><th>Chi phí ({{.Data.Currency}})</th></tr>
+{{range .Data.Days}}<tr><td>{{.Day}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+
+<h2>Theo mô hình</h2>
+<table><tr><th>Mô hình</th><th>Lượt</th><th>Prompt</th><th>Completion</th><th>Tổng token</th><th>Chi phí ({{.Data.Currency}})</th></tr>
+{{range .Data.Models}}<tr><td>{{if .Model}}{{.Model}}{{else}}<span class="mut">(không rõ)</span>{{end}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+
+<h2>Theo chat ({{.Data.ChatsTotal}})</h2>
+<table><tr><th>Chat</th><th>Lượt</th><th>Prompt</th><th>Completion</th><th>Tổng token</th><th>Chi phí ({{.Data.Currency}})</th></tr>
+{{range .Data.Chats}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.ChatID}}</span>{{else}}{{.ChatID}}{{end}} <span class="mut">{{.Platform}}</span></td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+<p>{{if .Data.ChatsPager.HasPrev}}<a href="{{.Data.ChatsPager.Prev}}">{{.Data.ChatsPager.PrevLabel}}</a> {{end}}{{.Data.ChatsPager.Page}}/{{.Data.ChatsPager.Pages}}{{if .Data.ChatsPager.HasNext}} <a href="{{.Data.ChatsPager.Next}}">{{.Data.ChatsPager.NextLabel}}</a>{{end}}</p>
+
+<h2>Theo người dùng ({{.Data.UsersTotal}})</h2>
+<table><tr><th>Người dùng</th><th>Lượt</th><th>Prompt</th><th>Completion</th><th>Tổng token</th><th>Chi phí ({{.Data.Currency}})</th></tr>
+{{range .Data.Users}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.UserID}}</span>{{else}}{{.UserID}}{{end}} <span class="mut">{{.Platform}}</span></td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+<p>{{if .Data.UsersPager.HasPrev}}<a href="{{.Data.UsersPager.Prev}}">{{.Data.UsersPager.PrevLabel}}</a> {{end}}{{.Data.UsersPager.Page}}/{{.Data.UsersPager.Pages}}{{if .Data.UsersPager.HasNext}} <a href="{{.Data.UsersPager.Next}}">{{.Data.UsersPager.NextLabel}}</a>{{end}}</p>
+{{template "foot" .}}

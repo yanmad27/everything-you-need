@@ -25,11 +25,15 @@ services:
       - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:-}
       - ADMIN_PASSWORD_HASH_B64=${ADMIN_PASSWORD_HASH_B64:-}
       - ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
+      - ADMIN_PASSWORD_RESET=${ADMIN_PASSWORD_RESET:-}
       # Zalo conversation store for the admin UI (stored on the data volume).
       - CONVO_ENABLED=${CONVO_ENABLED:-true}
       - CONVO_RETENTION_DAYS=${CONVO_RETENTION_DAYS:-90}
       - CONVO_PRICE_PROMPT_PER_1K=${CONVO_PRICE_PROMPT_PER_1K:-0}
       - CONVO_PRICE_COMPLETION_PER_1K=${CONVO_PRICE_COMPLETION_PER_1K:-0}
+      # Per-model prices per 1M tokens: "model:prompt:completion,..." (empty = cost "price not configured").
+      - CONVO_PRICES=${CONVO_PRICES:-}
+      - CONVO_CURRENCY=${CONVO_CURRENCY:-USD}
       # OpenAI-compatible LLM for the Zalo bot only (optional).
       - LLM_OPENAI_BASE_URL=${LLM_OPENAI_BASE_URL}
       - LLM_OPENAI_API_KEY=${LLM_OPENAI_API_KEY}

@@ -265,8 +265,11 @@ type Stat struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
-	// EstCost = tokens/1000 * configured price; 0 when no prices are configured.
-	EstCost float64
+	// EstCost is the cost of the priced part of the usage (per-model prices);
+	// 0 when nothing is priced. PartialPricing means some tokens belong to a
+	// model with no configured price, so EstCost is a lower bound.
+	EstCost        float64
+	PartialPricing bool
 }
 
 // UserStats returns per-user insights (ordered by messages, then last seen).
@@ -369,23 +372,29 @@ func (s *Store) stats(ctx context.Context, f StatsFilter, col string) ([]Stat, e
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// usage tokens.
+	// usage tokens (priced per model).
 	w, a = where("")
-	rows, err = s.db.QueryContext(ctx, `SELECT platform, `+col+`, SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens)
-		FROM usage WHERE `+w+` AND `+col+` != '' GROUP BY platform, `+col, a...)
+	rows, err = s.db.QueryContext(ctx, `SELECT platform, `+col+`, model, SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens)
+		FROM usage WHERE `+w+` AND `+col+` != '' GROUP BY platform, `+col+`, model`, a...)
 	if err != nil {
 		return nil, fmt.Errorf("convo: stats usage: %w", err)
 	}
 	for rows.Next() {
-		var pf, id string
+		var pf, id, model string
 		var p, c, t int64
-		if err := rows.Scan(&pf, &id, &p, &c, &t); err != nil {
+		if err := rows.Scan(&pf, &id, &model, &p, &c, &t); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		st := get(pf, id)
-		st.PromptTokens, st.CompletionTokens, st.TotalTokens = int(p), int(c), int(t)
-		st.EstCost = float64(p)/1000*s.opt.PricePromptPer1K + float64(c)/1000*s.opt.PriceCompletionPer1K
+		st.PromptTokens += int(p)
+		st.CompletionTokens += int(c)
+		st.TotalTokens += int(t)
+		if pr, ok := s.priceFor(model); ok {
+			st.EstCost += float64(p)/1e6*pr.PromptPer1M + float64(c)/1e6*pr.CompletionPer1M
+		} else if p+c+t > 0 {
+			st.PartialPricing = true
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {

@@ -93,6 +93,9 @@ type AdminConfig struct {
 	PasswordHash    string `mapstructure:"password_hash"`
 	PasswordHashB64 string `mapstructure:"password_hash_b64"`
 	SessionSecret   string `mapstructure:"session_secret"`
+	// PasswordReset (ADMIN_PASSWORD_RESET=true) clears the UI-changed password at
+	// startup so the env hash applies again.
+	PasswordReset bool `mapstructure:"password_reset"`
 }
 
 // ConvoConfig controls the Zalo conversation store used by the admin UI.
@@ -102,6 +105,16 @@ type ConvoConfig struct {
 	RetentionDays        int     `mapstructure:"retention_days"`
 	PricePromptPer1K     float64 `mapstructure:"price_prompt_per_1k"`
 	PriceCompletionPer1K float64 `mapstructure:"price_completion_per_1k"`
+	// Prices are per-model rates per 1M tokens (also CONVO_PRICES, see docs/admin.md).
+	Prices   []ModelPrice `mapstructure:"prices"`
+	Currency string       `mapstructure:"currency"`
+}
+
+// ModelPrice is one model's rate per 1,000,000 tokens.
+type ModelPrice struct {
+	Model           string  `mapstructure:"model"`
+	PromptPer1M     float64 `mapstructure:"prompt_per_1m"`
+	CompletionPer1M float64 `mapstructure:"completion_per_1m"`
 }
 
 type ChatConfig struct {

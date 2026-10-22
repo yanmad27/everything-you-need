@@ -451,14 +451,49 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 	if !c.Enabled {
 		return nil
 	}
+	prices, err := convoPrices(c, os.Getenv("CONVO_PRICES"))
+	if err != nil {
+		log.Printf("Convo prices ignored: %v", err)
+	}
 	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
-		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K})
+		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K,
+		Prices: prices, Currency: c.Currency})
 	if err != nil {
 		log.Printf("Convo store open failed: %v (conversation recording disabled)", err)
 		return nil
 	}
 	log.Printf("Convo store initialized (db=%s, retention_days=%d)", c.DBPath, c.RetentionDays)
 	return st
+}
+
+// convoPrices merges the config-file prices with CONVO_PRICES
+// ("model:prompt:completion,..." per 1M tokens); the env entry wins per model.
+// On a malformed env value only the file prices are returned, with the error.
+func convoPrices(c config.ConvoConfig, env string) ([]convo.Price, error) {
+	var out []convo.Price
+	idx := map[string]int{}
+	put := func(p convo.Price) {
+		k := strings.ToLower(p.Model)
+		if i, ok := idx[k]; ok {
+			out[i] = p
+			return
+		}
+		idx[k] = len(out)
+		out = append(out, p)
+	}
+	for _, p := range c.Prices {
+		if strings.TrimSpace(p.Model) != "" {
+			put(convo.Price{Model: strings.TrimSpace(p.Model), PromptPer1M: p.PromptPer1M, CompletionPer1M: p.CompletionPer1M})
+		}
+	}
+	envP, err := convo.ParsePrices(env)
+	if err != nil {
+		return out, err
+	}
+	for _, p := range envP {
+		put(p)
+	}
+	return out, nil
 }
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not
@@ -473,7 +508,7 @@ func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret}, store, admin.Options{})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

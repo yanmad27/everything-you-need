@@ -48,6 +48,27 @@ type Data interface {
 	ToolStats(ctx context.Context, f convo.StatsFilter) (convo.ToolReport, error)
 }
 
+// CredStore persists the changed password hash and the audit trail (implemented
+// by *convo.Store). When Data does not implement it, /admin/password is off.
+type CredStore interface {
+	AdminPasswordHash(ctx context.Context) (string, bool, error)
+	SetAdminPasswordHash(ctx context.Context, username, hash string) error
+	ClearAdminPasswordHash(ctx context.Context) (bool, error)
+	RecordAdminAudit(ctx context.Context, event, ip string) error
+}
+
+// UsageData is the usage/cost query surface (implemented by *convo.Store).
+// When Data does not implement it, /admin/usage is off.
+type UsageData interface {
+	UsageTotals(ctx context.Context, f convo.UsageFilter) (convo.UsageSum, error)
+	UsageByDay(ctx context.Context, f convo.UsageFilter) ([]convo.UsageDay, error)
+	UsageByChat(ctx context.Context, f convo.UsageFilter, p convo.Page) ([]convo.UsageChat, int, error)
+	UsageByUser(ctx context.Context, f convo.UsageFilter, p convo.Page) ([]convo.UsageUser, int, error)
+	UsageByModel(ctx context.Context, f convo.UsageFilter) ([]convo.UsageModel, error)
+	Currency() string
+	Prices() []convo.Price
+}
+
 // Config holds the owner credentials. Both Username and PasswordHash (bcrypt)
 // are required; otherwise New fails and the UI stays unmounted.
 type Config struct {
@@ -57,6 +78,8 @@ type Config struct {
 	// interpolation cannot mangle it). Takes precedence over PasswordHash.
 	PasswordHashB64 string
 	SessionSecret   string // optional HMAC key for login CSRF tokens; random per process if empty
+	// ResetPassword clears the stored (UI-changed) hash at startup so the env hash applies again.
+	ResetPassword bool
 }
 
 // Options tunes limits and the clock (tests).
@@ -65,6 +88,7 @@ type Options struct {
 	LoginAttempts      int           // per client IP per window (default 5)
 	GlobalLoginAttempt int           // all clients per window (default 60)
 	LoginWindow        time.Duration // default 15m
+	PasswordAttempts   int           // failed password-change attempts per session and per IP per window (default 5)
 }
 
 type session struct {
@@ -84,6 +108,12 @@ type Handler struct {
 	css    template.CSS
 	ipLim  *limiter
 	allLim *limiter
+
+	username string
+	creds    CredStore
+	usage    UsageData
+	pwSess   *limiter // failed password-change attempts per session
+	pwIP     *limiter // ... per client IP
 
 	mu       sync.Mutex
 	sessions map[[32]byte]*session
@@ -170,6 +200,18 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 			return nil, err
 		}
 	}
+	if opt.PasswordAttempts <= 0 {
+		opt.PasswordAttempts = 5
+	}
+	creds, _ := data.(CredStore)
+	usage, _ := data.(UsageData)
+	if cfg.ResetPassword && creds != nil {
+		cleared, err := creds.ClearAdminPasswordHash(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("admin: ADMIN_PASSWORD_RESET failed: %w", err)
+		}
+		log.Printf("admin: ADMIN_PASSWORD_RESET is set: stored password cleared=%t, the env hash applies (unset the flag after logging in)", cleared)
+	}
 	css, err := assets.ReadFile("assets/app.css")
 	if err != nil {
 		return nil, err
@@ -184,6 +226,9 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		ipLim:    newLimiter(opt.LoginAttempts, opt.LoginWindow, opt.Now),
 		allLim:   newLimiter(opt.GlobalLoginAttempt, opt.LoginWindow, opt.Now),
 		sessions: map[[32]byte]*session{},
+		username: cfg.Username, creds: creds, usage: usage,
+		pwSess: newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
+		pwIP:   newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
 	}, nil
 }
 
@@ -219,6 +264,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "/admin/logout" {
 		h.logout(w, r, sess)
+		return
+	}
+	if path == "/admin/password" {
+		h.password(w, r, sess)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -340,13 +389,16 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		// Always run both comparisons so timing does not reveal which part was wrong.
 		u := sha256.Sum256([]byte(r.PostForm.Get("username")))
 		userOK := subtle.ConstantTimeCompare(u[:], h.user[:]) == 1
-		pwOK := bcrypt.CompareHashAndPassword(h.hash, []byte(r.PostForm.Get("password"))) == nil
+		hash, herr := h.activeHash(r.Context())
+		pwOK := herr == nil && bcrypt.CompareHashAndPassword(hash, []byte(r.PostForm.Get("password"))) == nil
 		if !userOK || !pwOK {
 			h.allLim.add("*") // the global bucket counts failures only
+			h.audit(r, "login_fail")
 			h.renderLogin(w, r, http.StatusUnauthorized, true)
 			return
 		}
 		h.ipLim.reset(ip)
+		h.audit(r, "login_ok")
 		id, _ := h.startSession()
 		http.SetCookie(w, h.cookie(id, int(absTimeout/time.Second)))
 		http.Redirect(w, r, "/admin", http.StatusFound)
@@ -372,6 +424,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request, s *session) {
 		delete(h.sessions, sha256.Sum256([]byte(c.Value)))
 		h.mu.Unlock()
 	}
+	h.audit(r, "logout")
 	http.SetCookie(w, h.cookie("", -1))
 	http.Redirect(w, r, "/admin/login", http.StatusFound)
 }
