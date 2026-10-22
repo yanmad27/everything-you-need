@@ -23,6 +23,9 @@ func fetchPageTextSafe(ctx context.Context, rawURL string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 		return "", errUnsupportedURL
 	}
+	if text, ok := fetchTrending(ctx, safeHTTP, rawURL); ok {
+		return text, nil
+	}
 	if text, err := getText(ctx, safeHTTP, "https://r.jina.ai/"+rawURL, false); err == nil {
 		return text, nil
 	}

@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"everything-you-need/m/services/botconfig"
+	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/netguard"
 )
 
@@ -68,16 +69,35 @@ type Flash struct {
 
 // BotView is the Data of bot.html and the body of GET /admin/api/bots/zalo.
 type BotView struct {
-	Platform        string          `json:"platform"`
-	Enabled         bool            `json:"enabled"`
-	SecretsDisabled bool            `json:"secrets_disabled"` // BOTCONFIG_SECRET missing/short
-	Problems        []string        `json:"problems"`
-	Settings        []BotSettingRow `json:"settings"`
-	Flash           *Flash          `json:"flash"`
-	FormError       string          `json:"form_error"`     // general error (e.g. re-auth failed)
-	PasswordField   string          `json:"password_field"` // "admin_password"
-	PostURL         string          `json:"post_url"`
-	TestURL         string          `json:"test_url"`
+	Platform        string           `json:"platform"`
+	Enabled         bool             `json:"enabled"`
+	SecretsDisabled bool             `json:"secrets_disabled"` // BOTCONFIG_SECRET missing/short
+	Problems        []string         `json:"problems"`
+	Settings        []BotSettingRow  `json:"settings"`
+	Flash           *Flash           `json:"flash"`
+	FormError       string           `json:"form_error"`     // general error (e.g. re-auth failed)
+	PasswordField   string           `json:"password_field"` // "admin_password"
+	PostURL         string           `json:"post_url"`
+	TestURL         string           `json:"test_url"`
+	Providers       []ProviderStatus `json:"providers"` // external provider health as seen by the bot's tools
+}
+
+// ProviderStatus is one external provider's last known state. Detail is fixed
+// text; upstream response bodies and keys never appear here.
+type ProviderStatus struct {
+	Name   string    `json:"name"`   // "serper"
+	State  string    `json:"state"`  // "ok" | "no_credit" | "auth" | "error" | "unknown"
+	Since  time.Time `json:"since"`  // when State began; zero for "unknown"
+	Detail string    `json:"detail"` // fixed Vietnamese text
+}
+
+func providerStatuses() []ProviderStatus {
+	src := chat.ProviderStatuses()
+	out := make([]ProviderStatus, 0, len(src))
+	for _, p := range src {
+		out = append(out, ProviderStatus{Name: p.Name, State: p.State, Since: p.Since, Detail: p.Detail})
+	}
+	return out
 }
 
 var flashTexts = map[string]Flash{
@@ -120,7 +140,7 @@ func (h *Handler) botView(inputs map[string]string, errs map[string]string) BotV
 	defs := h.botsP.Defaults(platformZalo)
 	v := BotView{Platform: platformZalo, Enabled: sn.Bool(botconfig.KeyEnabled), SecretsDisabled: h.botsP.SecretsDisabled(),
 		Problems: append([]string{}, sn.Problems...), PasswordField: "admin_password", PostURL: "/admin/bots/zalo", TestURL: "/admin/bots/zalo/test",
-		Settings: []BotSettingRow{}}
+		Settings: []BotSettingRow{}, Providers: providerStatuses()}
 	for _, sv := range sn.View(defs) {
 		r := BotSettingRow{SettingView: sv, Source: "env", InputName: "s." + sv.Key, ResetName: "reset." + sv.Key, Error: errs[sv.Key]}
 		if sv.Overridden {
