@@ -1,15 +1,20 @@
-{{template "head" .}}<h1>Công cụ</h1>
-<form class="f" method="get">
-<label>Nền tảng<select name="platform"><option value="">tất cả</option><option value="zalo"{{if eq (.Q.Get "platform") "zalo"}} selected{{end}}>zalo</option><option value="telegram"{{if eq (.Q.Get "platform") "telegram"}} selected{{end}}>telegram</option></select></label>
-<label>Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>
-<label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
-<label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
-<button type="submit">Lọc</button></form>
-<table><tr><th>Công cụ</th><th>Số lần gọi</th><th>Thành công</th><th>Lỗi</th><th>Timeout</th><th>Bị chặn</th><th>p50 ok (ms)</th><th>p95 ok (ms)</th></tr>
-{{range .Data.Tools}}<tr><td>{{.Name}}</td><td class="n">{{.Calls}}</td><td class="n">{{pct .SuccessRate}}</td><td class="n">{{.Errors}}</td><td class="n">{{.Timeouts}}</td><td class="n">{{.Blocked}}</td><td class="n">{{.P50MS}}</td><td class="n">{{.P95MS}}</td></tr>
-{{else}}<tr><td colspan="8" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
-<h1 class="sec">Lỗi gần đây</h1>
-<table><tr><th>Thời gian</th><th>Công cụ</th><th>Kết quả</th><th>Args</th><th>Chat</th><th>ms</th></tr>
-{{range .Data.RecentFailures}}<tr><td>{{ftime .At}}</td><td>{{.Name}}</td><td class="bad">{{.Outcome}}</td><td><code>{{.ArgsSummary}}</code></td><td>{{.ChatID}}</td><td class="n">{{.LatencyMS}}</td></tr>
-{{else}}<tr><td colspan="6" class="mut">Không có lỗi.</td></tr>{{end}}</table>
+{{template "head" .}}<div class="ph"><div><h1>Công cụ <span class="count">{{len .Data.Tools}}</span></h1><p class="mut">Số lần gọi, tỉ lệ thành công và độ trễ của từng công cụ.</p></div></div>
+<form class="card filters" method="get">
+{{template "platform" (.Q.Get "platform")}}
+<label class="grow">Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>
+{{template "dates" .Q}}</form>
+<div class="card"><div class="sec-h"><h2>Hiệu năng công cụ</h2><div class="legend"><span><i class="sw ok"></i>thành công</span><span><i class="sw bad"></i>lỗi/timeout</span><span><i class="sw mut"></i>bị chặn</span><span><i class="sw p2"></i>p50 trên p95</span></div></div>
+<div class="tw"><table>
+<thead><tr><th>Công cụ</th><th class="n">Số lần gọi</th><th>Kết quả</th><th class="n">Lỗi</th><th class="n">Timeout</th><th class="n">Bị chặn</th><th class="n">p50 ok</th><th class="n">p95 ok</th><th>p50 / p95</th></tr></thead>
+<tbody>{{range .Data.Tools}}<tr><td><span class="name mono">{{.Name}}</span></td><td class="n">{{num .Calls}}</td>
+<td><div class="rate">{{if .Calls}}<svg class="hbar" viewBox="0 0 {{.Calls}} 1" preserveAspectRatio="none" role="img" aria-label="{{.OK}} thành công, {{.Errors}} lỗi, {{.Timeouts}} timeout, {{.Blocked}} bị chặn trên {{.Calls}} lần gọi"><title>{{.OK}} ok · {{.Errors}} lỗi · {{.Timeouts}} timeout · {{.Blocked}} bị chặn</title><rect class="bbad" x="0" y="0" width="{{.Calls}}" height="1"/><rect class="bok" x="0" y="0" width="{{.OK}}" height="1"/><svg x="0" y="0" width="{{.Calls}}" height="1" viewBox="-{{.Calls}} 0 {{.Calls}} 1" preserveAspectRatio="none"><rect class="bmut" x="0" y="0" width="{{.Blocked}}" height="1" transform="scale(-1,1)"/></svg></svg>{{end}}<span class="{{if lt .SuccessRate 0.9}}bad{{else}}ok{{end}}">{{pct .SuccessRate}}</span></div></td>
+<td class="n">{{if .Errors}}<span class="pill error">{{num .Errors}}</span>{{else}}<span class="mut">0</span>{{end}}</td><td class="n">{{if .Timeouts}}<span class="pill timeout">{{num .Timeouts}}</span>{{else}}<span class="mut">0</span>{{end}}</td><td class="n">{{if .Blocked}}<span class="pill blocked">{{num .Blocked}}</span>{{else}}<span class="mut">0</span>{{end}}</td>
+<td class="n">{{.P50MS}} ms</td><td class="n">{{.P95MS}} ms</td>
+<td>{{if .P95MS}}<svg class="hbar" viewBox="0 0 {{.P95MS}} 1" preserveAspectRatio="none" role="img" aria-label="p50 {{.P50MS}} ms trên p95 {{.P95MS}} ms"><title>p50 {{.P50MS}} ms / p95 {{.P95MS}} ms</title><rect class="b2" x="0" y="0" width="{{.P95MS}}" height="1"/><rect class="b1" x="0" y="0" width="{{.P50MS}}" height="1"/></svg>{{else}}<span class="mut">—</span>{{end}}</td></tr>
+{{else}}<tr><td colspan="9" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div></div>
+<div class="card sec"><div class="sec-h"><h2>Lỗi gần đây</h2><span class="mut">20 lần gọi không thành công mới nhất</span></div>
+<div class="tw"><table>
+<thead><tr><th>Thời gian</th><th>Công cụ</th><th>Kết quả</th><th>Tham số</th><th>Chat</th><th class="n">Độ trễ</th></tr></thead>
+<tbody>{{range .Data.RecentFailures}}<tr><td class="t">{{ftime .At}}</td><td><span class="mono">{{.Name}}</span></td><td><span class="pill {{.Outcome}}">{{.Outcome}}</span></td><td class="args"><code>{{.ArgsSummary}}</code></td><td><span class="id">{{.ChatID}}</span></td><td class="n">{{.LatencyMS}} ms</td></tr>
+{{else}}<tr><td colspan="6" class="empty">Không có lỗi.</td></tr>{{end}}</tbody></table></div></div>
 {{template "foot" .}}

@@ -1,8 +1,11 @@
-{{template "head" .}}
-<form class="login" method="post" action="/admin/login"><h1>Đăng nhập</h1>
-{{if .Data}}<p class="bad">Sai tên đăng nhập hoặc mật khẩu.</p>{{end}}
+{{template "head" .}}<div class="auth">
+<form class="card form" method="post" action="/admin/login">
+<a class="brand" href="/admin/login"><span class="dot"></span>Pink admin</a>
+<h1 class="sec">Đăng nhập</h1>
+<p class="lead">Bảng quản trị chỉ đọc.</p>
+{{if .Data}}<p class="alert bad" role="alert">Sai tên đăng nhập hoặc mật khẩu.</p>{{end}}
 <input type="hidden" name="csrf" value="{{.CSRF}}">
-<label for="u">Tên đăng nhập</label><input id="u" name="username" autocomplete="username" required maxlength="100">
-<label for="p">Mật khẩu</label><input id="p" name="password" type="password" autocomplete="current-password" required maxlength="200">
-<button type="submit">Đăng nhập</button></form>
+<div class="fld"><label for="u">Tên đăng nhập</label><input id="u" name="username" autocomplete="username" required maxlength="100" autofocus></div>
+<div class="fld"><label for="p">Mật khẩu</label><input id="p" name="password" type="password" autocomplete="current-password" required maxlength="200"></div>
+<button class="btn" type="submit">Đăng nhập</button></form></div>
 {{template "foot" .}}

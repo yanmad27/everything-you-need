@@ -1,13 +1,15 @@
-{{template "head" .}}<h1>{{.Data.Platform}} · {{.Data.ChatID}} <span class="mut">({{.Data.Total}} mục)</span></h1>
-<p><a href="/admin/chats">← Danh sách</a></p>
-{{template "pager" .Data.Pager}}
-{{range .Data.Items}}
-{{if .Message}}{{with .Message}}<div class="msg {{.Direction}}{{if eq .Kind "system"}} system{{end}}">
-<div class="meta">{{ftime .CreatedAt}} · {{if eq .Direction "in"}}{{if .UserName}}{{.UserName}}{{else}}{{.UserID}}{{end}}{{else}}Pink{{end}}{{if eq .Kind "system"}} · hệ thống{{end}} · lượt {{.TurnID}}{{if .ErrorTag}} · <span class="bad">{{.ErrorTag}}</span>{{end}}</div>
-{{if eq .Kind "image"}}<div>🖼 ảnh {{if .ImageMime}}{{.ImageMime}}{{end}}{{if .ImageBytes}} {{kb .ImageBytes}}{{end}} <span class="mut">(không lưu nội dung ảnh)</span></div>{{end}}
-{{if .Text}}<div>{{.Text}}</div>{{end}}</div>{{end}}
-{{else}}{{with .Tool}}<div class="tool{{if ne .Outcome "ok"}} err{{end}}">🔧 <b>{{.Name}}</b> · <span class="{{if eq .Outcome "ok"}}ok{{else}}bad{{end}}">{{.Outcome}}</span> · {{.LatencyMS}} ms · {{ftime .CreatedAt}}
-{{if .ArgsSummary}}<div>args: <code>{{.ArgsSummary}}</code></div>{{end}}{{if .ResultSummary}}<div>kết quả: <code>{{.ResultSummary}}</code></div>{{end}}</div>{{end}}{{end}}
-{{end}}
-{{template "pager" .Data.Pager}}
+{{template "head" .}}<div class="ph"><div><a class="back" href="/admin/chats">← Danh sách hội thoại</a>
+<h1>Chi tiết hội thoại <span class="count">{{num .Data.Total}} mục</span></h1>
+<p class="chips">{{template "plat" .Data.Platform}}<span class="mono mut">{{.Data.ChatID}}</span></p></div></div>
+<div class="card">{{template "pager" .Data.Pager}}
+<div class="timeline">
+{{range .Data.Items}}{{if .Message}}{{with .Message}}<div class="msg {{.Direction}}{{if eq .Kind "system"}} system{{end}}{{if .ErrorTag}} failed{{end}}">
+<div class="meta">{{if eq .Kind "system"}}<span class="pill blocked">hệ thống</span>{{else}}<span class="author">{{if eq .Direction "in"}}{{if .UserName}}{{.UserName}}{{else}}{{.UserID}}{{end}}{{else}}Pink{{end}}</span>{{end}}<span>{{ftime .CreatedAt}}</span><span class="mono">lượt {{.TurnID}}</span>{{if .ErrorTag}}<span class="pill error">{{.ErrorTag}}</span>{{end}}</div>
+{{if eq .Kind "image"}}<div class="img"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="2" fill="currentColor"/><path d="M4 18l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Ảnh{{if .ImageMime}} {{.ImageMime}}{{end}}{{if .ImageBytes}} {{kb .ImageBytes}}{{end}} · <span class="mut">(không lưu nội dung ảnh)</span></span></div>{{end}}
+{{if .Text}}<div class="bubble">{{.Text}}</div>{{end}}</div>{{end}}
+{{else}}{{with .Tool}}<details class="tool {{.Outcome}}"><summary><b>{{.Name}}</b><span class="pill {{.Outcome}}">{{.Outcome}}</span><span class="lat">{{.LatencyMS}} ms · {{ftime .CreatedAt}}</span></summary>
+<dl>{{if .ArgsSummary}}<dt>Tham số</dt><dd><code>{{.ArgsSummary}}</code></dd>{{end}}{{if .ResultSummary}}<dt>Kết quả</dt><dd><code>{{.ResultSummary}}</code></dd>{{end}}{{if not (or .ArgsSummary .ResultSummary)}}<dt>—</dt><dd class="mut">Không có tóm tắt.</dd>{{end}}</dl></details>{{end}}{{end}}
+{{else}}<p class="mut">Chưa có dữ liệu.</p>{{end}}
+</div>
+{{template "pager" .Data.Pager}}</div>
 {{template "foot" .}}
