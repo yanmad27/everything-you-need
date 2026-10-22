@@ -65,6 +65,8 @@ type Service struct {
 	last         map[string]lastText
 	searchBudget *searchBudget
 	dueChats     map[string]bool
+	fetchAllow   []string // domains the model may fetch unprompted
+	liveSrc      LiveSource
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -119,6 +121,7 @@ func (s *Service) respond(ctx context.Context, chatID string, replyToMsgID int64
 }
 
 func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
+	ctx, _ = s.CaptureLive(ctx) // no-op without a live source (Telegram)
 	if prompt == "" {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! 🩷 Bạn cần gì nào?")
 	}

@@ -110,7 +110,7 @@ type page struct {
 	Data                    any
 }
 
-var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password"}
+var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password", "bots": "bots"}
 
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, name string, p page) {
 	p.Nonce, _ = r.Context().Value(nonceKey{}).(string)

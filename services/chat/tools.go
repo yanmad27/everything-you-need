@@ -76,6 +76,9 @@ type Tools struct {
 
 	// DueChats lists the chat ids allowed to use due_dates (private data); empty disables it.
 	DueChats []string
+	// FetchAllowDomains: domains (exact or subdomain) the model may fetch on its
+	// own; empty = defaultFetchAllow.
+	FetchAllowDomains []string
 	// SearchPerHour is the per-process web_search budget (default 200).
 	SearchPerHour int
 
@@ -245,7 +248,7 @@ func (s *Service) buildTools() []toolImpl {
 			},
 		})
 	}
-	if tl.Search != nil {
+	if tl.Search != nil || s.liveSrc != nil {
 		out = append(out, toolImpl{
 			taints: true,
 			def: llm.ToolDef{Name: "web_search", Description: "Tìm kiếm web hoặc tin tức mới.",
@@ -256,18 +259,25 @@ func (s *Service) buildTools() []toolImpl {
 					N           int
 				}
 				if err := json.Unmarshal(raw, &a); err != nil || strings.TrimSpace(a.Query) == "" {
-					return "", userError("invalid arguments: query required")
+					return "", withReason("invalid_args", userError("invalid arguments: query required"))
 				}
 				if t.countSearch() > maxSearchesPerTurn || !s.searchBudget.take(tl.Now()) {
-					return "", userError("đã hết lượt tìm kiếm, hãy trả lời bằng thông tin đã có")
+					return "", withReason("search_budget", userError("đã hết lượt tìm kiếm, hãy trả lời bằng thông tin đã có"))
 				}
 				n := clamp(a.N, 1, 5, 5)
 				var hits []WebHit
 				var err error
+				ws := tl.Search
+				if lv := liveFrom(ctx); lv.Search != nil {
+					ws = lv.Search
+				}
+				if ws == nil {
+					return "", withReason("not_configured", userError("web search is not configured"))
+				}
 				if a.Kind == "news" {
-					hits, err = tl.Search.SearchNews(ctx, a.Query, n)
+					hits, err = ws.SearchNews(ctx, a.Query, n)
 				} else {
-					hits, err = tl.Search.Search(ctx, a.Query, n)
+					hits, err = ws.Search(ctx, a.Query, n)
 				}
 				if err != nil {
 					return "", err
@@ -279,21 +289,22 @@ func (s *Service) buildTools() []toolImpl {
 	}
 	out = append(out, toolImpl{
 		taints: true,
-		def: llm.ToolDef{Name: "fetch_url", Description: "Đọc nội dung văn bản của một trang web http(s) công khai.",
+		def: llm.ToolDef{Name: "fetch_url", Description: "Đọc nội dung văn bản của một trang web http(s) công khai (có thể ghi thiếu https://, ví dụ github.com/trending).",
 			Parameters: schema(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`)},
 		run: func(ctx context.Context, t *turn, raw json.RawMessage) (string, error) {
 			var a struct{ URL string }
 			if err := json.Unmarshal(raw, &a); err != nil || a.URL == "" {
-				return "", userError("invalid arguments: url required")
+				return "", withReason("invalid_args", userError("invalid arguments: url required"))
 			}
-			if !t.urlAllowed(a.URL) {
-				return "", userError("chỉ đọc link người dùng gửi hoặc từ kết quả tìm kiếm")
+			target, err := t.fetchTarget(preFrom(ctx), a.URL, liveFrom(ctx).fetchAllowOr(s.fetchAllow))
+			if err != nil {
+				return "", err
 			}
 			fetch := tl.Fetch
 			if fetch == nil {
 				fetch = fetchPageTextSafe
 			}
-			return fetch(ctx, a.URL)
+			return fetch(ctx, target)
 		},
 	})
 	if tl.Due != nil {

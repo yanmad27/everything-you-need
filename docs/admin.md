@@ -33,8 +33,11 @@ with `convo.currency` / `CONVO_CURRENCY` (default `USD`, label only). Two equiva
 
 The env entry overrides the yaml entry for the same model. The old
 `price_prompt_per_1k` / `price_completion_per_1k` keys still work as a **fallback for models
-with no entry** (per-1K × 1000 = per-1M). **There are no default prices.** A model with no
-price (and no legacy fallback) has cost *nil* — shown as "chưa cấu hình giá" (price not configured), never `0`.
+with no entry** (per-1K × 1000 = per-1M). **Built-in default: `gpt-6-sol` = $2 input / $10 output per 1M tokens (USD)**, from OpenAI's official pricing page
+<https://developers.openai.com/api/docs/pricing> (standard short-context tier). `CONVO_PRICES`, `convo.prices` or the admin
+UI override it per model. Cached input ($0.20/1M) is not modelled: cached tokens are billed at the input price in our
+estimate, so it is slightly high. No other model has a default. A model with no price (and no legacy fallback) has cost
+*nil* — shown as "chưa cấu hình giá" (price not configured), never `0`.
 
 Aggregation rule: a group's `Cost` is the cost of its **priced** tokens; `PartialPricing` is
 true when some tokens in the group belong to an unpriced model (so `Cost` is a lower bound),
@@ -160,3 +163,47 @@ filters), `.Data`. Template funcs: `ftime`, `kb`, `pct`, `cost`, `money *float64
 
 `GET /admin/api/usage` returns the same `UsageView` as JSON (snake_case keys, `cost: null` when unpriced).
 `stats.html` rows (`convo.Stat`) gain `PartialPricing`; `EstCost` is the per-model priced cost (shown with `estcost`). Out-of-range `chat_page`/`user_page` are clamped to the last page.
+
+## Bot settings pages (`/admin/bots`)
+
+Needs `BOTCONFIG_SECRET` only for secrets (see `docs/bot-config.md`). Routes (session required; logged out → 302 / API 401;
+404 when the settings provider is off):
+- `GET /admin/bots` — list (`BotsView`).
+- `GET /admin/bots/zalo` — settings page (`BotView`); `?flash=<code>` shows a result line.
+- `POST /admin/bots/zalo` — save. `POST /admin/bots/zalo/test?what=llm|serper` — connection test.
+- `GET /admin/api/bots/zalo` — `BotView` as JSON (secrets masked).
+
+All pages set `.Active = "bots"` (and `.Nav = "bots"`).
+
+**`bots.html`** — `.Data` is `BotsView{Bots []BotRow}`; `BotRow{Platform, Managed, Enabled, Status ("enabled"|"paused"|"unmanaged"),
+Overrides int, Problems []string, Note ("không quản lý ở đây" for telegram), URL ("" when unmanaged)}`.
+
+**`bot.html`** — `.Data` is `BotView{Platform, Enabled, SecretsDisabled, Problems []string, Settings []BotSettingRow, Flash *Flash,
+FormError string, PasswordField ("admin_password"), PostURL, TestURL}`.
+`BotSettingRow` embeds `botconfig.SettingView{Key, Label, Kind ("bool|string|text|int|list|prices|secret"), Secret, Sensitive,
+Overridden, Value, Default, Masked{Set,Last4}, UpdatedAt, UpdatedBy}` plus `Source ("env"|"ui"), InputName ("s.<key>"),
+ResetName ("reset.<key>"), Input (current value as form text; never set for secrets), DefaultText, MaskedText ("đã đặt …last4" |
+"đã đặt" | "chưa đặt"), Error (per-field message), UpdatedTime (formatted, "" for env)`.
+`Flash{Code, Kind ("ok"|"err"), Text}`.
+
+Badges: source `env`/`ui` (`.Source`, CSS-friendly `source-env|source-ui`), `Sensitive` (security-relevant key).
+Banners: `.Data.SecretsDisabled` (BOTCONFIG_SECRET missing/short), `.Data.Problems` (stored values unusable → defaults apply),
+`.Data.FormError` (e.g. wrong admin password), `.Data.Flash`.
+
+Form (POST `PostURL`): `csrf` (= `.CSRF`); one field per setting named `s.<key>` — bool = `<select>` true/false, list = comma/newline
+text, text = textarea, secret = **empty password input (empty = unchanged)**; optional `reset.<key>` checkbox (shown only when
+`.Overridden`) = delete the override; `admin_password` = required when any Sensitive key or any secret changes (or such a key is reset);
+it shares the password-change lockout (5 failures / 15 min per session and IP → 429). Only values that differ from the current
+effective value are saved (an unchanged form creates no overrides). Validation errors re-render with status 400, per-field
+`Error`, and the submitted non-secret values preserved. Success → 302 `?flash=saved` (`nochange` when nothing differs).
+Test forms: `POST TestURL?what=llm|serper` with `csrf` and optional `s.llm_base_url|s.llm_api_key|s.llm_model|s.serper_api_key`
+(just-entered values win over stored ones); result → `?flash=test_<what>_ok` or `test_<what>_<class>` with class one of
+`http_400|http_401|http_403|http_404|http_429|http_5xx|http_other|credits (402)|timeout|dns|blocked (private/non-https base URL,
+refused before any request, or SSRF guard)|network|not_set`. Never the upstream body or any key. Limit 10 / 15 min per session and IP.
+
+Live wiring (Zalo only): one settings snapshot per inbound message. `enabled=false` pauses the bot **silently** (no reply, no LLM
+call; the inbound message is logged and stored with tag `paused`; reminders and images are not handled either). LLM base URL/key/model,
+tool toggles (`tools.*` hide the tool from the model), `images=false` (replies "Pink đang tắt xử lý ảnh"), Serper key, fetch allowlist,
+private-tool chats, persona (replaces the built-in system prompt base), rate limit (resized in place, per-chat state kept), prices and
+retention (read at query/prune time) take effect on the next message without restart. Limits: reminder parsing and the news digest keep
+using the env-configured LLM; if the env configures no OpenAI-compatible LLM, an LLM saved in the UI is used for chat after the next restart.

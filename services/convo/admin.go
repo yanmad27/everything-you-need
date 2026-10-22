@@ -55,14 +55,16 @@ func (s *Store) RecordAdminAudit(ctx context.Context, event, ip string) error {
 
 // AdminAuditEntry is one audit row.
 type AdminAuditEntry struct {
-	At    int64
-	Event string
-	IP    string
+	At     int64
+	Event  string
+	IP     string
+	Detail string // e.g. "zalo/llm_model" for setting events (never a value)
+	Actor  string
 }
 
 // AdminAudit returns audit rows, oldest first.
 func (s *Store) AdminAudit(ctx context.Context) ([]AdminAuditEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT at, event, ip FROM admin_audit ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT at, event, ip, detail, actor FROM admin_audit ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +72,7 @@ func (s *Store) AdminAudit(ctx context.Context) ([]AdminAuditEntry, error) {
 	var out []AdminAuditEntry
 	for rows.Next() {
 		var e AdminAuditEntry
-		if err := rows.Scan(&e.At, &e.Event, &e.IP); err != nil {
+		if err := rows.Scan(&e.At, &e.Event, &e.IP, &e.Detail, &e.Actor); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

@@ -200,3 +200,39 @@ func TestAdminCredentialsAndAudit(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+func TestDefaultPriceOverridesAndLiveFns(t *testing.T) {
+	ctx := context.Background()
+	live := []Price{}
+	days := 0
+	s, c := usageStore(t, Options{RetentionDays: 90, PricesFn: func() []Price { return live }, RetentionFn: func() int { return days }})
+	rec(t, s, c, c.now(), "c1", "u1", "gpt-6-sol", 1_000_000, 1_000_000)
+	rec(t, s, c, c.now(), "c1", "u1", "other", 10, 10)
+	tot, _ := s.UsageTotals(ctx, UsageFilter{})
+	if !near(tot.Cost, 12) || !tot.PartialPricing { // built-in gpt-6-sol 2 + 10; "other" unpriced
+		t.Fatalf("built-in default: %+v", tot)
+	}
+	// a configured price for the same model wins, and is read live
+	live = []Price{{Model: "GPT-6-SOL", PromptPer1M: 1, CompletionPer1M: 1}}
+	if tot, _ = s.UsageTotals(ctx, UsageFilter{}); !near(tot.Cost, 2) {
+		t.Fatalf("override: %+v", tot)
+	}
+	eff := s.Prices()
+	if len(eff) != 1 || eff[0].PromptPer1M != 1 {
+		t.Fatalf("effective prices: %+v", eff)
+	}
+	live = nil
+	if eff = s.Prices(); len(eff) != 1 || eff[0] != DefaultPrices[0] {
+		t.Fatalf("defaults listed: %+v", eff)
+	}
+	// retention is read at each prune: the fn's value applies, 0 falls back to the static 90 days
+	c.set(c.now().Add(100 * 24 * time.Hour))
+	days = 365
+	if n, _ := s.Prune(ctx); n != 0 {
+		t.Fatalf("365 days must keep 100-day-old rows: pruned %d", n)
+	}
+	days = 0
+	if n, _ := s.Prune(ctx); n == 0 {
+		t.Fatal("static 90 days must prune 100-day-old rows")
+	}
+}
