@@ -32,8 +32,9 @@ func (p Price) Valid() error {
 // (rates per 1M tokens), e.g. "gpt-6-sol:1.25:10,claude-haiku-4-5:1:5". Entries
 // are independent: good ones are returned, each bad one adds a description to
 // bad (entry number and reason only). The split is from the right, so model
-// names may contain ':'.
+// names may contain ':'. A model listed twice keeps its first entry; later ones are bad.
 func ParsePrices(spec string) (prices []Price, bad []string) {
+	seen := map[string]bool{}
 	for i, part := range strings.Split(spec, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -55,7 +56,10 @@ func ParsePrices(spec string) (prices []Price, bad []string) {
 			bad = append(bad, fmt.Sprintf("entry %d: rate is not a number", i+1))
 		} else if err := pr.Valid(); err != nil {
 			bad = append(bad, fmt.Sprintf("entry %d: %v", i+1, err))
+		} else if k := strings.ToLower(pr.Model); seen[k] {
+			bad = append(bad, fmt.Sprintf("entry %d: duplicate model", i+1))
 		} else {
+			seen[k] = true
 			prices = append(prices, pr)
 		}
 	}

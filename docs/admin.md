@@ -196,14 +196,21 @@ text, text = textarea, secret = **empty password input (empty = unchanged)**; op
 it shares the password-change lockout (5 failures / 15 min per session and IP → 429). Only values that differ from the current
 effective value are saved (an unchanged form creates no overrides). Validation errors re-render with status 400, per-field
 `Error`, and the submitted non-secret values preserved. Success → 302 `?flash=saved` (`nochange` when nothing differs).
-Test forms: `POST TestURL?what=llm|serper` with `csrf` and optional `s.llm_base_url|s.llm_api_key|s.llm_model|s.serper_api_key`
-(just-entered values win over stored ones); result → `?flash=test_<what>_ok` or `test_<what>_<class>` with class one of
+Test forms: `POST TestURL?what=llm|serper` with `csrf` only — tests use the **saved** values (base URL, key, model, Serper key); form values are ignored, so save first, then test. The LLM test sends `max_tokens: 5` and retries once with `max_completion_tokens` when the model rejects it.
+; result → `?flash=test_<what>_ok` or `test_<what>_<class>` with class one of
 `http_400|http_401|http_403|http_404|http_429|http_5xx|http_other|credits (402)|timeout|dns|blocked (private/non-https base URL,
 refused before any request, or SSRF guard)|network|not_set`. Never the upstream body or any key. Limit 10 / 15 min per session and IP.
 
 Live wiring (Zalo only): one settings snapshot per inbound message. `enabled=false` pauses the bot **silently** (no reply, no LLM
 call; the inbound message is logged and stored with tag `paused`; reminders and images are not handled either). LLM base URL/key/model,
 tool toggles (`tools.*` hide the tool from the model), `images=false` (replies "Pink đang tắt xử lý ảnh"), Serper key, fetch allowlist,
-private-tool chats, persona (replaces the built-in system prompt base), rate limit (resized in place, per-chat state kept), prices and
+private-tool chats, persona (replaces only the character/base part of the system prompt; the fixed tool-safety, reminder and formatting rules always follow it), rate limit (resized in place, per-chat state kept), prices and
 retention (read at query/prune time) take effect on the next message without restart. Limits: reminder parsing and the news digest keep
 using the env-configured LLM; if the env configures no OpenAI-compatible LLM, an LLM saved in the UI is used for chat after the next restart.
+
+Sensitive keys (re-auth with `admin_password`): `llm_base_url`, `llm_api_key`, `serper_api_key`, `fetch_allow_domains`, `private_tool_chats`,
+`tools.fetch`, `tools.web_search`, `persona`, `retention_days`. A paused bot stores the inbound message as a count/tag only (no text),
+like a rate-limited one. A base URL saved from the UI dials through the SSRF guard (loopback/private refused at dial time); an
+env-configured base URL keeps the plain client. `llm_base_url` / `llm_api_key` cannot be saved empty (use reset to return to the env value);
+an empty `prices` override is valid and means "built-in default prices only"; a model listed twice in `prices` / `CONVO_PRICES` is rejected
+(the first entry is kept in the env form, the later ones are reported as bad).

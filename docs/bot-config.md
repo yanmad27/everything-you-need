@@ -19,10 +19,10 @@ in the convo SQLite DB (idempotent migration). Plain values are JSON; secrets ar
 | key | type | rule / default source |
 |---|---|---|
 | `enabled` | bool | `zalo.enabled` |
-| `llm_base_url` ★ | string | https only, default port, no credentials/query; host must be a public DNS name (no IP, `localhost`, single-label, `.local/.internal/.lan/...`); `llm_openai.base_url` |
+| `llm_base_url` ★ | string | cannot be saved empty (reset instead);  https only, default port, no credentials/query; host must be a public DNS name (no IP, `localhost`, single-label, `.local/.internal/.lan/...`); `llm_openai.base_url` |
 | `llm_model` | string | ≤100, `[A-Za-z0-9._:/-]`; `llm_openai.model` |
 | `llm_api_key` ★ | secret | `llm_openai.api_key` |
-| `prices` | prices | `CONVO_PRICES` format `model:prompt:completion` per 1M tokens, validated by `convo.ParsePrices` |
+| `prices` | prices | `CONVO_PRICES` format `model:prompt:completion` per 1M tokens, validated by `convo.ParsePrices` (duplicates rejected); an empty override = built-in default prices only |
 | `tools.prices` `tools.lunar` `tools.news` `tools.reminders` `tools.due_dates` `tools.images` | bool | default true |
 | `tools.web_search` ★ `tools.fetch` ★ | bool | default true |
 | `serper_api_key` ★ | secret | `news.serper_api_key` |
@@ -30,8 +30,8 @@ in the convo SQLite DB (idempotent migration). Plain values are JSON; secrets ar
 | `private_tool_chats` ★ | list | ≤100 ids `[A-Za-z0-9_.:-]`; `zalo.private_tool_chats` |
 | `rate_limit_per_min` | int | 1..120 (default 6) |
 | `rate_limit_burst` | int | 1..20 (default 3) |
-| `persona` | text | ≤4000 chars (empty = built-in prompt) |
-| `retention_days` | int | 1..3650; `convo.retention_days` |
+| `persona` ★ | text | ≤4000 chars (empty = built-in character); replaces only the character part, fixed safety/tool/format rules still follow |
+| `retention_days` ★ | int | 1..3650; `convo.retention_days` |
 
 ★ security-relevant (`Spec.Sensitive`): the UI should warn/confirm. Defaults from env are trusted
 and not policy-checked; only saved values are validated.

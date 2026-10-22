@@ -92,7 +92,12 @@ func okAny(v any) (any, error) { return v, nil }
 
 var zaloSpecs = []Spec{
 	{Key: KeyEnabled, Kind: KindBool, Label: "Bot enabled", validate: okAny},
-	{Key: KeyLLMBaseURL, Kind: KindString, Label: "LLM base URL (https)", Sensitive: true, validate: validBaseURL},
+	{Key: KeyLLMBaseURL, Kind: KindString, Label: "LLM base URL (https)", Sensitive: true, validate: func(v any) (any, error) {
+		if strings.TrimSpace(v.(string)) == "" {
+			return nil, fmt.Errorf("empty; use reset to go back to the env value")
+		}
+		return validBaseURL(v)
+	}},
 	{Key: KeyLLMModel, Kind: KindString, Label: "LLM model", validate: func(v any) (any, error) {
 		if s := v.(string); s != "" && !modelRe.MatchString(s) {
 			return nil, fmt.Errorf("model must match [A-Za-z0-9._:/-] and be at most 100 characters")
@@ -102,7 +107,7 @@ var zaloSpecs = []Spec{
 	{Key: KeyLLMAPIKey, Kind: KindSecret, Label: "LLM API key", Secret: true, Sensitive: true, validate: validSecret},
 	{Key: KeyPrices, Kind: KindPrices, Label: "Model prices (model:prompt:completion per 1M, comma-separated)", validate: func(v any) (any, error) {
 		s := strings.TrimSpace(v.(string))
-		if _, bad := convo.ParsePrices(s); len(bad) > 0 {
+		if _, bad := convo.ParsePrices(s); len(bad) > 0 { // includes duplicate models
 			return nil, fmt.Errorf("invalid price entries: %s", strings.Join(bad, "; "))
 		}
 		return s, nil
@@ -131,7 +136,7 @@ var zaloSpecs = []Spec{
 	}},
 	{Key: KeyRatePerMin, Kind: KindInt, Label: "Rate limit (messages per minute)", validate: intRange(1, 120)},
 	{Key: KeyRateBurst, Kind: KindInt, Label: "Rate limit burst", validate: intRange(1, 20)},
-	{Key: KeyPersona, Kind: KindText, Label: "Persona / system prompt", validate: func(v any) (any, error) {
+	{Key: KeyPersona, Kind: KindText, Label: "Persona / system prompt", Sensitive: true, validate: func(v any) (any, error) {
 		s := v.(string)
 		if utf8.RuneCountInString(s) > maxPersona {
 			return nil, fmt.Errorf("at most %d characters", maxPersona)
@@ -141,7 +146,7 @@ var zaloSpecs = []Spec{
 		}
 		return s, nil
 	}},
-	{Key: KeyRetentionDays, Kind: KindInt, Label: "Conversation retention (days)", validate: intRange(1, 3650)},
+	{Key: KeyRetentionDays, Kind: KindInt, Label: "Conversation retention (days)", Sensitive: true, validate: intRange(1, 3650)},
 }
 
 func specFor(platform, key string) (Spec, bool) {

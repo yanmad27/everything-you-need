@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -206,5 +209,67 @@ func TestPricesFormatRoundTrip(t *testing.T) {
 	got, bad := convo.ParsePrices(formatPrices(in))
 	if len(bad) != 0 || len(got) != 2 || got[0] != in[0] || got[1] != in[1] {
 		t.Fatalf("%q %v %v", formatPrices(in), got, bad)
+	}
+}
+
+func TestUISavedBaseURLUsesSSRFGuardEnvKeepsPlainClient(t *testing.T) {
+	// A server on loopback: reachable by the plain client, refused by the guarded one.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	msgs := []llm.Message{{Role: "user", Content: "hi"}}
+	if out, err := newLLMClient(srv.URL, "test-key-12345", "m", false).Complete(ctx, "", msgs, 5); err != nil || out != "pong" {
+		t.Fatalf("env-configured base keeps the plain client: %q %v", out, err)
+	}
+	_, err := newLLMClient(srv.URL, "test-key-12345", "m", true).Complete(ctx, "", msgs, 5)
+	if err == nil || !strings.Contains(err.Error(), "blocked destination") {
+		t.Fatalf("UI-saved base URL must be refused at dial: %v", err)
+	}
+	// a hostname that resolves to loopback is refused the same way (dial-time check on the resolved IP)
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	if _, err := newLLMClient("https://localhost:"+port, "test-key-12345", "m", true).Complete(ctx, "", msgs, 5); err == nil || !strings.Contains(err.Error(), "blocked destination") {
+		t.Fatalf("localhost: %v", err)
+	}
+}
+
+func TestZaloLiveClientAndModelTogether(t *testing.T) {
+	_, prov, _, _, _ := liveRig(t) // no env LLM: no client, no model override
+	zl := &zaloLive{prov: prov}
+	if lv := zl.source(); lv.Client != nil || lv.Model != "" {
+		t.Fatalf("model without client: %+v", lv)
+	}
+	ctx := context.Background()
+	if err := prov.Save(ctx, "zalo", map[string]string{botconfig.KeyLLMModel: "only-model"}, "o"); err != nil {
+		t.Fatal(err)
+	}
+	if lv := zl.source(); lv.Client != nil || lv.Model != "" {
+		t.Fatalf("model set without a client: %+v", lv)
+	}
+	if err := prov.Save(ctx, "zalo", map[string]string{botconfig.KeyLLMBaseURL: "https://llm.example.com", botconfig.KeyLLMAPIKey: "a-long-enough-test-api-key"}, "o"); err != nil {
+		t.Fatal(err)
+	}
+	if lv := zl.source(); lv.Client == nil || lv.Model != "only-model" {
+		t.Fatalf("client+model: %+v", lv)
+	}
+	// the cache is keyed by its inputs: a changed key yields a new client
+	c1 := zl.source().Client
+	_ = prov.Save(ctx, "zalo", map[string]string{botconfig.KeyLLMAPIKey: "another-long-enough-api-key"}, "o")
+	if c2 := zl.source().Client; c1 == c2 {
+		t.Fatal("stale client after key change")
+	}
+}
+
+func TestPausedInboundTextNotStored(t *testing.T) {
+	svc, prov, _, _, st := liveRig(t)
+	ctx := context.Background()
+	_ = prov.Save(ctx, "zalo", map[string]string{botconfig.KeyEnabled: "false"}, "o")
+	dispatchZalo(ctx, nil, svc, nil, zmsg("SECRET-MESSAGE-TEXT"))
+	_ = st.Flush(ctx)
+	tl, _, _ := st.Timeline(ctx, "zalo", "chat-1", convo.Page{})
+	if len(tl) != 1 || tl[0].Message == nil || tl[0].Message.ErrorTag != "paused" || tl[0].Message.Text != "" {
+		t.Fatalf("%+v", tl)
 	}
 }

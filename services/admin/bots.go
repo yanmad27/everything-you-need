@@ -284,7 +284,7 @@ func (h *Handler) botSave(w http.ResponseWriter, r *http.Request, s *session) {
 			continue
 		}
 		inputs[sp.Key] = in
-		if normalizeForm(in) == normalizeForm(cur[sp.Key]) {
+		if sameInput(sp.Kind, in, cur[sp.Key]) {
 			continue
 		}
 		changes[sp.Key] = in
@@ -312,41 +312,42 @@ func (h *Handler) botSave(w http.ResponseWriter, r *http.Request, s *session) {
 			return
 		}
 	}
-	actor := h.username
-	if len(changes) > 0 {
-		if err := h.botsP.Save(r.Context(), platformZalo, changes, actor); err != nil {
-			var ve *botconfig.ValidationError
-			switch {
-			case errors.As(err, &ve):
-				rerender(http.StatusBadRequest, "Có giá trị không hợp lệ.", ve.Problems)
-			case errors.Is(err, botconfig.ErrSecretsDisabled):
-				rerender(http.StatusBadRequest, "Chưa đặt BOTCONFIG_SECRET (≥32 ký tự) nên không thể lưu khoá bí mật.", nil)
-			default:
-				http.Error(w, "internal error", http.StatusInternalServerError)
-			}
-			return
-		}
-	}
-	for _, k := range resets {
-		if err := h.botsP.Reset(r.Context(), platformZalo, k, actor); err != nil {
+	if err := h.botsP.Apply(r.Context(), platformZalo, changes, resets, h.username); err != nil {
+		var ve *botconfig.ValidationError
+		switch {
+		case errors.As(err, &ve):
+			rerender(http.StatusBadRequest, "Có giá trị không hợp lệ.", ve.Problems)
+		case errors.Is(err, botconfig.ErrSecretsDisabled):
+			rerender(http.StatusBadRequest, "Chưa đặt BOTCONFIG_SECRET (≥32 ký tự) nên không thể lưu khoá bí mật.", nil)
+		default:
 			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
 		}
+		return
 	}
 	http.Redirect(w, r, "/admin/bots/zalo?flash=saved", http.StatusFound)
 }
 
-// normalizeForm makes "a, b" / "a,b" / CRLF variants of the same list compare equal.
-func normalizeForm(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
-	if strings.ContainsAny(s, ",\n") {
-		parts := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' })
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		return strings.Join(parts, ",")
+// sameInput reports whether a submitted value equals the current effective
+// one. Text (persona) is compared exactly after CRLF→LF, so any edit counts;
+// lists ignore separators/spacing; other kinds compare trimmed.
+func sameInput(k botconfig.Kind, in, cur string) bool {
+	fold := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n") }
+	switch k {
+	case botconfig.KindText:
+		return fold(in) == fold(cur)
+	case botconfig.KindList:
+		return normalizeList(in) == normalizeList(cur)
 	}
-	return strings.TrimSpace(s)
+	return strings.TrimSpace(in) == strings.TrimSpace(cur)
+}
+
+// normalizeList makes "a, b" / "a,b" / newline variants of the same list equal.
+func normalizeList(s string) string {
+	parts := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ';' })
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, ",")
 }
 
 // ---- connection tests ----
@@ -373,34 +374,14 @@ func (h *Handler) botTest(w http.ResponseWriter, r *http.Request, s *session) {
 		http.Error(w, "too many attempts, try again later", http.StatusTooManyRequests)
 		return
 	}
-	sn := h.botsP.Snapshot(platformZalo)
-	pick := func(key string) string { // just-entered value wins, else the snapshot's
-		if v := strings.TrimSpace(r.PostForm.Get("s." + key)); v != "" {
-			return v
-		}
-		return ""
-	}
+	// Tests use the SAVED values only: a form value could point the request (and
+	// the stored key) at an arbitrary host.
+	z := h.botsP.Snapshot(platformZalo).Zalo()
 	var class string
-	switch what {
-	case "llm":
-		base, key, model := pick(botconfig.KeyLLMBaseURL), pick(botconfig.KeyLLMAPIKey), pick(botconfig.KeyLLMModel)
-		z := sn.Zalo()
-		if base == "" {
-			base = z.LLMBaseURL
-		}
-		if key == "" {
-			key = z.LLMAPIKey.Reveal()
-		}
-		if model == "" {
-			model = z.LLMModel
-		}
-		class = h.testLLM(r.Context(), base, key, model)
-	default:
-		key := pick(botconfig.KeySerperAPIKey)
-		if key == "" {
-			key = sn.Zalo().SerperAPIKey.Reveal()
-		}
-		class = h.testSerper(r.Context(), key)
+	if what == "llm" {
+		class = h.testLLM(r.Context(), z.LLMBaseURL, z.LLMAPIKey.Reveal(), z.LLMModel)
+	} else {
+		class = h.testSerper(r.Context(), z.SerperAPIKey.Reveal())
 	}
 	h.audit(r, "settings_test_"+what)
 	code := "test_" + what + "_" + class
@@ -411,19 +392,25 @@ func (h *Handler) botTest(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 func (h *Handler) testLLM(ctx context.Context, base, key, model string) string {
-	if base == "" || key == "" {
+	if base == "" || key == "" || model == "" {
 		return "not_set"
 	}
 	nb, err := botconfig.ValidateBaseURL(base)
 	if err != nil {
 		return "blocked" // refused before any request (not https / private / IP host)
 	}
-	if model == "" {
-		return "not_set"
-	}
 	ep := strings.TrimSuffix(strings.TrimRight(nb, "/"), "/v1") + "/v1/chat/completions"
-	body, _ := json.Marshal(map[string]any{"model": model, "messages": []map[string]string{{"role": "user", "content": "ping"}}, "max_tokens": 5})
-	return h.doTest(ctx, ep, body, map[string]string{"Authorization": "Bearer " + key})
+	hdr := map[string]string{"Authorization": "Bearer " + key}
+	mk := func(field string) []byte {
+		b, _ := json.Marshal(map[string]any{"model": model, "messages": []map[string]string{{"role": "user", "content": "ping"}}, field: 5})
+		return b
+	}
+	class, code, detail := h.doTest(ctx, ep, mk("max_tokens"), hdr)
+	// Newer models reject max_tokens: retry once with max_completion_tokens, as the real client does.
+	if code == http.StatusBadRequest && strings.Contains(detail, "max_tokens") {
+		class, _, _ = h.doTest(ctx, ep, mk("max_completion_tokens"), hdr)
+	}
+	return class
 }
 
 func (h *Handler) testSerper(ctx context.Context, key string) string {
@@ -431,18 +418,19 @@ func (h *Handler) testSerper(ctx context.Context, key string) string {
 		return "not_set"
 	}
 	body, _ := json.Marshal(map[string]any{"q": "test", "num": 1})
-	return h.doTest(ctx, serperSearchEP, body, map[string]string{"X-API-KEY": key})
+	class, _, _ := h.doTest(ctx, serperSearchEP, body, map[string]string{"X-API-KEY": key})
+	return class
 }
 
 // doTest sends one request through the SSRF-guarded client and returns "ok" or
 // an error class. The upstream body is drained and discarded; nothing from it
 // (or the key) reaches the result.
-func (h *Handler) doTest(ctx context.Context, endpoint string, body []byte, hdr map[string]string) string {
+func (h *Handler) doTest(ctx context.Context, endpoint string, body []byte, hdr map[string]string) (class string, code int, detail string) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "invalid"
+		return "invalid", 0, ""
 	}
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range hdr {
@@ -450,21 +438,23 @@ func (h *Handler) doTest(ctx context.Context, endpoint string, body []byte, hdr 
 	}
 	resp, err := h.outbound.Do(req)
 	if err != nil {
-		return classifyNetErr(err)
+		return classifyNetErr(err), 0, ""
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	// detail is only used by the caller to decide on a retry; it is never returned to the user.
+	detail = strings.ToLower(string(raw))
 	switch c := resp.StatusCode; {
 	case c >= 200 && c < 300:
-		return "ok"
+		return "ok", c, detail
 	case c == 402:
-		return "credits"
+		return "credits", c, detail
 	case c == 400, c == 401, c == 403, c == 404, c == 429:
-		return fmt.Sprintf("http_%d", c)
+		return fmt.Sprintf("http_%d", c), c, detail
 	case c >= 500:
-		return "http_5xx"
+		return "http_5xx", c, detail
 	}
-	return "http_other"
+	return "http_other", resp.StatusCode, detail
 }
 
 func classifyNetErr(err error) string {

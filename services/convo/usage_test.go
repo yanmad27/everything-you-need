@@ -236,3 +236,10 @@ func TestDefaultPriceOverridesAndLiveFns(t *testing.T) {
 		t.Fatal("static 90 days must prune 100-day-old rows")
 	}
 }
+
+func TestParsePricesRejectsDuplicates(t *testing.T) {
+	got, bad := ParsePrices("a:1:2,b:3:4,A:5:6")
+	if len(got) != 2 || got[0].PromptPer1M != 1 || len(bad) != 1 || !strings.Contains(bad[0], "duplicate") {
+		t.Fatalf("%+v %v", got, bad)
+	}
+}

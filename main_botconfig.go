@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"everything-you-need/m/services/netguard"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/chat"
@@ -65,12 +67,24 @@ type zaloLive struct {
 	srchClient chat.WebSearch
 }
 
-func (z *zaloLive) llm(base, key, model string) llm.ToolCompleter {
-	h := sha256.Sum256([]byte(base + "\x00" + key + "\x00" + model))
+// newLLMClient builds the OpenAI-compatible client. A base URL saved from the
+// admin UI (uiBase) dials through the SSRF guard (loopback/private/link-local
+// refused at dial time, also on redirects); an env-configured one keeps the
+// plain client, as before.
+func newLLMClient(base, key, model string, uiBase bool) *llm.OpenAIClient {
+	c := llm.NewOpenAIClient(base, key, model, 0)
+	if uiBase {
+		c.WithHTTPClient(netguard.NewSafeClient(60 * time.Second))
+	}
+	return c
+}
+
+func (z *zaloLive) llm(base, key, model string, uiBase bool) llm.ToolCompleter {
+	h := sha256.Sum256([]byte(base + "\x00" + key + "\x00" + model + "\x00" + strconv.FormatBool(uiBase)))
 	z.mu.Lock()
 	defer z.mu.Unlock()
 	if z.llmClient == nil || z.llmKey != h {
-		z.llmClient, z.llmKey = llm.NewOpenAIClient(base, key, model, 0), h
+		z.llmClient, z.llmKey = newLLMClient(base, key, model, uiBase), h
 	}
 	return z.llmClient
 }
@@ -88,17 +102,19 @@ func (z *zaloLive) search(key string) chat.WebSearch {
 // bootCompleter is the OpenAI-compatible client from the stored settings, for a
 // start where the env does not configure one; nil when base URL or key is unset.
 func (z *zaloLive) bootCompleter() llm.Completer {
-	s := z.prov.Snapshot(botconfig.PlatformZalo).Zalo()
+	sn := z.prov.Snapshot(botconfig.PlatformZalo)
+	s := sn.Zalo()
 	if s.LLMBaseURL == "" || s.LLMAPIKey.Reveal() == "" {
 		return nil
 	}
-	return llm.NewOpenAIClient(s.LLMBaseURL, s.LLMAPIKey.Reveal(), s.LLMModel, 0)
+	return newLLMClient(s.LLMBaseURL, s.LLMAPIKey.Reveal(), s.LLMModel, sn.Overridden(botconfig.KeyLLMBaseURL))
 }
 
 // source captures one snapshot and maps it to the turn settings.
 func (z *zaloLive) source() chat.Live {
-	s := z.prov.Snapshot(botconfig.PlatformZalo).Zalo()
-	lv := chat.Live{Set: true, Paused: !s.Enabled, Model: s.LLMModel, Persona: s.Persona, ImagesOff: !s.Tools.Images,
+	sn := z.prov.Snapshot(botconfig.PlatformZalo)
+	s := sn.Zalo()
+	lv := chat.Live{Set: true, Paused: !s.Enabled, Persona: s.Persona, ImagesOff: !s.Tools.Images,
 		FetchAllow: s.FetchAllowDomains, DueChats: s.PrivateToolChats, RatePerMin: float64(s.RateLimitPerMin), Burst: s.RateLimitBurst,
 		DisabledTools: map[string]bool{}}
 	for name, on := range map[string]bool{"get_prices": s.Tools.Prices, "lunar_date": s.Tools.Lunar, "news_recent": s.Tools.News, "web_search": s.Tools.WebSearch,
@@ -108,7 +124,8 @@ func (z *zaloLive) source() chat.Live {
 		}
 	}
 	if s.LLMBaseURL != "" && s.LLMAPIKey.Reveal() != "" {
-		lv.Client = z.llm(s.LLMBaseURL, s.LLMAPIKey.Reveal(), s.LLMModel)
+		lv.Client = z.llm(s.LLMBaseURL, s.LLMAPIKey.Reveal(), s.LLMModel, sn.Overridden(botconfig.KeyLLMBaseURL))
+		lv.Model = s.LLMModel // only together with the client that actually serves it
 	}
 	if k := s.SerperAPIKey.Reveal(); k != "" {
 		lv.Search = z.search(k)
