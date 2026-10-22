@@ -108,6 +108,9 @@ type ChatConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	APIKey  string `mapstructure:"api_key"`
 	Model   string `mapstructure:"model"`
+	// FetchAllowDomains: comma-separated domains (exact or subdomain) the model
+	// may fetch on its own initiative; empty = built-in default list.
+	FetchAllowDomains string `mapstructure:"fetch_allow_domains"`
 }
 
 type NewsConfig struct {
