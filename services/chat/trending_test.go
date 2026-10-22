@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -18,7 +19,10 @@ func TestParseTrendingFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := parseTrending(string(b))
+	got, links := parseTrending(string(b))
+	if len(links) != strings.Count(got, "\n")-1 || !strings.HasPrefix(links[0], "https://github.com/cloudflare/") {
+		t.Errorf("links=%v", links)
+	}
 	if n := strings.Count(got, "\n"); n < 4 || n > maxTrendingItems+1 {
 		t.Fatalf("lines=%d:\n%s", n, got)
 	}
@@ -34,7 +38,7 @@ func TestParseTrendingFixture(t *testing.T) {
 	if i := strings.Index(got, "github.com/cloudflare/"); i < 0 || i > defMaxResult/10 {
 		t.Errorf("first repo at %d", i)
 	}
-	if parseTrending("<html>nothing</html>") != "" {
+	if out, l := parseTrending("<html>nothing</html>"); out != "" || l != nil {
 		t.Error("empty page should not produce a list")
 	}
 }
@@ -45,7 +49,7 @@ func TestParseTrendingCapsItems(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		b.WriteString(strings.Replace(one, "%d", string(rune('a'+i%26))+string(rune('a'+i/26)), 1))
 	}
-	if got := parseTrending(b.String()); strings.Count(got, "\n") != maxTrendingItems+1 {
+	if got, l := parseTrending(b.String()); strings.Count(got, "\n") != maxTrendingItems+1 || len(l) != maxTrendingItems {
 		t.Errorf("lines=%d", strings.Count(got, "\n"))
 	}
 }
@@ -167,16 +171,20 @@ func TestSearch400OnlyWithCreditsCools(t *testing.T) {
 	}
 }
 
-func TestTaintedFetchOnlySeenOrKnown(t *testing.T) {
-	trending := func(_ context.Context, u string) (string, error) {
+func TestTaintedFetchOnlyTrendLinksOrKnown(t *testing.T) {
+	// the stub plays the extractor: it reports one structured repo link, while
+	// the page text also contains URLs (e.g. from a repo description).
+	trending := func(ctx context.Context, u string) (string, error) {
 		if u == "https://github.com/trending" {
-			return "1. https://github.com/o/seen-repo — d\n2. https://evil.test/x — d\n", nil
+			noteTrendLinks(ctx, []string{"https://github.com/o/seen-repo"})
+			return "1. https://github.com/o/seen-repo — see https://github.com/o/desc-link and https://github.com/x/y\n", nil
 		}
 		return "page of " + u, nil
 	}
 	f := func(u string) llm.ToolCall { return call("f", "fetch_url", `{"url":"`+u+`"}`) }
 	ok := map[string]bool{"https://github.com/o/seen-repo": true, "https://github.com/o/seen-repo?q=SECRET": true,
 		"https://github.com/trending/python": true, "https://github.com/trending/c++": true, "https://github.com": true,
+		"https://github.com/o/desc-link": false, "https://github.com/x/y": false,
 		"https://github.com/attacker/abc123secret": false, "https://github.com/trending/Python%20x": false,
 		"https://github.com/trending/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": false, "https://evil.test/x": false,
 		"https://en.wikipedia.org/wiki/Secret": false, "https://github.com/o/seen-repo/issues/1": false}
@@ -190,5 +198,27 @@ func TestTaintedFetchOnlySeenOrKnown(t *testing.T) {
 		if !want && !strings.Contains(got, "chỉ đọc link") {
 			t.Errorf("%s: wrong refusal %q", u, got)
 		}
+	}
+}
+
+func TestTrendLinkBlockedWhenPrivate(t *testing.T) {
+	tn := &turn{}
+	tn.addTrendLinks([]string{"https://github.com/o/seen-repo"})
+	allow := defaultFetchAllow
+	// tainted, nothing private: allowed via the trending set
+	if _, err := tn.fetchTarget(preState{tainted: true}, "https://github.com/o/seen-repo", allow); err != nil {
+		t.Errorf("clean: %v", err)
+	}
+	// private data in the turn: the trending set must not be reachable
+	_, err := tn.fetchTarget(preState{tainted: true, private: true}, "https://github.com/o/seen-repo", allow)
+	if reasonOf(err) != "private_seen" {
+		t.Errorf("private: %v (%s)", err, reasonOf(err))
+	}
+	// and the set is bounded
+	for i := 0; i < 300; i++ {
+		tn.addTrendLinks([]string{fmt.Sprintf("https://github.com/o/r%d", i)})
+	}
+	if len(tn.trendURLs) > maxTrendLinks {
+		t.Errorf("trend set %d", len(tn.trendURLs))
 	}
 }

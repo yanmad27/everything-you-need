@@ -45,7 +45,8 @@ func fetchTrending(ctx context.Context, client *http.Client, rawURL string) (str
 	if err != nil {
 		return "", false
 	}
-	out := parseTrending(body)
+	out, links := parseTrending(body)
+	noteTrendLinks(ctx, links)
 	return out, out != ""
 }
 
@@ -63,7 +64,8 @@ func cleanHTMLText(s string) string {
 
 // parseTrending turns the trending page HTML into a numbered list of at most
 // maxTrendingItems repositories: name, description, language, stars.
-func parseTrending(page string) string {
+func parseTrending(page string) (string, []string) {
+	var links []string
 	var b strings.Builder
 	n := 0
 	for _, m := range trendArticleRe.FindAllStringSubmatch(page, -1) {
@@ -73,7 +75,9 @@ func parseTrending(page string) string {
 			continue
 		}
 		n++
-		fmt.Fprintf(&b, "%d. https://github.com/%s", n, r[1])
+		link := "https://github.com/" + r[1]
+		links = append(links, link)
+		fmt.Fprintf(&b, "%d. %s", n, link)
 		if d := trendDescRe.FindStringSubmatch(art); d != nil {
 			if t := cleanHTMLText(d[1]); t != "" {
 				if rs := []rune(t); len(rs) > 120 {
@@ -103,7 +107,7 @@ func parseTrending(page string) string {
 		}
 	}
 	if n == 0 {
-		return ""
+		return "", nil
 	}
-	return "GitHub Trending (repo đang lên hôm nay, nguồn https://github.com/trending):\n" + b.String()
+	return "GitHub Trending (repo đang lên hôm nay, nguồn https://github.com/trending):\n" + b.String(), links
 }

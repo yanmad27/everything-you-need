@@ -122,8 +122,8 @@ type turn struct {
 	mu           sync.Mutex
 	untrusted    bool // untrusted content (web, news, image) has entered the turn
 	searches     int
-	fetches      int // fetch_url targets accepted this turn
-	fetchedLinks int // links collected from fetched pages
+	fetches      int             // fetch_url targets accepted this turn
+	trendURLs    map[string]bool // repo URLs from the structured trending extractor; checked only after private_seen
 	remMutations int
 	urls         map[string]bool // URLs returned by web_search this turn
 	private      bool            // a sensitive tool has run in this turn
@@ -206,27 +206,13 @@ func (t *turn) fetchTarget(pre preState, raw string, allow []string) (string, er
 		return "", blockedReason("url_not_allowed", refuse)
 	}
 	u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
-	if pre.tainted && !known && !t.seenLocked(u) {
-		// Untrusted content is in the turn: the URL must come from what this
-		// turn saw or be a fixed well-known page, so injected text cannot
-		// steer it to an attacker-chosen path.
+	if pre.tainted && !known && !t.trendURLs[u.String()] {
+		// Untrusted content is in the turn: the URL must be a repo from the
+		// parsed trending list or a fixed well-known page, so injected text
+		// cannot steer it to an attacker-chosen path.
 		return "", blockedReason("url_not_allowed", refuse)
 	}
 	return u.String(), nil
-}
-
-// seenLocked reports whether u (query/fragment stripped) is a link this turn
-// already saw in search results or fetched pages. Callers hold t.mu.
-func (t *turn) seenLocked(u *url.URL) bool {
-	for h := range t.urls {
-		if n, ok := normalizeURL(h); ok {
-			n.RawQuery, n.Fragment, n.ForceQuery = "", "", false
-			if n.String() == u.String() {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 var trendLangPathRe = regexp.MustCompile(`^[a-z0-9+#.-]{1,30}$`)
@@ -248,29 +234,32 @@ func knownPath(u *url.URL) bool {
 	return ok && trendLangPathRe.MatchString(lang)
 }
 
-// maxFetchedLinks bounds the links collected from fetched pages per turn.
-const maxFetchedLinks = 200
+// maxTrendLinks bounds the structured trending links kept per turn.
+const maxTrendLinks = 200
 
-// addFetchedLinks records allowlisted, plain-path URLs found in fetched page
-// text so a follow-up fetch of a listed item is possible after taint.
-func (t *turn) addFetchedLinks(text string, allow []string) {
+type trendLinksKey struct{}
+
+// noteTrendLinks reports repo URLs built from the parsed trending list to the
+// turn (if the context carries one). Only structured extractor output goes
+// through here, never regex-harvested page text.
+func noteTrendLinks(ctx context.Context, links []string) {
+	if f, ok := ctx.Value(trendLinksKey{}).(func([]string)); ok {
+		f(links)
+	}
+}
+
+func (t *turn) addTrendLinks(links []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.urls == nil {
-		t.urls = map[string]bool{}
+	if t.trendURLs == nil {
+		t.trendURLs = map[string]bool{}
 	}
-	for _, m := range urlRe.FindAllString(text, -1) {
-		if t.fetchedLinks >= maxFetchedLinks {
+	for _, l := range links {
+		if len(t.trendURLs) >= maxTrendLinks {
 			return
 		}
-		u, ok := normalizeURL(strings.TrimRight(m, ").,;:!?]*"))
-		if !ok || !modelURLOK(u, allow) {
-			continue
-		}
-		u.RawQuery, u.Fragment, u.ForceQuery = "", "", false
-		if k := u.String(); !t.urls[k] {
-			t.urls[k] = true
-			t.fetchedLinks++
+		if u, ok := normalizeURL(l); ok {
+			t.trendURLs[u.String()] = true
 		}
 	}
 }

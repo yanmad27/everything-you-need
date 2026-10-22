@@ -306,11 +306,7 @@ func (s *Service) buildTools() []toolImpl {
 			if fetch == nil {
 				fetch = fetchPageTextSafe
 			}
-			text, err := fetch(ctx, target)
-			if err == nil {
-				t.addFetchedLinks(text, liveFrom(ctx).fetchAllowOr(s.fetchAllow))
-			}
-			return text, err
+			return fetch(context.WithValue(ctx, trendLinksKey{}, t.addTrendLinks), target)
 		},
 	})
 	if tl.Due != nil {
