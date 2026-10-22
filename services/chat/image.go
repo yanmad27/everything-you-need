@@ -91,8 +91,13 @@ func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName stri
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink chưa xem được ảnh ở đây, bạn mô tả bằng chữ giúp Pink nhé 🩷")
 	}
 	ctx = newTurn(ctx)
+	ctx, lv := s.CaptureLive(ctx)
 	caption = strings.Join(strings.Fields(caption), " ")
 	in := ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "image", Text: caption}
+	if lv.ImagesOff {
+		s.recordConvo(ctx, ConvoEvent{ChatID: chatID, UserID: userID, UserName: userName, Direction: "in", Kind: "image", ErrTag: "images_off"})
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, msgImagesOff)
+	}
 	if ok, notice := s.limiter.allow(chatID); !ok {
 		in.Text, in.ErrTag = "", "rate_limited"
 		s.recordConvo(ctx, in)

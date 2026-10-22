@@ -45,6 +45,11 @@ type Options struct {
 	// The legacy per-1K pair above acts as a fallback for models not listed here.
 	Prices   []Price
 	Currency string
+	// PricesFn, if set, supplies the configured prices at query time (live
+	// settings) instead of Prices. RetentionFn does the same for RetentionDays;
+	// both are read at each use, never cached.
+	PricesFn    func() []Price
+	RetentionFn func() int
 	// Now is injectable for tests.
 	Now func() time.Time
 	// StartupPruneDelay is how long after Open the first prune runs (default 10s).
@@ -277,7 +282,7 @@ func (s *Store) Dropped() int64 { return s.dropped.Load() }
 // Prune deletes rows older than the retention window and returns the number of
 // rows removed.
 func (s *Store) Prune(ctx context.Context) (int64, error) {
-	cut := s.now().Add(-time.Duration(s.opt.RetentionDays) * 24 * time.Hour).UnixMilli()
+	cut := s.now().Add(-time.Duration(s.retentionDays()) * 24 * time.Hour).UnixMilli()
 	var total int64
 	for _, q := range []string{
 		`DELETE FROM messages WHERE created_at < ?`,

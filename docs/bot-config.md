@@ -1,7 +1,7 @@
 # Per-bot settings (foundation)
 
 Package `services/botconfig` stores per-bot settings that the owner edits live in
-`/admin` (UI and handlers arrive in a later change; nothing is wired into the bots yet).
+`/admin` (UI: `/admin/bots`, documented in `docs/admin.md`; Zalo reads one snapshot per inbound message).
 Telegram is listed in the registry (`botconfig.Bots()`) as **not managed**: no editable keys.
 
 ## Precedence

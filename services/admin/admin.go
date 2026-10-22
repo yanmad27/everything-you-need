@@ -23,7 +23,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/convo"
+	"everything-you-need/m/services/netguard"
 )
 
 //go:embed templates/*.html assets/app.css
@@ -86,10 +88,13 @@ type Config struct {
 // Options tunes limits and the clock (tests).
 type Options struct {
 	Now                func() time.Time
-	LoginAttempts      int           // per client IP per window (default 5)
-	GlobalLoginAttempt int           // all clients per window (default 60)
-	LoginWindow        time.Duration // default 15m
-	PasswordAttempts   int           // failed password-change attempts per session and per IP per window (default 5)
+	LoginAttempts      int                 // per client IP per window (default 5)
+	GlobalLoginAttempt int                 // all clients per window (default 60)
+	LoginWindow        time.Duration       // default 15m
+	PasswordAttempts   int                 // failed password-change attempts per session and per IP per window (default 5)
+	TestAttempts       int                 // connection tests per session and per IP per 15 min (default 10)
+	Bots               *botconfig.Provider // live per-bot settings; nil = /admin/bots is off
+	Outbound           *http.Client        // connection tests (default: SSRF-guarded client); tests inject
 }
 
 type session struct {
@@ -116,6 +121,10 @@ type Handler struct {
 	credMu   sync.RWMutex // password change holds it exclusively; login holds it shared from compare to session start
 	pwSess   *limiter     // failed password-change attempts per session
 	pwIP     *limiter     // ... per client IP
+	testSess *limiter     // connection tests per session
+	testIP   *limiter     // ... per client IP
+	botsP    *botconfig.Provider
+	outbound *http.Client
 
 	mu       sync.Mutex
 	sessions map[[32]byte]*session
@@ -202,8 +211,14 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 			return nil, err
 		}
 	}
+	if opt.TestAttempts <= 0 {
+		opt.TestAttempts = testPerWindow
+	}
 	if opt.PasswordAttempts <= 0 {
 		opt.PasswordAttempts = 5
+	}
+	if opt.Outbound == nil {
+		opt.Outbound = netguard.NewSafeClient(10 * time.Second)
 	}
 	creds, _ := data.(CredStore)
 	usage, _ := data.(UsageData)
@@ -231,8 +246,10 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		allLim:   newLimiter(opt.GlobalLoginAttempt, opt.LoginWindow, opt.Now),
 		sessions: map[[32]byte]*session{},
 		username: cfg.Username, creds: creds, usage: usage,
-		pwSess: newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
-		pwIP:   newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
+		pwSess:   newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
+		pwIP:     newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
+		testSess: newLimiter(opt.TestAttempts, testWindow, opt.Now), testIP: newLimiter(opt.TestAttempts, testWindow, opt.Now),
+		botsP: opt.Bots, outbound: opt.Outbound,
 	}, nil
 }
 
@@ -268,6 +285,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "/admin/logout" {
 		h.logout(w, r, sess)
+		return
+	}
+	if path == "/admin/bots" || strings.HasPrefix(path, "/admin/bots/") || strings.HasPrefix(path, "/admin/api/bots") {
+		h.bots(w, r, path, sess)
 		return
 	}
 	if path == "/admin/password" {

@@ -213,6 +213,16 @@ func allDigits(s string) bool {
 	return s != ""
 }
 
+// ValidateBaseURL applies the saved-value rules for llm_base_url (https, public
+// DNS name, default port) and returns the normalised URL.
+func ValidateBaseURL(s string) (string, error) {
+	v, err := validBaseURL(s)
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
+
 func validBaseURL(v any) (any, error) {
 	s := strings.TrimSpace(v.(string))
 	if s == "" {

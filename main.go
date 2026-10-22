@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"everything-you-need/m/services/admin"
+	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/convo"
@@ -55,18 +56,30 @@ func main() {
 		teleChat = buildChatService(cfg, teleService, nil, false)
 	}
 	if zaloService != nil {
-		zaloChat = buildChatService(cfg, zaloService, zaloCompleter, true)
+		convoStore = buildConvoStore(cfg)
+		var zl *zaloLive
+		if bp := buildBotConfig(cfg, convoStore); bp != nil {
+			zl = &zaloLive{prov: bp}
+		}
+		chatCompleter := zaloCompleter
+		if chatCompleter == nil && zl != nil {
+			chatCompleter = zl.bootCompleter() // LLM saved in the admin UI before this start
+		}
+		zaloChat = buildChatService(cfg, zaloService, chatCompleter, true)
+		if zaloChat != nil && zl != nil {
+			zaloChat.WithLive(zl.source)
+		}
 		var zaloRem *reminder.Service
 		if _, zOn := reminderPlatforms(cfg, teleService != nil, true, zaloCompleter != nil); zOn {
 			zaloRem = reminderService
 		}
 		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
-		if convoStore = buildConvoStore(cfg); convoStore != nil {
+		if convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
-			zaloTools.Model = zaloModel(cfg, zaloCompleter)
+			zaloTools.Model = zaloModel(cfg, chatCompleter)
 		}
-		enableZaloTools(zaloChat, zaloCompleter, zaloTools)
+		enableZaloTools(zaloChat, chatCompleter, zaloTools)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -384,6 +397,19 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 // regex service). fetchImage downloads msg.Photo; nil ignores images.
 func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
 	ctx = chat.WithMeta(ctx, chat.Meta{ChatType: msg.Chat.ChatType})
+	if chatSvc != nil {
+		// One settings snapshot per inbound message; paused = log + record, no answer.
+		var lv chat.Live
+		if ctx, lv = chatSvc.CaptureLive(ctx); lv.Paused {
+			text := msg.Text
+			if msg.Kind == "image" {
+				text = ""
+			}
+			chatSvc.NotePaused(ctx, msg.Chat.ID, msg.From.ID, msg.From.DisplayName, text)
+			log.Printf("zalo dispatch: result=paused outcome=paused chat=%s", zalobot.MaskID(msg.Chat.ID))
+			return
+		}
+	}
 	if msg.Kind == "image" {
 		dispatchZaloImage(ctx, chatSvc, botNames, msg, fetchImage)
 		return
@@ -458,7 +484,19 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 	}
 	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
 		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K,
-		Prices: prices, Currency: c.Currency})
+		Prices: prices, Currency: c.Currency,
+		PricesFn: func() []convo.Price { // live settings win once the provider is up
+			if p := botProvider.Load(); p != nil {
+				return p.Snapshot(botconfig.PlatformZalo).Prices()
+			}
+			return prices
+		},
+		RetentionFn: func() int {
+			if p := botProvider.Load(); p != nil {
+				return p.Snapshot(botconfig.PlatformZalo).Zalo().RetentionDays
+			}
+			return c.RetentionDays
+		}})
 	if err != nil {
 		log.Printf("Convo store open failed: %v (conversation recording disabled)", err)
 		return nil
@@ -512,7 +550,7 @@ func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load()})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

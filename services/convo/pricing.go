@@ -62,12 +62,43 @@ func ParsePrices(spec string) (prices []Price, bad []string) {
 	return prices, bad
 }
 
-// priceFor returns the rate for model: an exact (case-insensitive) match, else
-// the legacy per-1K fallback when set, else ok=false.
+// DefaultPrices are built-in rates (USD per 1M tokens) used for a model unless
+// CONVO_PRICES / the admin UI sets one. gpt-6-sol: OpenAI's pricing page
+// (https://developers.openai.com/api/docs/pricing), standard short-context tier,
+// input $2 / output $10. Cached input ($0.20) is not modelled: cached tokens are
+// billed at the input price here, so the estimate is slightly high.
+var DefaultPrices = []Price{{Model: "gpt-6-sol", PromptPer1M: 2, CompletionPer1M: 10}}
+
+func (s *Store) configuredPrices() []Price {
+	if s.opt.PricesFn != nil {
+		return s.opt.PricesFn()
+	}
+	return s.opt.Prices
+}
+
+func (s *Store) retentionDays() int {
+	if s.opt.RetentionFn != nil {
+		if d := s.opt.RetentionFn(); d > 0 {
+			return d
+		}
+	}
+	return s.opt.RetentionDays
+}
+
+// priceFor returns the rate for model: a configured exact (case-insensitive)
+// match, else a built-in default, else the legacy per-1K fallback when set,
+// else ok=false.
 func (s *Store) priceFor(model string) (Price, bool) {
-	for _, p := range s.opt.Prices {
-		if model != "" && strings.EqualFold(p.Model, model) {
-			return p, true
+	if model != "" {
+		for _, p := range s.configuredPrices() {
+			if strings.EqualFold(p.Model, model) {
+				return p, true
+			}
+		}
+		for _, p := range DefaultPrices {
+			if strings.EqualFold(p.Model, model) {
+				return p, true
+			}
 		}
 	}
 	if s.opt.PricePromptPer1K > 0 || s.opt.PriceCompletionPer1K > 0 {
@@ -79,8 +110,23 @@ func (s *Store) priceFor(model string) (Price, bool) {
 // Currency is the label for every cost the store reports.
 func (s *Store) Currency() string { return s.opt.Currency }
 
-// Prices returns the configured per-model rates (without the legacy fallback).
-func (s *Store) Prices() []Price { return append([]Price{}, s.opt.Prices...) }
+// Prices returns the effective per-model rates: configured ones plus built-in
+// defaults not overridden (without the legacy fallback).
+func (s *Store) Prices() []Price {
+	out := append([]Price{}, s.configuredPrices()...)
+	for _, d := range DefaultPrices {
+		found := false
+		for _, p := range out {
+			if strings.EqualFold(p.Model, d.Model) {
+				found = true
+			}
+		}
+		if !found {
+			out = append(out, d)
+		}
+	}
+	return out
+}
 
 // UsageSum aggregates token usage. Cost covers only the priced part of the
 // usage and is nil when none of it could be priced; PartialPricing is true when

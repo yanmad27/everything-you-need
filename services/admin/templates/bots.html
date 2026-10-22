@@ -1,0 +1,9 @@
+{{template "head" .}}<h1>{{.Title}}</h1>
+<table><tr><th>Bot</th><th>Trạng thái</th><th>Thay đổi từ UI</th><th>Vấn đề</th><th></th></tr>
+{{range .Data.Bots}}<tr><td>{{.Platform}}</td>
+<td class="status-{{.Status}}">{{if eq .Status "enabled"}}đang bật{{else if eq .Status "paused"}}tạm dừng{{else}}{{.Note}}{{end}}</td>
+<td class="n">{{if .Managed}}{{.Overrides}}{{else}}<span class="mut">—</span>{{end}}</td>
+<td>{{range .Problems}}<span class="bad">{{.}}</span> {{else}}<span class="mut">—</span>{{end}}</td>
+<td>{{if .URL}}<a href="{{.URL}}">Cài đặt</a>{{end}}</td></tr>
+{{end}}</table>
+{{template "foot" .}}

@@ -1,0 +1,28 @@
+{{template "head" .}}<h1>{{.Title}}</h1>
+{{with .Data.Flash}}<p class="flash {{.Kind}}">{{.Text}}</p>{{end}}
+{{if .Data.SecretsDisabled}}<p class="warn banner-secrets">Chưa đặt BOTCONFIG_SECRET (≥32 ký tự): không thể lưu khoá bí mật (API key). Các cài đặt khác vẫn dùng được.</p>{{end}}
+{{if .Data.Problems}}<p class="bad banner-problems">Một số giá trị đã lưu không dùng được, đang dùng mặc định: {{range .Data.Problems}}{{.}} {{end}}</p>{{end}}
+{{with .Data.FormError}}<p class="bad form-error">{{.}}</p>{{end}}
+<form method="post" action="{{.Data.PostURL}}">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<table><tr><th>Cài đặt</th><th>Giá trị</th><th>Nguồn</th><th>Mặc định (env)</th><th>Cập nhật</th><th>Đặt lại</th></tr>
+{{range .Data.Settings}}<tr class="setting{{if .Sensitive}} sensitive{{end}}" id="k-{{.Key}}"><td><label for="f-{{.Key}}">{{.Label}}</label> <span class="mut">{{.Key}}</span>{{if .Sensitive}} <span class="badge sensitive">nhạy cảm</span>{{end}}</td>
+<td>{{if .Secret}}<span class="mut">{{.MaskedText}}</span> <input id="f-{{.Key}}" type="password" name="{{.InputName}}" value="" autocomplete="new-password" maxlength="500" placeholder="để trống = giữ nguyên">
+{{else if eq (printf "%s" .Kind) "bool"}}<select id="f-{{.Key}}" name="{{.InputName}}"><option value="true"{{if eq .Input "true"}} selected{{end}}>bật</option><option value="false"{{if eq .Input "false"}} selected{{end}}>tắt</option></select>
+{{else if eq (printf "%s" .Kind) "text"}}<textarea id="f-{{.Key}}" name="{{.InputName}}" rows="6" maxlength="4000">{{.Input}}</textarea>
+{{else if eq (printf "%s" .Kind) "list"}}<textarea id="f-{{.Key}}" name="{{.InputName}}" rows="3">{{.Input}}</textarea>
+{{else}}<input id="f-{{.Key}}" name="{{.InputName}}" value="{{.Input}}" maxlength="500">{{end}}
+{{if .Error}}<br><span class="bad field-error">{{.Error}}</span>{{end}}</td>
+<td><span class="badge source-{{.Source}}">{{if eq .Source "ui"}}UI{{else}}env{{end}}</span></td>
+<td class="mut">{{if .Secret}}—{{else}}{{.DefaultText}}{{end}}</td>
+<td class="mut">{{if .UpdatedTime}}{{.UpdatedTime}}{{if .UpdatedBy}} · {{.UpdatedBy}}{{end}}{{end}}</td>
+<td>{{if .Overridden}}<input type="checkbox" name="{{.ResetName}}" value="1" id="r-{{.Key}}"> <label for="r-{{.Key}}">về mặc định</label>{{end}}</td></tr>
+{{end}}</table>
+<p><label for="ap">Mật khẩu quản trị (bắt buộc khi đổi cài đặt nhạy cảm hoặc khoá bí mật)</label>
+<input id="ap" type="password" name="{{.Data.PasswordField}}" autocomplete="current-password" maxlength="200"></p>
+<button type="submit">Lưu</button></form>
+
+<h2>Kiểm tra kết nối</h2>
+<form method="post" action="{{.Data.TestURL}}?what=llm"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Thử LLM</button></form>
+<form method="post" action="{{.Data.TestURL}}?what=serper"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Thử Serper</button></form>
+{{template "foot" .}}

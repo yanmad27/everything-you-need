@@ -181,17 +181,34 @@ func (s *Snapshot) LogValue() slog.Value {
 
 // SettingView is one row of the settings page.
 type SettingView struct {
-	Key        string
-	Label      string
-	Kind       Kind
-	Secret     bool
-	Sensitive  bool
-	Overridden bool
-	Value      any    // effective value; nil for secrets
-	Default    any    // env/config default; nil for secrets
-	Masked     Masked // secrets only
-	UpdatedAt  int64  // ms, overrides only
-	UpdatedBy  string
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	Kind       Kind   `json:"kind"`
+	Secret     bool   `json:"secret"`
+	Sensitive  bool   `json:"sensitive"`
+	Overridden bool   `json:"overridden"`
+	Value      any    `json:"value"`      // effective value; nil for secrets
+	Default    any    `json:"default"`    // env/config default; nil for secrets
+	Masked     Masked `json:"masked"`     // secrets only
+	UpdatedAt  int64  `json:"updated_at"` // ms, overrides only
+	UpdatedBy  string `json:"updated_by"`
+}
+
+// FormatValue renders a non-secret value in the textual form Save accepts.
+func FormatValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case []string:
+		return strings.Join(x, ", ")
+	case bool:
+		return fmt.Sprint(x)
+	case int:
+		return fmt.Sprint(x)
+	case string:
+		return x
+	}
+	return fmt.Sprint(v)
 }
 
 // View lists every key with its effective value, default and override state.
