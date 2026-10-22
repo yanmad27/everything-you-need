@@ -156,6 +156,11 @@ func normalizeURL(raw string) (*url.URL, bool) {
 		return nil, false
 	}
 	h := strings.ToLower(u.Hostname())
+	for _, r := range h {
+		if r > 126 {
+			return nil, false // no IDN hosts for any fetch_url URL
+		}
+	}
 	if h == "" || !strings.Contains(h, ".") || strings.HasSuffix(h, ".") || badHost(h) {
 		return nil, false
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"everything-you-need/m/services/llm"
 )
@@ -690,7 +691,7 @@ func TestFetchUntaintedModelURL(t *testing.T) {
 	}
 	// invalid inputs, including IP literals and local names
 	for _, in := range []string{"localhost", "ftp://x.test/a", "https://u:p@x.test/", "https://x.test:8080/", "a b.com",
-		"http://127.0.0.1/", "http://127.1/", "http://0x7f.1/", "http://2130706433/", "http://[::1]/", "http://a.local/", "http://db.internal/", "http://nas.lan/", "http://localhost.evil.com.local/"} {
+		"http://127.0.0.1/", "http://127.1/", "https://gıthub.com/x", "http://例え.jp/", "http://0x7f.1/", "http://2130706433/", "http://[::1]/", "http://a.local/", "http://db.internal/", "http://nas.lan/", "http://localhost.evil.com.local/"} {
 		r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"`+in+`"}`)), textStep("ok"))
 		r.ask("hi")
 		if got := r.toolResult(1); !strings.Contains(got, "URL không hợp lệ") {
@@ -715,7 +716,6 @@ func TestFetchModelURLRestrictions(t *testing.T) {
 	blocked("segments", "hi", toolStep(f("https://github.com/a/b/c/d/e/f")), textStep("ok"))
 	blocked("long path", "hi", toolStep(f("https://github.com/"+strings.Repeat("a", 81))), textStep("ok"))
 	blocked("odd chars", "hi", toolStep(f("https://github.com/a;b")), textStep("ok"))
-	blocked("idn host", "hi", toolStep(f("https://github.com/x"), f("https://gıthub.com/x")), textStep("ok"))
 	blocked("after search", "hi", toolStep(call("s", "web_search", `{"query":"q"}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
 	blocked("after news", "hi", toolStep(call("s", "news_recent", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
 	// private data already read in this turn
@@ -822,6 +822,10 @@ func TestCondenseReader(t *testing.T) {
 	}
 	if strings.Contains(got, "Nav 5") || strings.Contains(got, "img/1.png") || len(got) > 1500 {
 		t.Errorf("boilerplate kept (len %d)", len(got))
+	}
+	// long lines are cut by runes, not bytes (valid UTF-8 kept)
+	if got := condenseReader("## t\n" + strings.Repeat("ệ", 700) + "\nbody " + strings.Repeat("x", 250)); !utf8.ValidString(got) || strings.Contains(got, strings.Repeat("ệ", 601)) || !strings.Contains(got, strings.Repeat("ệ", 600)) {
+		t.Error("rune truncation")
 	}
 	// few list links keep their text
 	few := "- [Alpha story](https://a.test/1)\n- [Beta story](https://a.test/2)\n" + strings.Repeat("some body text. ", 20)

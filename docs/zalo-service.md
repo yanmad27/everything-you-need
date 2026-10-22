@@ -198,7 +198,7 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
   of `[A-Za-z0-9._~-]`. Query and fragment are stripped. Otherwise `outcome=blocked
   reason=url_not_allowed`. Default allowlist: github.com, wikipedia.org, news.ycombinator.com,
   vnexpress.net, tuoitre.vn, thanhnien.vn, dantri.com.vn, cafef.vn, coingecko.com, reuters.com,
-  bbc.com, apnews.com. Override (replaces the default) with `chat.fetch_allow_domains` / env
+  bbc.com, apnews.com. Never allowlist shared-hosting suffixes (github.io, blogspot.com, ...): anyone can register a subdomain there. Override (replaces the default) with `chat.fetch_allow_domains` / env
   `CHAT_FETCH_ALLOW_DOMAINS` (comma-separated).
 - Reader output is condensed before the 12k cap: bare links/images dropped, list-item links kept as
   text unless the page has >40 of them (then they are menus and dropped), lines truncated at 600

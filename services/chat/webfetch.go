@@ -126,7 +126,7 @@ var (
 )
 
 const (
-	// maxReaderLine truncates giant lines (mega-menus, inlined data) from reader
+	// maxReaderLine truncates giant lines (in runes; mega-menus, inlined data) from reader
 	// output; kept small so one such line cannot push the content past the caps.
 	maxReaderLine = 600
 	// minCondensed: below this the condensed text is not trusted (a link-only
@@ -167,8 +167,8 @@ func condenseReader(s string) string {
 		if l = strings.TrimSpace(mdImageRe.ReplaceAllString(l, "")); l == "" || l == "*" || l == "-" || l == "+" {
 			continue
 		}
-		if len(l) > maxReaderLine {
-			l = strings.ToValidUTF8(l[:maxReaderLine], "") + "…"
+		if r := []rune(l); len(r) > maxReaderLine {
+			l = string(r[:maxReaderLine]) + "…"
 		}
 		out = append(out, l)
 	}
