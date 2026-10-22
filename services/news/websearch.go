@@ -81,8 +81,10 @@ func (w *WebSearcher) do(ctx context.Context, path, q string, n int) ([]WebResul
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		// Never echo the response body: it may carry request details.
-		return nil, fmt.Errorf("serper status %d", resp.StatusCode)
+		// Never echo the response body: it may carry request details. It is
+		// read only to tell an out-of-credits 400 from other bad requests.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return nil, &StatusError{Code: resp.StatusCode, credits: bytes.Contains(bytes.ToLower(b), []byte("credit"))}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -105,6 +107,17 @@ func (w *WebSearcher) do(ctx context.Context, path, q string, n int) ([]WebResul
 	}
 	return out, nil
 }
+
+// StatusError is a non-200 Serper response. Its text is only the status code.
+type StatusError struct {
+	Code    int
+	credits bool
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("serper status %d", e.Code) }
+
+// CreditsExhausted reports that the response body indicated no credits left.
+func (e *StatusError) CreditsExhausted() bool { return e.credits }
 
 // redactedError carries a key-free message while preserving the cause chain.
 type redactedError struct {

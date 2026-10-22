@@ -61,6 +61,9 @@ func augmentWithURLs(ctx context.Context, prompt string, safe bool) string {
 // bypasses WAF/IP blocks and renders JS, returning clean LLM-ready text). Falls
 // back to a direct fetch if the reader is unavailable.
 func fetchPageText(ctx context.Context, rawURL string) (string, error) {
+	if text, ok := fetchTrending(ctx, fetchHTTP, rawURL); ok {
+		return text, nil
+	}
 	if text, err := getText(ctx, fetchHTTP, "https://r.jina.ai/"+rawURL, false); err == nil {
 		return text, nil
 	} else {
@@ -72,6 +75,27 @@ func fetchPageText(ctx context.Context, rawURL string) (string, error) {
 // getText GETs a URL and returns readable text. stripHTML runs the tag stripper
 // (needed for a direct fetch; the reader already returns markdown).
 func getText(ctx context.Context, client *http.Client, url string, stripHTML bool) (string, error) {
+	raw, err := getBody(ctx, client, url)
+	if err != nil {
+		return "", err
+	}
+	s := raw
+	if stripHTML {
+		s = htmlToText(s)
+	} else {
+		s = condenseReader(s) // reader returns markdown; keep structure, drop nav boilerplate
+		if len(s) > maxPageChars {
+			s = strings.ToValidUTF8(s[:maxPageChars], "")
+		}
+	}
+	if s == "" {
+		return "", fmt.Errorf("no readable text")
+	}
+	return s, nil
+}
+
+// getBody GETs a URL with a browser UA and returns at most 3 MB of the body.
+func getBody(ctx context.Context, client *http.Client, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
@@ -91,19 +115,7 @@ func getText(ctx context.Context, client *http.Client, url string, stripHTML boo
 	if err != nil {
 		return "", err
 	}
-	s := string(raw)
-	if stripHTML {
-		s = htmlToText(s)
-	} else {
-		s = condenseReader(s) // reader returns markdown; keep structure, drop nav boilerplate
-		if len(s) > maxPageChars {
-			s = strings.ToValidUTF8(s[:maxPageChars], "")
-		}
-	}
-	if s == "" {
-		return "", fmt.Errorf("no readable text")
-	}
-	return s, nil
+	return string(raw), nil
 }
 
 // htmlToText strips script/style/tags, unescapes entities, collapses whitespace,
@@ -141,7 +153,7 @@ const (
 // List-item links keep their text ("- [Title](url)" -> "- Title").
 func condenseReader(s string) string {
 	s = strings.TrimSpace(s)
-	lines := strings.Split(s, "\n")
+	lines := skipLeadingNav(strings.Split(s, "\n"))
 	links := 0
 	for _, l := range lines {
 		if mdListLinkRe.MatchString(strings.TrimSpace(l)) {
@@ -177,3 +189,29 @@ func condenseReader(s string) string {
 	}
 	return s
 }
+
+// navLeadLines: a heading preceded by at least this many lines is assumed to
+// start the main content, the lines before it being site navigation.
+const navLeadLines = 25
+
+var mdHeadingRe = regexp.MustCompile(`^#{1,3}\s+\S`)
+
+// skipLeadingNav drops the site menu that reader output puts before the page
+// content: when a long run of lines precedes the first heading that is not a
+// navigation heading, the run is cut. The first line (the reader's "Title:")
+// is kept. Short pages and pages without such a heading are untouched.
+func skipLeadingNav(lines []string) []string {
+	for i, l := range lines {
+		l = strings.TrimSpace(l)
+		if !mdHeadingRe.MatchString(l) || navHeadingRe.MatchString(l) {
+			continue
+		}
+		if i < navLeadLines {
+			return lines
+		}
+		return append([]string{lines[0]}, lines[i:]...)
+	}
+	return lines
+}
+
+var navHeadingRe = regexp.MustCompile(`(?i)^#+\s*(navigation|menu|skip to|main menu|site navigation)`)

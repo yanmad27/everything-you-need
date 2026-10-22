@@ -97,11 +97,12 @@ const (
 	defMaxCalls     = 3
 	defToolTimeout  = 15 * time.Second
 	defLoopDeadline = 45 * time.Second
-	defMaxResult    = 4000
+	defMaxResult    = 6000 // a list page (e.g. GitHub trending, 25 items) must fit
 	defRateBurst    = 3
 	defRatePerMin   = 6.0
 
 	maxSearchesPerTurn = 3
+	maxFetchesPerTurn  = 4
 	defSearchPerHour   = 200
 )
 
@@ -279,6 +280,7 @@ func (s *Service) buildTools() []toolImpl {
 				} else {
 					hits, err = ws.Search(ctx, a.Query, n)
 				}
+				searchHealth.record(ws, err, tl.Now())
 				if err != nil {
 					return "", err
 				}
@@ -304,7 +306,7 @@ func (s *Service) buildTools() []toolImpl {
 			if fetch == nil {
 				fetch = fetchPageTextSafe
 			}
-			return fetch(ctx, target)
+			return fetch(context.WithValue(ctx, trendLinksKey{}, t.addTrendLinks), target)
 		},
 	})
 	if tl.Due != nil {
