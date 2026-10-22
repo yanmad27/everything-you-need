@@ -1,15 +1,14 @@
-{{template "head" .}}<h1>{{.Title}}</h1>
-<form class="f" method="get">
-<label>Nền tảng<select name="platform"><option value="">tất cả</option><option value="zalo"{{if eq (.Q.Get "platform") "zalo"}} selected{{end}}>zalo</option><option value="telegram"{{if eq (.Q.Get "platform") "telegram"}} selected{{end}}>telegram</option></select></label>
-<label>Tìm (tên/id)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
+{{template "head" .}}<div class="ph"><div><h1>{{.Title}} <span class="count">{{len .Data.Items}}</span></h1><p class="mut">{{if .Data.ByChat}}Hoạt động, lỗi và chi phí theo từng nhóm/chat.{{else}}Hoạt động, lỗi và chi phí theo từng người dùng.{{end}}</p></div></div>
+<form class="card filters" method="get">
+{{template "platform" (.Q.Get "platform")}}
+<label class="grow">Tìm (tên/id)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
 {{if not .Data.ByChat}}<label>Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>{{end}}
-<label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
-<label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
-<button type="submit">Lọc</button></form>
-<table><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th>Tin nhắn</th><th>Ngày hoạt động</th><th>Lần cuối</th><th>Nhắc nhở</th><th>Ảnh</th><th>Công cụ hàng đầu</th><th>Lỗi</th><th>Thông báo</th><th>Token (in/out/tổng)</th><th>Chi phí ước tính</th></tr>
-{{range .Data.Items}}<tr><td>{{if .Name}}{{.Name}} <span class="mut">{{.ID}}</span>{{else}}{{.ID}}{{end}} <span class="mut">{{.Platform}}</span></td>
-<td class="n">{{.Messages}}</td><td class="n">{{.ActiveDays}}</td><td>{{ftime .LastSeen}}</td><td class="n">{{.RemindersCreated}}</td><td class="n">{{.ImagesSent}}</td>
-<td>{{range .TopTools}}{{.Name}}×{{.Count}} {{end}}</td><td class="n{{if .Errors}} bad{{end}}">{{.Errors}}</td><td class="n">{{.Notices}}</td>
-<td class="n">{{.PromptTokens}}/{{.CompletionTokens}}/{{.TotalTokens}}</td><td class="n">{{if .EstCost}}{{cost .EstCost}}{{else}}<span class="mut">—</span>{{end}}</td></tr>
-{{else}}<tr><td colspan="11" class="mut">Chưa có dữ liệu.</td></tr>{{end}}</table>
+{{template "dates" .Q}}</form>
+<div class="card"><div class="tw"><table>
+<thead><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th class="n">Tin nhắn</th><th class="n">Ngày h.động</th><th>Lần cuối</th><th class="n">Nhắc nhở</th><th class="n">Ảnh</th><th>Công cụ hàng đầu</th><th class="n">Lỗi</th><th class="n">Thông báo</th><th class="n">Token vào</th><th class="n">Token ra</th><th class="n">Tổng token</th><th class="n">Chi phí ước tính</th></tr></thead>
+<tbody>{{range .Data.Items}}<tr><td><span class="name">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</span> {{template "plat" .Platform}}{{if .Name}}<span class="id">{{.ID}}</span>{{end}}</td>
+<td class="n">{{num .Messages}}</td><td class="n">{{num .ActiveDays}}</td><td class="t">{{ftime .LastSeen}}</td><td class="n">{{num .RemindersCreated}}</td><td class="n">{{num .ImagesSent}}</td>
+<td><span class="chips">{{range .TopTools}}<span class="chip">{{.Name}} <b>×{{.Count}}</b></span>{{else}}<span class="mut">—</span>{{end}}</span></td><td class="n">{{if .Errors}}<span class="pill error">{{num .Errors}}</span>{{else}}<span class="mut">0</span>{{end}}</td><td class="n">{{num .Notices}}</td>
+<td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n"><b>{{num .TotalTokens}}</b></td><td class="n">{{estcost .EstCost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="13" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div></div>
 {{template "foot" .}}

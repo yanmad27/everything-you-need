@@ -118,3 +118,22 @@ func TestMaxTokensUnsupportedMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestWithHTTPClientIsUsed(t *testing.T) {
+	var used bool
+	hc := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		used = true
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"hi"}}]}`))}, nil
+	})}
+	c := NewOpenAIClient("https://x.example.com", "k", "m", 0).WithHTTPClient(hc)
+	if out, err := c.Complete(context.Background(), "", []Message{{Role: "user", Content: "q"}}, 5); err != nil || out != "hi" || !used {
+		t.Fatalf("%q %v used=%v", out, err, used)
+	}
+	if NewOpenAIClient("https://x.example.com", "k", "m", 0).WithHTTPClient(nil).http == nil {
+		t.Fatal("nil client must be ignored")
+	}
+}
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

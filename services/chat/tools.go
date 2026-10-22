@@ -248,7 +248,7 @@ func (s *Service) buildTools() []toolImpl {
 			},
 		})
 	}
-	if tl.Search != nil {
+	if tl.Search != nil || s.liveSrc != nil {
 		out = append(out, toolImpl{
 			taints: true,
 			def: llm.ToolDef{Name: "web_search", Description: "Tìm kiếm web hoặc tin tức mới.",
@@ -267,10 +267,17 @@ func (s *Service) buildTools() []toolImpl {
 				n := clamp(a.N, 1, 5, 5)
 				var hits []WebHit
 				var err error
+				ws := tl.Search
+				if lv := liveFrom(ctx); lv.Search != nil {
+					ws = lv.Search
+				}
+				if ws == nil {
+					return "", withReason("not_configured", userError("web search is not configured"))
+				}
 				if a.Kind == "news" {
-					hits, err = tl.Search.SearchNews(ctx, a.Query, n)
+					hits, err = ws.SearchNews(ctx, a.Query, n)
 				} else {
-					hits, err = tl.Search.Search(ctx, a.Query, n)
+					hits, err = ws.Search(ctx, a.Query, n)
 				}
 				if err != nil {
 					return "", err
@@ -289,7 +296,7 @@ func (s *Service) buildTools() []toolImpl {
 			if err := json.Unmarshal(raw, &a); err != nil || a.URL == "" {
 				return "", withReason("invalid_args", userError("invalid arguments: url required"))
 			}
-			target, err := t.fetchTarget(preFrom(ctx), a.URL, s.fetchAllow)
+			target, err := t.fetchTarget(preFrom(ctx), a.URL, liveFrom(ctx).fetchAllowOr(s.fetchAllow))
 			if err != nil {
 				return "", err
 			}

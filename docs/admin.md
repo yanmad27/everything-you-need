@@ -16,14 +16,42 @@ batching writer; when full events are dropped and a counter is logged, no
 content). `Close` flushes on shutdown (5s cap). Rows older than
 `convo.retention_days` (default 90) are pruned daily.
 
-Config (env): `CONVO_ENABLED`, `CONVO_DB_PATH`, `CONVO_RETENTION_DAYS`,
-`CONVO_PRICE_PROMPT_PER_1K`, `CONVO_PRICE_COMPLETION_PER_1K` (0 = tokens only).
+Config (env): `CONVO_ENABLED`, `CONVO_DB_PATH`, `CONVO_RETENTION_DAYS`, `CONVO_PRICES`,
+`CONVO_CURRENCY`, and the legacy `CONVO_PRICE_PROMPT_PER_1K` / `CONVO_PRICE_COMPLETION_PER_1K`.
+
+### Usage prices
+
+Prices are **per model, per 1,000,000 tokens**, prompt and completion separately, labelled
+with `convo.currency` / `CONVO_CURRENCY` (default `USD`, label only). Two equivalent forms:
+
+- env: `CONVO_PRICES="gpt-6-sol:1.25:10,claude-haiku-4-5:1:5"` — comma-separated
+  `model:prompt:completion` (model match is case-insensitive; split from the right, so model
+  names may contain `:`). Entries are parsed independently: each bad one (missing field,
+  non-number, negative, NaN/Inf) is skipped and logged by index, the good ones are kept.
+  The same validation applies to yaml entries.
+- yaml: `convo.prices: [{model: gpt-6-sol, prompt_per_1m: 1.25, completion_per_1m: 10}]`.
+
+The env entry overrides the yaml entry for the same model. The old
+`price_prompt_per_1k` / `price_completion_per_1k` keys still work as a **fallback for models
+with no entry** (per-1K × 1000 = per-1M). **Built-in default: `gpt-6-sol` = $2 input / $10 output per 1M tokens (USD)**, from OpenAI's official pricing page
+<https://developers.openai.com/api/docs/pricing> (standard short-context tier). `CONVO_PRICES`, `convo.prices` or the admin
+UI override it per model. Cached input ($0.20/1M) is not modelled: cached tokens are billed at the input price in our
+estimate, so it is slightly high. No other model has a default. A model with no price (and no legacy fallback) has cost
+*nil* — shown as "chưa cấu hình giá" (price not configured), never `0`.
+
+Aggregation rule: a group's `Cost` is the cost of its **priced** tokens; `PartialPricing` is
+true when some tokens in the group belong to an unpriced model (so `Cost` is a lower bound),
+and `Cost` is nil when nothing in the group could be priced. A group with zero tokens has cost 0.
+Token counts come from the recorded per-turn `usage` rows; the upstream (OpenAI-compatible)
+`usage` object carries no cost field (verified for `cpa.lowbit.link`), so cost is always computed
+from the configured prices at query time (changing a price re-prices history).
 
 Query API (`services/convo`, read-only): `ListChats`, `Timeline`, `UserStats`,
-`ChatStats`, `ToolStats`. Reminder-regex commands handled before the chat
+`ChatStats`, `ToolStats`, `UsageTotals`, `UsageByDay`, `UsageByChat`, `UsageByUser`,
+`UsageByModel` (days are Vietnam time, UTC+7; `From` inclusive, `To` exclusive). Reminder-regex commands handled before the chat
 assistant are not recorded (only chat/tool turns).
 
-## Admin UI (`/admin`, read-only)
+## Admin UI (`/admin`)
 
 Enabled only when `ADMIN_USERNAME` **and** `ADMIN_PASSWORD_HASH` (bcrypt, cost ≥ 10)
 are set and the convo store is up; otherwise `/admin` is not mounted (404) and the
@@ -58,7 +86,11 @@ Routes (all need a session except login; logged out: HTML → 302 `/admin/login`
 - `GET /admin/users`, `/admin/chat-stats` — user / chat insights
 - `GET /admin/tools` — tool success rate, p50/p95, recent failures
 - `GET /admin/api/{chats,timeline,users,chat-stats,tools}` — same data as JSON
-- `GET|POST /admin/login`, `POST /admin/logout` — the only state-changing routes (CSRF)
+- `GET /admin/usage` (+ `GET /admin/api/usage`) — tokens and cost per day / model / chat / user
+  and totals; filters `platform`, `from`, `to` (YYYY-MM-DD, Vietnam days, `to` inclusive),
+  `chat_page`, `user_page`
+- `GET|POST /admin/password` — change the admin password (needs a session)
+- `GET|POST /admin/login`, `POST /admin/logout` — with `/admin/password`, the only state-changing routes (CSRF)
 
 Security: login CSRF (HMAC, 30 min) + 5 attempts / 15 min per client IP
 (`CF-Connecting-IP`, else the last `X-Forwarded-For` hop, else the peer address) → 429,
@@ -79,3 +111,106 @@ calls with outcome error/timeout + failed bot replies (attributed to the turn's 
 rate-limit / image-too-large replies are **Notices**. Tool success rate =
 ok/(ok+error+timeout), blocked shown separately, p50/p95 over ok calls. Timeline pages
 count from the newest (page 1 = latest 100 entries).
+
+## Changing the password
+
+`/admin/password`: current password, new password, confirmation (per-session CSRF token).
+Rules: ≥12 characters and ≤72 bytes; different from the current password; at least 3 of
+{lowercase, uppercase, digit, symbol} **or** ≥20 characters; confirmation must match.
+
+On success a bcrypt (cost 12) hash is stored in the convo SQLite DB (`admin_credentials`, one
+row) and takes precedence over the env hash from then on (the env hash stays as the
+bootstrap/fallback; the username always comes from `ADMIN_USERNAME`). **All** sessions are
+invalidated and the current one gets a new id/cookie. Attempts are limited to 5 failures per
+15 minutes per session and per client IP (→ 429); only a wrong current password counts (new-password policy/mismatch errors do not). Password POSTs are serialised, so parallel requests cannot exceed the limit, and a login cannot create a session across a password change. Env
+`ADMIN_USERNAME` / hash must still be set for the UI to mount.
+
+Audit: table `admin_audit(at, event, ip)` with `login_ok`, `login_fail`, `password_changed`,
+`password_change_fail`, `logout`, and a log line `admin audit: event=… ip=…`. Passwords and
+hashes are never stored in it or logged. Rows are pruned with the retention window.
+
+### Lockout recovery
+
+Set `ADMIN_PASSWORD_RESET=true` (exactly `true`; any other value, e.g. `1` or `TRUE`, is ignored and logged) and restart: the stored hash is deleted at startup (logged as
+`admin: ADMIN_PASSWORD_RESET is set…`) and the env hash (`ADMIN_PASSWORD_HASH_B64` /
+`ADMIN_PASSWORD_HASH`) applies again. Unset the flag afterwards (while it is set, every restart
+clears a password changed in the UI). Without a restart, with sqlite3 on the data volume:
+`sqlite3 data/convo.db "DELETE FROM admin_credentials;"` (takes effect at the next login).
+
+## Template data contract
+
+Every template receives `page` (`services/admin/views.go`): `.Title`, `.Nav` (legacy key:
+`chats|users|chatstats|tools|usage|password`), **`.Active`** (nav key: `chats|users|chat-stats|tools|usage|password`;
+empty on login), **`.Username`** (signed-in admin; empty on login), `.CSRF` (session token, empty on
+login page where it is the login token), `.Nonce`, `.CSS`, `.Q` (`url.Values` of the current
+filters), `.Data`. Template funcs: `ftime`, `kb`, `pct`, `cost`, `money *float64 partial`
+("chưa cấu hình giá" for nil, `≥ x (một phần)` when partial; 2 decimals from 0.01, 6 significant digits below, `<0.000001` floor), `estcost float partial` (for `convo.Stat`), `num int` (1,234,567).
+
+`password.html` — `.Data` is `PasswordView`: `.Saved` bool (show success), `.Error` string
+(empty = none), `.MinLen` int (chars), `.MaxLen` int (bytes), `.Hint` string. Form: POST
+`/admin/password` with fields `csrf` (= `.CSRF`), `current`, `new`, `confirm`.
+
+`usage.html` — `.Data` is `UsageView`:
+- `.Currency`, `.Platform`, `.From`, `.To` (filter echo), `.Prices` (`[]convo.Price{Model, PromptPer1M, CompletionPer1M}`)
+- `.Totals` — `convo.UsageSum`
+- `.Days` `[]convo.UsageDay{Day "YYYY-MM-DD"}` ascending, zero-filled when both dates are set;
+  `.MaxDayTokens` int and `.MaxDayCost` float64 to scale bars
+- `.Models` `[]convo.UsageModel{Model, Priced}`
+- `.Chats` `[]convo.UsageChat{Platform, ChatID, Name}`, `.ChatsTotal`, `.ChatsPage`, `.ChatsPager` (`Prev/Next/HasPrev/HasNext/PrevLabel/NextLabel/Page/Pages`; query param `chat_page`)
+- `.Users` `[]convo.UsageUser{Platform, UserID, Name}`, `.UsersTotal`, `.UsersPage`, `.UsersPager` (param `user_page`)
+- every row embeds `convo.UsageSum`: `Turns`, `PromptTokens`, `CompletionTokens`, `TotalTokens`,
+  `Cost *float64` (nil = price not configured), `PartialPricing bool`.
+
+`GET /admin/api/usage` returns the same `UsageView` as JSON (snake_case keys, `cost: null` when unpriced).
+`stats.html` rows (`convo.Stat`) gain `PartialPricing`; `EstCost` is the per-model priced cost (shown with `estcost`). Out-of-range `chat_page`/`user_page` are clamped to the last page.
+
+## Bot settings pages (`/admin/bots`)
+
+Needs `BOTCONFIG_SECRET` only for secrets (see `docs/bot-config.md`). Routes (session required; logged out → 302 / API 401;
+404 when the settings provider is off):
+- `GET /admin/bots` — list (`BotsView`).
+- `GET /admin/bots/zalo` — settings page (`BotView`); `?flash=<code>` shows a result line.
+- `POST /admin/bots/zalo` — save. `POST /admin/bots/zalo/test?what=llm|serper` — connection test.
+- `GET /admin/api/bots/zalo` — `BotView` as JSON (secrets masked).
+
+All pages set `.Active = "bots"` (and `.Nav = "bots"`).
+
+**`bots.html`** — `.Data` is `BotsView{Bots []BotRow}`; `BotRow{Platform, Managed, Enabled, Status ("enabled"|"paused"|"unmanaged"),
+Overrides int, Problems []string, Note ("không quản lý ở đây" for telegram), URL ("" when unmanaged)}`.
+
+**`bot.html`** — `.Data` is `BotView{Platform, Enabled, SecretsDisabled, Problems []string, Settings []BotSettingRow, Flash *Flash,
+FormError string, PasswordField ("admin_password"), PostURL, TestURL}`.
+`BotSettingRow` embeds `botconfig.SettingView{Key, Label, Kind ("bool|string|text|int|list|prices|secret"), Secret, Sensitive,
+Overridden, Value, Default, Masked{Set,Last4}, UpdatedAt, UpdatedBy}` plus `Source ("env"|"ui"), InputName ("s.<key>"),
+ResetName ("reset.<key>"), Input (current value as form text; never set for secrets), DefaultText, MaskedText ("đã đặt …last4" |
+"đã đặt" | "chưa đặt"), Error (per-field message), UpdatedTime (formatted, "" for env)`.
+`Flash{Code, Kind ("ok"|"err"), Text}`.
+
+Badges: source `env`/`ui` (`.Source`, CSS-friendly `source-env|source-ui`), `Sensitive` (security-relevant key).
+Banners: `.Data.SecretsDisabled` (BOTCONFIG_SECRET missing/short), `.Data.Problems` (stored values unusable → defaults apply),
+`.Data.FormError` (e.g. wrong admin password), `.Data.Flash`.
+
+Form (POST `PostURL`): `csrf` (= `.CSRF`); one field per setting named `s.<key>` — bool = `<select>` true/false, list = comma/newline
+text, text = textarea, secret = **empty password input (empty = unchanged)**; optional `reset.<key>` checkbox (shown only when
+`.Overridden`) = delete the override; `admin_password` = required when any Sensitive key or any secret changes (or such a key is reset);
+it shares the password-change lockout (5 failures / 15 min per session and IP → 429). Only values that differ from the current
+effective value are saved (an unchanged form creates no overrides). Validation errors re-render with status 400, per-field
+`Error`, and the submitted non-secret values preserved. Success → 302 `?flash=saved` (`nochange` when nothing differs).
+Test forms: `POST TestURL?what=llm|serper` with `csrf` only — tests use the **saved** values (base URL, key, model, Serper key); form values are ignored, so save first, then test. The LLM test sends `max_tokens: 5` and retries once with `max_completion_tokens` when the model rejects it.
+; result → `?flash=test_<what>_ok` or `test_<what>_<class>` with class one of
+`http_400|http_401|http_403|http_404|http_429|http_5xx|http_other|credits (402)|timeout|dns|blocked (private/non-https base URL,
+refused before any request, or SSRF guard)|network|not_set`. Never the upstream body or any key. Limit 10 / 15 min per session and IP.
+
+Live wiring (Zalo only): one settings snapshot per inbound message. `enabled=false` pauses the bot **silently** (no reply, no LLM
+call; the inbound message is logged and stored with tag `paused`; reminders and images are not handled either). LLM base URL/key/model,
+tool toggles (`tools.*` hide the tool from the model), `images=false` (replies "Pink đang tắt xử lý ảnh"), Serper key, fetch allowlist,
+private-tool chats, persona (replaces only the character/base part of the system prompt; the fixed tool-safety, reminder and formatting rules always follow it), rate limit (resized in place, per-chat state kept), prices and
+retention (read at query/prune time) take effect on the next message without restart. Limits: reminder parsing and the news digest keep
+using the env-configured LLM; if the env configures no OpenAI-compatible LLM, an LLM saved in the UI is used for chat after the next restart.
+
+Sensitive keys (re-auth with `admin_password`): `llm_base_url`, `llm_api_key`, `serper_api_key`, `fetch_allow_domains`, `private_tool_chats`,
+`tools.fetch`, `tools.web_search`, `persona`, `retention_days`. A paused bot stores the inbound message as a count/tag only (no text),
+like a rate-limited one. A base URL saved from the UI dials through the SSRF guard (loopback/private refused at dial time); an
+env-configured base URL keeps the plain client. `llm_base_url` / `llm_api_key` cannot be saved empty (use reset to return to the env value);
+an empty `prices` override is valid and means "built-in default prices only"; a model listed twice in `prices` / `CONVO_PRICES` is rejected
+(the first entry is kept in the env form, the later ones are reported as bad).

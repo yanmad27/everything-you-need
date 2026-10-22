@@ -2,18 +2,30 @@
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>{{.Title}} · Pink admin</title>
 <style nonce="{{.Nonce}}">{{.CSS}}</style></head><body>
-{{if .CSRF}}{{if ne .Nav ""}}<header><b>Pink admin</b>
-<a href="/admin/chats"{{if eq .Nav "chats"}} class="on"{{end}}>Hội thoại</a>
-<a href="/admin/users"{{if eq .Nav "users"}} class="on"{{end}}>Người dùng</a>
-<a href="/admin/chat-stats"{{if eq .Nav "chatstats"}} class="on"{{end}}>Theo chat</a>
-<a href="/admin/tools"{{if eq .Nav "tools"}} class="on"{{end}}>Công cụ</a>
-<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Đăng xuất</button></form></header>{{end}}{{end}}
+{{if .Active}}<header class="top"><div class="top-in">
+<a class="brand" href="/admin/chats"><span class="dot"></span>Pink admin</a>
+<nav class="nav" aria-label="Điều hướng chính">
+<a href="/admin/chats"{{if eq .Active "chats"}} class="on" aria-current="page"{{end}}>Hội thoại</a>
+<a href="/admin/users"{{if eq .Active "users"}} class="on" aria-current="page"{{end}}>Người dùng</a>
+<a href="/admin/chat-stats"{{if eq .Active "chat-stats"}} class="on" aria-current="page"{{end}}>Nhóm/Chat</a>
+<a href="/admin/tools"{{if eq .Active "tools"}} class="on" aria-current="page"{{end}}>Công cụ</a>
+<a href="/admin/usage"{{if eq .Active "usage"}} class="on" aria-current="page"{{end}}>Chi phí &amp; token</a>
+<a href="/admin/bots"{{if eq .Active "bots"}} class="on" aria-current="page"{{end}}>Bot</a>
+<a href="/admin/password"{{if eq .Active "password"}} class="on" aria-current="page"{{end}}>Đổi mật khẩu</a>
+</nav>
+<div class="who">{{if .Username}}<span class="avatar"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 14c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span>{{.Username}}</span></span>{{end}}
+<form method="post" action="/admin/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn ghost" type="submit">Đăng xuất</button></form></div>
+</div></header>{{end}}
 <main>{{end}}
 {{define "foot"}}</main></body></html>{{end}}
-{{define "filters"}}<form class="f" method="get">
+{{define "platform"}}<label>Nền tảng<select name="platform"><option value="">Tất cả</option><option value="zalo"{{if eq . "zalo"}} selected{{end}}>Zalo</option><option value="telegram"{{if eq . "telegram"}} selected{{end}}>Telegram</option></select></label>{{end}}
+{{define "dates"}}<label>Từ ngày<input type="date" name="from" value="{{.Get "from"}}"></label>
+<label>Đến ngày<input type="date" name="to" value="{{.Get "to"}}"></label>
+<button class="btn" type="submit">Lọc</button>{{end}}
+{{define "filters"}}<form class="card filters" method="get">
 {{if .Q.Get "id"}}<input type="hidden" name="id" value="{{.Q.Get "id"}}">{{end}}
-<label>Nền tảng<select name="platform"><option value="">tất cả</option><option value="zalo"{{if eq (.Q.Get "platform") "zalo"}} selected{{end}}>zalo</option><option value="telegram"{{if eq (.Q.Get "platform") "telegram"}} selected{{end}}>telegram</option></select></label>
-<label>Tìm kiếm<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
-<label>Từ ngày<input type="date" name="from" value="{{.Q.Get "from"}}"></label>
-<label>Đến ngày<input type="date" name="to" value="{{.Q.Get "to"}}"></label>
-<button type="submit">Lọc</button></form>{{end}}
+{{template "platform" (.Q.Get "platform")}}
+<label class="grow">Tìm kiếm<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
+{{template "dates" .Q}}</form>{{end}}
+{{define "pager"}}<nav class="pager" aria-label="Phân trang">{{if .HasPrev}}<a href="{{.Prev}}">{{.PrevLabel}}</a>{{else}}<span class="off" aria-hidden="true">{{.PrevLabel}}</span>{{end}}<span class="mut">Trang {{.Page}} / {{.Pages}}</span>{{if .HasNext}}<a href="{{.Next}}">{{.NextLabel}}</a>{{else}}<span class="off" aria-hidden="true">{{.NextLabel}}</span>{{end}}</nav>{{end}}
+{{define "plat"}}<span class="pill {{.}}">{{.}}</span>{{end}}

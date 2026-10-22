@@ -1,0 +1,53 @@
+{{template "head" .}}<div class="ph"><div><h1>Chi phí &amp; token</h1><p class="mut">Token và chi phí ước tính theo giá đã cấu hình · {{.Data.Currency}} · GMT+7</p></div></div>
+<form class="card filters" method="get">
+{{template "platform" .Data.Platform}}
+<label>Từ ngày<input type="date" name="from" value="{{.Data.From}}"></label>
+<label>Đến ngày<input type="date" name="to" value="{{.Data.To}}"></label>
+<button class="btn" type="submit">Lọc</button></form>
+{{with .Data.Totals}}<div class="kpis">
+<div class="card kpi acc"><div class="k">Chi phí ({{$.Data.Currency}})</div><div class="v{{if or (not .Cost) .PartialPricing}} sm{{end}}">{{money .Cost .PartialPricing}}</div>{{if .PartialPricing}}<div class="s">Một số mô hình chưa có giá</div>{{end}}</div>
+<div class="card kpi"><div class="k">Tổng token</div><div class="v">{{num .TotalTokens}}</div></div>
+<div class="card kpi"><div class="k">Prompt</div><div class="v">{{num .PromptTokens}}</div></div>
+<div class="card kpi"><div class="k">Completion</div><div class="v">{{num .CompletionTokens}}</div></div>
+<div class="card kpi"><div class="k">Lượt</div><div class="v">{{num .Turns}}</div></div>
+</div>{{end}}
+
+{{$first := ""}}{{$last := ""}}{{range .Data.Days}}{{if not $first}}{{$first = .Day}}{{end}}{{$last = .Day}}{{end}}
+<div class="card chart"><div class="ph"><h2>Token theo ngày</h2><div class="legend"><span><i class="sw"></i>prompt</span><span><i class="sw p2"></i>completion</span><span>cao nhất {{num .Data.MaxDayTokens}}</span></div></div>
+{{if and .Data.Days .Data.MaxDayTokens}}{{$max := .Data.MaxDayTokens}}<svg viewBox="0 0 {{len .Data.Days}} 100" preserveAspectRatio="none" role="img" aria-label="Biểu đồ token theo ngày, cao nhất {{$max}}">
+<line class="grid" x1="0" y1="0.5" x2="{{len .Data.Days}}" y2="0.5"/><line class="grid" x1="0" y1="50" x2="{{len .Data.Days}}" y2="50"/><line class="grid" x1="0" y1="99.5" x2="{{len .Data.Days}}" y2="99.5"/>
+{{range $i, $d := .Data.Days}}<svg x="{{$i}}" y="0" width="1" height="100" viewBox="0 -{{$max}} 1 {{$max}}" preserveAspectRatio="none"><g><title>{{$d.Day}}: {{num $d.TotalTokens}} token ({{num $d.PromptTokens}} prompt, {{num $d.CompletionTokens}} completion)</title><rect class="btrack" x="0.1" y="-{{$max}}" width="0.8" height="{{$max}}" fill-opacity="0"/><rect class="b2" x="0.15" y="0" width="0.7" height="{{$d.TotalTokens}}" transform="scale(1,-1)"/><rect class="b1" x="0.15" y="0" width="0.7" height="{{$d.PromptTokens}}" transform="scale(1,-1)"/></g></svg>{{end}}
+</svg><div class="axis"><span>{{$first}}</span><span>{{$last}}</span></div>{{else}}<p class="mut">Chưa có dữ liệu.</p>{{end}}</div>
+
+<div class="card chart sec"><div class="ph"><h2>Chi phí theo ngày ({{.Data.Currency}})</h2><div class="legend"><span><i class="sw"></i>chi phí</span><span><i class="sw mut"></i>có phần chưa định giá</span></div></div>
+{{if and .Data.Days (gt .Data.MaxDayCost 0.0)}}{{$max := .Data.MaxDayCost}}<svg class="thin" viewBox="0 0 {{len .Data.Days}} 100" preserveAspectRatio="none" role="img" aria-label="Biểu đồ chi phí theo ngày">
+<line class="grid" x1="0" y1="0.5" x2="{{len .Data.Days}}" y2="0.5"/><line class="grid" x1="0" y1="99.5" x2="{{len .Data.Days}}" y2="99.5"/>
+{{range $i, $d := .Data.Days}}{{with $d.Cost}}<svg x="{{$i}}" y="0" width="1" height="100" viewBox="0 -{{$max}} 1 {{$max}}" preserveAspectRatio="none"><g><title>{{$d.Day}}: {{money $d.Cost $d.PartialPricing}}</title><rect class="{{if $d.PartialPricing}}bmut{{else}}b1{{end}}" x="0.15" y="0" width="0.7" height="{{.}}" transform="scale(1,-1)"/></g></svg>{{end}}{{end}}
+</svg><div class="axis"><span>{{$first}}</span><span>{{$last}}</span></div>{{else}}<p class="mut">Chưa có chi phí đã định giá trong khoảng này.</p>{{end}}</div>
+
+<details class="card sec"><summary class="sec-h"><h2>Bảng theo ngày</h2><span class="mut">{{len .Data.Days}} ngày</span></summary>
+<div class="tw"><table><thead><tr><th>Ngày</th><th class="n">Lượt</th><th class="n">Prompt</th><th class="n">Completion</th><th class="n">Tổng token</th><th class="n">Chi phí ({{.Data.Currency}})</th></tr></thead>
+<tbody>{{range .Data.Days}}<tr><td class="t">{{.Day}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div></details>
+
+<div class="card sec"><div class="sec-h"><h2>Theo mô hình</h2><span class="mut">{{len .Data.Models}} mô hình</span></div>
+<div class="tw"><table><thead><tr><th>Mô hình</th><th class="n">Lượt</th><th class="n">Prompt</th><th class="n">Completion</th><th class="n">Tổng token</th><th class="n">Chi phí ({{.Data.Currency}})</th></tr></thead>
+<tbody>{{range .Data.Models}}<tr><td>{{if .Model}}<span class="mono">{{.Model}}</span>{{else}}<span class="mut">(không rõ)</span>{{end}}{{if not .Priced}} <span class="pill timeout">chưa có giá</span>{{end}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div></div>
+
+<div class="card sec"><div class="sec-h"><h2>Theo chat <span class="count">{{num .Data.ChatsTotal}}</span></h2><span class="mut">nhiều token nhất trước</span></div>
+<div class="tw"><table><thead><tr><th>Chat</th><th class="n">Lượt</th><th class="n">Prompt</th><th class="n">Completion</th><th class="n">Tổng token</th><th class="n">Chi phí ({{.Data.Currency}})</th></tr></thead>
+<tbody>{{range .Data.Chats}}<tr><td><a class="name" href="/admin/chat?platform={{.Platform}}&amp;id={{.ChatID}}">{{if .Name}}{{.Name}}{{else}}{{.ChatID}}{{end}}</a> {{template "plat" .Platform}}{{if .Name}}<span class="id">{{.ChatID}}</span>{{end}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" .Data.ChatsPager}}</div>
+
+<div class="card sec"><div class="sec-h"><h2>Theo người dùng <span class="count">{{num .Data.UsersTotal}}</span></h2><span class="mut">nhiều token nhất trước</span></div>
+<div class="tw"><table><thead><tr><th>Người dùng</th><th class="n">Lượt</th><th class="n">Prompt</th><th class="n">Completion</th><th class="n">Tổng token</th><th class="n">Chi phí ({{.Data.Currency}})</th></tr></thead>
+<tbody>{{range .Data.Users}}<tr><td><span class="name">{{if .Name}}{{.Name}}{{else}}{{.UserID}}{{end}}</span> {{template "plat" .Platform}}{{if .Name}}<span class="id">{{.UserID}}</span>{{end}}</td><td class="n">{{num .Turns}}</td><td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n">{{num .TotalTokens}}</td><td class="n">{{money .Cost .PartialPricing}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div>
+{{template "pager" .Data.UsersPager}}</div>
+
+{{if .Data.Prices}}<div class="card sec"><div class="sec-h"><h2>Bảng giá đã cấu hình</h2><span class="mut">{{.Data.Currency}} / 1 triệu token</span></div>
+<div class="tw"><table><thead><tr><th>Mô hình</th><th class="n">Prompt</th><th class="n">Completion</th></tr></thead>
+<tbody>{{range .Data.Prices}}<tr><td><span class="mono">{{.Model}}</span></td><td class="n">{{cost .PromptPer1M}}</td><td class="n">{{cost .CompletionPer1M}}</td></tr>{{end}}</tbody></table></div></div>{{end}}
+{{template "foot" .}}

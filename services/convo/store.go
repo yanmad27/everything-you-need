@@ -41,6 +41,15 @@ type Options struct {
 	// Estimated cost per 1000 tokens (0 = show tokens only).
 	PricePromptPer1K     float64
 	PriceCompletionPer1K float64
+	// Prices are per-model rates per 1M tokens; Currency labels them (default "USD").
+	// The legacy per-1K pair above acts as a fallback for models not listed here.
+	Prices   []Price
+	Currency string
+	// PricesFn, if set, supplies the configured prices at query time (live
+	// settings) instead of Prices. RetentionFn does the same for RetentionDays;
+	// both are read at each use, never cached.
+	PricesFn    func() []Price
+	RetentionFn func() int
 	// Now is injectable for tests.
 	Now func() time.Time
 	// StartupPruneDelay is how long after Open the first prune runs (default 10s).
@@ -88,6 +97,9 @@ func Open(path string, opt Options) (*Store, error) {
 	}
 	if opt.Now == nil {
 		opt.Now = time.Now
+	}
+	if opt.Currency == "" {
+		opt.Currency = "USD"
 	}
 	if opt.StartupPruneDelay <= 0 {
 		opt.StartupPruneDelay = 10 * time.Second
@@ -198,10 +210,44 @@ func migrate(db *sql.DB) error {
 			created_at        INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_chat ON usage(platform, chat_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_created ON usage(created_at)`,
+		`CREATE TABLE IF NOT EXISTS admin_credentials (
+			id            INTEGER PRIMARY KEY CHECK (id = 1),
+			username      TEXT NOT NULL,
+			password_hash TEXT NOT NULL,
+			updated_at    INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS bot_settings (
+			platform   TEXT NOT NULL,
+			key        TEXT NOT NULL,
+			value      BLOB NOT NULL,
+			is_secret  INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL,
+			updated_by TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (platform, key)
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_audit (
+			id    INTEGER PRIMARY KEY AUTOINCREMENT,
+			at    INTEGER NOT NULL,
+			event TEXT NOT NULL,
+			ip    TEXT NOT NULL DEFAULT ''
+		)`,
 	}
 	for _, st := range stmts {
 		if _, err := db.Exec(st); err != nil {
 			return fmt.Errorf("convo: migrate: %w", err)
+		}
+	}
+	// admin_audit gained detail/actor for setting changes; add them idempotently.
+	for _, col := range []string{"detail", "actor"} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('admin_audit') WHERE name = ?`, col).Scan(&n); err != nil {
+			return fmt.Errorf("convo: migrate: %w", err)
+		}
+		if n == 0 {
+			if _, err := db.Exec(`ALTER TABLE admin_audit ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("convo: migrate: %w", err)
+			}
 		}
 	}
 	return nil
@@ -236,12 +282,13 @@ func (s *Store) Dropped() int64 { return s.dropped.Load() }
 // Prune deletes rows older than the retention window and returns the number of
 // rows removed.
 func (s *Store) Prune(ctx context.Context) (int64, error) {
-	cut := s.now().Add(-time.Duration(s.opt.RetentionDays) * 24 * time.Hour).UnixMilli()
+	cut := s.now().Add(-time.Duration(s.retentionDays()) * 24 * time.Hour).UnixMilli()
 	var total int64
 	for _, q := range []string{
 		`DELETE FROM messages WHERE created_at < ?`,
 		`DELETE FROM tool_calls WHERE created_at < ?`,
 		`DELETE FROM usage WHERE created_at < ?`,
+		`DELETE FROM admin_audit WHERE at < ?`,
 		`DELETE FROM chats WHERE last_seen < ?`,
 		`DELETE FROM users WHERE last_seen < ?`,
 	} {

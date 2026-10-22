@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"everything-you-need/m/services/admin"
+	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/chat"
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/convo"
@@ -54,18 +56,30 @@ func main() {
 		teleChat = buildChatService(cfg, teleService, nil, false)
 	}
 	if zaloService != nil {
-		zaloChat = buildChatService(cfg, zaloService, zaloCompleter, true)
+		convoStore = buildConvoStore(cfg)
+		var zl *zaloLive
+		if bp := buildBotConfig(cfg, convoStore); bp != nil {
+			zl = &zaloLive{prov: bp}
+		}
+		chatCompleter := zaloCompleter
+		if chatCompleter == nil && zl != nil {
+			chatCompleter = zl.bootCompleter() // LLM saved in the admin UI before this start
+		}
+		zaloChat = buildChatService(cfg, zaloService, chatCompleter, true)
+		if zaloChat != nil && zl != nil {
+			zaloChat.WithLive(zl.source)
+		}
 		var zaloRem *reminder.Service
 		if _, zOn := reminderPlatforms(cfg, teleService != nil, true, zaloCompleter != nil); zOn {
 			zaloRem = reminderService
 		}
 		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
-		if convoStore = buildConvoStore(cfg); convoStore != nil {
+		if convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
-			zaloTools.Model = zaloModel(cfg, zaloCompleter)
+			zaloTools.Model = zaloModel(cfg, chatCompleter)
 		}
-		enableZaloTools(zaloChat, zaloCompleter, zaloTools)
+		enableZaloTools(zaloChat, chatCompleter, zaloTools)
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
@@ -383,6 +397,15 @@ func dispatchZalo(ctx context.Context, svc *reminder.Service, chatSvc *chat.Serv
 // regex service). fetchImage downloads msg.Photo; nil ignores images.
 func dispatchZaloWith(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, botNames []string, msg zalobot.Message, fetchImage func(ctx context.Context, url string) ([]byte, string, error)) {
 	ctx = chat.WithMeta(ctx, chat.Meta{ChatType: msg.Chat.ChatType})
+	if chatSvc != nil {
+		// One settings snapshot per inbound message; paused = log + record, no answer.
+		var lv chat.Live
+		if ctx, lv = chatSvc.CaptureLive(ctx); lv.Paused {
+			chatSvc.NotePaused(ctx, msg.Chat.ID, msg.From.ID, msg.From.DisplayName)
+			log.Printf("zalo dispatch: result=paused outcome=paused chat=%s", zalobot.MaskID(msg.Chat.ID))
+			return
+		}
+	}
 	if msg.Kind == "image" {
 		dispatchZaloImage(ctx, chatSvc, botNames, msg, fetchImage)
 		return
@@ -451,14 +474,64 @@ func buildConvoStore(cfg *config.Config) *convo.Store {
 	if !c.Enabled {
 		return nil
 	}
+	prices, badPrices := convoPrices(c, os.Getenv("CONVO_PRICES"))
+	for _, b := range badPrices {
+		log.Printf("Convo price skipped: %s", b)
+	}
 	st, err := convo.Open(c.DBPath, convo.Options{RetentionDays: c.RetentionDays,
-		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K})
+		PricePromptPer1K: c.PricePromptPer1K, PriceCompletionPer1K: c.PriceCompletionPer1K,
+		Prices: prices, Currency: c.Currency,
+		PricesFn: func() []convo.Price { // live settings win once the provider is up
+			if p := botProvider.Load(); p != nil {
+				return p.Snapshot(botconfig.PlatformZalo).Prices()
+			}
+			return prices
+		},
+		RetentionFn: func() int {
+			if p := botProvider.Load(); p != nil {
+				return p.Snapshot(botconfig.PlatformZalo).Zalo().RetentionDays
+			}
+			return c.RetentionDays
+		}})
 	if err != nil {
 		log.Printf("Convo store open failed: %v (conversation recording disabled)", err)
 		return nil
 	}
 	log.Printf("Convo store initialized (db=%s, retention_days=%d)", c.DBPath, c.RetentionDays)
 	return st
+}
+
+// convoPrices merges the config-file prices with CONVO_PRICES
+// ("model:prompt:completion,..." per 1M tokens); the env entry wins per model.
+// Invalid entries (either source) are skipped, the rest are kept; bad describes
+// each skipped entry (index and reason, never the value).
+func convoPrices(c config.ConvoConfig, env string) (out []convo.Price, bad []string) {
+	idx := map[string]int{}
+	put := func(p convo.Price) {
+		k := strings.ToLower(p.Model)
+		if i, ok := idx[k]; ok {
+			out[i] = p
+			return
+		}
+		idx[k] = len(out)
+		out = append(out, p)
+	}
+	for i, p := range c.Prices {
+		cp := convo.Price{Model: strings.TrimSpace(p.Model), PromptPer1M: p.PromptPer1M, CompletionPer1M: p.CompletionPer1M}
+		if err := cp.Valid(); err != nil {
+			bad = append(bad, fmt.Sprintf("convo.prices[%d]: %v", i, err))
+			continue
+		}
+		put(cp)
+	}
+	envP, envBad := convo.ParsePrices(env)
+	for _, p := range envP {
+		put(p)
+	}
+	for _, b := range envBad {
+		bad = append(bad, "CONVO_PRICES "+b)
+	}
+	return out, bad
 }
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not
@@ -473,7 +546,7 @@ func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret}, store, admin.Options{})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load()})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

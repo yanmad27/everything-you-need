@@ -63,13 +63,19 @@ admin:
   password_hash: "" # -> ADMIN_PASSWORD_HASH (bcrypt, cost >= 10)
   password_hash_b64: "" # -> ADMIN_PASSWORD_HASH_B64 (base64 of the bcrypt hash; no `$`, preferred for compose/Dokploy)
   session_secret: "" # -> ADMIN_SESSION_SECRET (optional; random per process if empty)
+  password_reset: "" # -> ADMIN_PASSWORD_RESET (exactly "true" clears the UI-changed password at startup; the env hash applies again)
 
 convo:
   enabled: true # -> CONVO_ENABLED
   db_path: "data/convo.db" # -> CONVO_DB_PATH
   retention_days: 90 # -> CONVO_RETENTION_DAYS
-  price_prompt_per_1k: 0 # -> CONVO_PRICE_PROMPT_PER_1K (0 = show tokens only)
+  price_prompt_per_1k: 0 # -> CONVO_PRICE_PROMPT_PER_1K (legacy fallback for models without a price below; 0 = none)
   price_completion_per_1k: 0 # -> CONVO_PRICE_COMPLETION_PER_1K
+  currency: "USD" # -> CONVO_CURRENCY (label only)
+  # Per-model prices per 1M tokens (no defaults: a model without a price shows "price not configured").
+  # Env form (overrides per model): CONVO_PRICES="model-a:1.25:10,model-b:1:5" = model:prompt:completion
+  prices: []
+  #  - {model: "model-a", prompt_per_1m: 1.25, completion_per_1m: 10}
 
 news:
   enabled: true

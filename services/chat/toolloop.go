@@ -227,10 +227,17 @@ func maskChat(id string) string {
 	return "…" + string(r)
 }
 
-func (s *Service) systemPromptFor(now time.Time) string {
+func (s *Service) systemPromptFor(now time.Time) string { return s.systemPromptWith(now, "") }
+
+// systemPromptWith is systemPromptFor with an optional persona replacing the built-in base.
+func (s *Service) systemPromptWith(now time.Time, persona string) string {
 	n := now.In(ictZone)
+	base := strings.SplitN(systemPrompt, "\nKhi tin nhắn có kèm", 2)[0]
+	if p := strings.TrimSpace(persona); p != "" {
+		base = p
+	}
 	return fmt.Sprintf("%s\nHôm nay: %s, %s (giờ Việt Nam, UTC+7).%s",
-		strings.SplitN(systemPrompt, "\nKhi tin nhắn có kèm", 2)[0],
+		base,
 		weekdaysVN[n.Weekday()], n.Format("02/01/2006 15:04"), toolRulePrompt)
 }
 
@@ -243,6 +250,14 @@ func (s *Service) completeTools(ctx context.Context, chatID, userID, userName, p
 // multimodal); userText is what the injection guard treats as the user's words.
 func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName, userText string, user llm.ChatMessage, maxRounds int) (string, error) {
 	tl := s.tools
+	lv := liveFrom(ctx)
+	client := s.toolClient
+	if lv.Client != nil {
+		client = lv.Client
+	}
+	if lv.Model != "" {
+		tl.Model = lv.Model
+	}
 	started := tl.Now()
 	t := &turn{chatID: chatID, userID: userID, userName: userName, userText: userText, now: tl.Now}
 
@@ -258,8 +273,11 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	var defs []llm.ToolDef
 	byName := make(map[string]toolImpl, len(s.toolImpls))
 	for _, ti := range s.toolImpls {
-		if ti.def.Name == "due_dates" && !s.dueChats[chatID] {
+		if ti.def.Name == "due_dates" && !lv.dueChat(s.dueChats, chatID) {
 			continue // private data: only for allow-listed chats
+		}
+		if lv.Set && (lv.DisabledTools[ti.def.Name] || (ti.def.Name == "web_search" && lv.Search == nil && tl.Search == nil)) {
+			continue
 		}
 		defs = append(defs, ti.def)
 		byName[ti.def.Name] = ti
@@ -267,7 +285,7 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	if user.Role == "user" && len(user.Parts) > 0 {
 		t.taint() // image turn: untrusted content from the start
 	}
-	system := s.systemPromptFor(tl.Now())
+	system := s.systemPromptWith(tl.Now(), lv.Persona)
 
 	var usage llm.Usage
 	rounds := 0
@@ -293,7 +311,7 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 
 	for rounds < maxRounds && loopCtx.Err() == nil {
 		rounds++
-		resp, err := s.toolClient.CompleteWithTools(loopCtx, system, msgs, defs, 2048)
+		resp, err := client.CompleteWithTools(loopCtx, system, msgs, defs, 2048)
 		add(resp.Usage)
 		if err != nil {
 			if loopCtx.Err() != nil && ctx.Err() == nil {
@@ -337,7 +355,7 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 	finalCtx, cancelFinal := context.WithTimeout(ctx, finalTO)
 	defer cancelFinal()
 	rounds++
-	resp, err := s.toolClient.CompleteWithTools(finalCtx, system, msgs, nil, 2048)
+	resp, err := client.CompleteWithTools(finalCtx, system, msgs, nil, 2048)
 	add(resp.Usage)
 	if err != nil {
 		return finish("", err)
@@ -513,6 +531,13 @@ type bucket struct {
 	tokens     float64
 	last       time.Time
 	lastNotice time.Time
+}
+
+// resize changes the rate in place, keeping per-chat state.
+func (l *limiter) resize(burst int, perMin float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.burst, l.perSec = float64(burst), perMin/60
 }
 
 func newLimiter(burst int, perMin float64, now func() time.Time) *limiter {
