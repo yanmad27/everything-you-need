@@ -1,28 +1,41 @@
-{{template "head" .}}<h1>{{.Title}}</h1>
-{{with .Data.Flash}}<p class="flash {{.Kind}}">{{.Text}}</p>{{end}}
-{{if .Data.SecretsDisabled}}<p class="warn banner-secrets">Chưa đặt BOTCONFIG_SECRET (≥32 ký tự): không thể lưu khoá bí mật (API key). Các cài đặt khác vẫn dùng được.</p>{{end}}
-{{if .Data.Problems}}<p class="bad banner-problems">Một số giá trị đã lưu không dùng được, đang dùng mặc định: {{range .Data.Problems}}{{.}} {{end}}</p>{{end}}
-{{with .Data.FormError}}<p class="bad form-error">{{.}}</p>{{end}}
-<form method="post" action="{{.Data.PostURL}}">
+{{template "head" .}}<div class="ph"><div><a class="back" href="/admin/bots">← Danh sách bot</a>
+<h1>{{.Title}}</h1><p class="chips">{{template "plat" .Data.Platform}}{{if .Data.Enabled}}<span class="pill ok">đang bật</span>{{else}}<span class="pill timeout">tạm dừng</span>{{end}}</p></div>
+<div class="legend"><span><span class="badge source-env">env</span> giá trị mặc định</span><span><span class="badge source-ui">UI</span> đã đổi trên UI</span><span><span class="badge sensitive">nhạy cảm</span> cần mật khẩu</span></div></div>
+{{with .Data.Flash}}<p class="alert flash {{if eq .Kind "ok"}}ok{{else}}bad{{end}} {{.Kind}}" role="status">{{.Text}}</p>{{end}}
+{{if .Data.SecretsDisabled}}<p class="alert warn banner-secrets" role="alert">Chưa đặt BOTCONFIG_SECRET (≥32 ký tự): không thể lưu khoá bí mật (API key). Các cài đặt khác vẫn dùng được.</p>{{end}}
+{{if .Data.Problems}}<div class="alert bad banner-problems" role="alert">Một số giá trị đã lưu không dùng được, đang dùng mặc định: <span class="chips">{{range .Data.Problems}}<code>{{.}}</code>{{end}}</span></div>{{end}}
+{{with .Data.FormError}}<p class="alert bad form-error" role="alert">{{.}}</p>{{end}}
+<form class="cfg-form" method="post" action="{{.Data.PostURL}}">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
-<table><tr><th>Cài đặt</th><th>Giá trị</th><th>Nguồn</th><th>Mặc định (env)</th><th>Cập nhật</th><th>Đặt lại</th></tr>
-{{range .Data.Settings}}<tr class="setting{{if .Sensitive}} sensitive{{end}}" id="k-{{.Key}}"><td><label for="f-{{.Key}}">{{.Label}}</label> <span class="mut">{{.Key}}</span>{{if .Sensitive}} <span class="badge sensitive">nhạy cảm</span>{{end}}</td>
-<td>{{if .Secret}}<span class="mut">{{.MaskedText}}</span> <input id="f-{{.Key}}" type="password" name="{{.InputName}}" value="" autocomplete="new-password" maxlength="500" placeholder="để trống = giữ nguyên">
+<section class="card sec cfg" id="sec-st" aria-labelledby="h-st"><div class="sec-h"><h2 id="h-st">Trạng thái</h2><span class="mut">Bật/tạm dừng bot. Khi tạm dừng, bot im lặng nhưng vẫn lưu tin nhắn.</span></div>
+{{range .Data.Settings}}{{if (eq .Key "enabled")}}{{template "setting" .}}{{end}}{{end}}</section>
+<section class="card sec cfg" id="sec-llm" aria-labelledby="h-llm"><div class="sec-h"><h2 id="h-llm">LLM</h2><span class="mut">Máy chủ, mô hình, khoá API và bảng giá.</span></div>
+{{range .Data.Settings}}{{if (or (eq .Key "llm_base_url") (eq .Key "llm_model") (eq .Key "llm_api_key") (eq .Key "prices"))}}{{template "setting" .}}{{end}}{{end}}</section>
+<section class="card sec cfg" id="sec-tools" aria-labelledby="h-tools"><div class="sec-h"><h2 id="h-tools">Công cụ</h2><span class="mut">Tắt một công cụ sẽ ẩn nó khỏi mô hình.</span></div>
+{{range .Data.Settings}}{{if (or (eq .Key "tools.prices") (eq .Key "tools.lunar") (eq .Key "tools.news") (eq .Key "tools.web_search") (eq .Key "tools.fetch") (eq .Key "tools.reminders") (eq .Key "tools.due_dates") (eq .Key "tools.images"))}}{{template "setting" .}}{{end}}{{end}}</section>
+<section class="card sec cfg" id="sec-web" aria-labelledby="h-web"><div class="sec-h"><h2 id="h-web">Tìm kiếm &amp; đọc web</h2><span class="mut">Khoá Serper, tên miền được phép đọc và chat được dùng công cụ riêng tư.</span></div>
+{{range .Data.Settings}}{{if (or (eq .Key "serper_api_key") (eq .Key "fetch_allow_domains") (eq .Key "private_tool_chats"))}}{{template "setting" .}}{{end}}{{end}}</section>
+<section class="card sec cfg" id="sec-lim" aria-labelledby="h-lim"><div class="sec-h"><h2 id="h-lim">Giới hạn &amp; lưu trữ</h2><span class="mut">Giới hạn tần suất mỗi chat và thời gian giữ dữ liệu.</span></div>
+{{range .Data.Settings}}{{if (or (eq .Key "rate_limit_per_min") (eq .Key "rate_limit_burst") (eq .Key "retention_days"))}}{{template "setting" .}}{{end}}{{end}}</section>
+<section class="card sec cfg" id="sec-persona" aria-labelledby="h-persona"><div class="sec-h"><h2 id="h-persona">Persona</h2><span class="mut">Thay thế phần đầu system prompt mặc định.</span></div>
+{{range .Data.Settings}}{{if (eq .Key "persona")}}{{template "setting" .}}{{end}}{{end}}</section>
+{{$other := false}}{{range .Data.Settings}}{{if not (or (eq .Key "enabled") (eq .Key "llm_base_url") (eq .Key "llm_model") (eq .Key "llm_api_key") (eq .Key "prices") (eq .Key "tools.prices") (eq .Key "tools.lunar") (eq .Key "tools.news") (eq .Key "tools.web_search") (eq .Key "tools.fetch") (eq .Key "tools.reminders") (eq .Key "tools.due_dates") (eq .Key "tools.images") (eq .Key "serper_api_key") (eq .Key "fetch_allow_domains") (eq .Key "private_tool_chats") (eq .Key "rate_limit_per_min") (eq .Key "rate_limit_burst") (eq .Key "retention_days") (eq .Key "persona"))}}{{$other = true}}{{end}}{{end}}{{if $other}}<section class="card sec cfg" id="sec-other" aria-labelledby="h-other"><div class="sec-h"><h2 id="h-other">Khác</h2></div>
+{{range .Data.Settings}}{{if not (or (eq .Key "enabled") (eq .Key "llm_base_url") (eq .Key "llm_model") (eq .Key "llm_api_key") (eq .Key "prices") (eq .Key "tools.prices") (eq .Key "tools.lunar") (eq .Key "tools.news") (eq .Key "tools.web_search") (eq .Key "tools.fetch") (eq .Key "tools.reminders") (eq .Key "tools.due_dates") (eq .Key "tools.images") (eq .Key "serper_api_key") (eq .Key "fetch_allow_domains") (eq .Key "private_tool_chats") (eq .Key "rate_limit_per_min") (eq .Key "rate_limit_burst") (eq .Key "retention_days") (eq .Key "persona"))}}{{template "setting" .}}{{end}}{{end}}</section>{{end}}
+<div class="card savebar"><div class="fld"><label for="ap">Mật khẩu quản trị <span class="badge sensitive">bắt buộc khi đổi mục nhạy cảm hoặc khoá bí mật</span></label>
+<input id="ap" type="password" name="{{.Data.PasswordField}}" autocomplete="current-password" maxlength="200"></div>
+<button class="btn" type="submit">Lưu thay đổi</button></div></form>
+
+<section class="card sec" aria-labelledby="h-test"><div class="sec-h"><h2 id="h-test">Kiểm tra kết nối</h2><span class="mut">Dùng giá trị đã lưu; không hiển thị phản hồi hay khoá.</span></div>
+<div class="tests"><form method="post" action="{{.Data.TestURL}}?what=llm"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn ghost" type="submit">Thử LLM</button></form>
+<form method="post" action="{{.Data.TestURL}}?what=serper"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="btn ghost" type="submit">Thử Serper</button></form></div></section>
+{{template "foot" .}}
+{{define "setting"}}<div class="setting{{if .Sensitive}} sensitive{{end}}{{if .Error}} has-error{{end}}" id="k-{{.Key}}">
+<div class="s-lbl"><label for="f-{{.Key}}">{{.Label}}</label><span class="chips"><span class="badge source-{{.Source}}">{{if eq .Source "ui"}}UI{{else}}env{{end}}</span>{{if .Sensitive}}<span class="badge sensitive">nhạy cảm</span>{{end}}{{if .Secret}}<span class="badge">bí mật</span>{{end}}</span><span class="id">{{.Key}}</span></div>
+<div class="s-in">{{if .Secret}}<span class="masked">{{.MaskedText}}</span><input id="f-{{.Key}}" type="password" name="{{.InputName}}" value="" autocomplete="new-password" maxlength="500" placeholder="để trống = giữ nguyên">
 {{else if eq (printf "%s" .Kind) "bool"}}<select id="f-{{.Key}}" name="{{.InputName}}"><option value="true"{{if eq .Input "true"}} selected{{end}}>bật</option><option value="false"{{if eq .Input "false"}} selected{{end}}>tắt</option></select>
-{{else if eq (printf "%s" .Kind) "text"}}<textarea id="f-{{.Key}}" name="{{.InputName}}" rows="6" maxlength="4000">{{.Input}}</textarea>
+{{else if eq (printf "%s" .Kind) "text"}}<textarea id="f-{{.Key}}" name="{{.InputName}}" rows="8" maxlength="4000">{{.Input}}</textarea>
 {{else if eq (printf "%s" .Kind) "list"}}<textarea id="f-{{.Key}}" name="{{.InputName}}" rows="3">{{.Input}}</textarea>
 {{else}}<input id="f-{{.Key}}" name="{{.InputName}}" value="{{.Input}}" maxlength="500">{{end}}
-{{if .Error}}<br><span class="bad field-error">{{.Error}}</span>{{end}}</td>
-<td><span class="badge source-{{.Source}}">{{if eq .Source "ui"}}UI{{else}}env{{end}}</span></td>
-<td class="mut">{{if .Secret}}—{{else}}{{.DefaultText}}{{end}}</td>
-<td class="mut">{{if .UpdatedTime}}{{.UpdatedTime}}{{if .UpdatedBy}} · {{.UpdatedBy}}{{end}}{{end}}</td>
-<td>{{if .Overridden}}<input type="checkbox" name="{{.ResetName}}" value="1" id="r-{{.Key}}"> <label for="r-{{.Key}}">về mặc định</label>{{end}}</td></tr>
-{{end}}</table>
-<p><label for="ap">Mật khẩu quản trị (bắt buộc khi đổi cài đặt nhạy cảm hoặc khoá bí mật)</label>
-<input id="ap" type="password" name="{{.Data.PasswordField}}" autocomplete="current-password" maxlength="200"></p>
-<button type="submit">Lưu</button></form>
-
-<h2>Kiểm tra kết nối</h2>
-<form method="post" action="{{.Data.TestURL}}?what=llm"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Thử LLM</button></form>
-<form method="post" action="{{.Data.TestURL}}?what=serper"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Thử Serper</button></form>
-{{template "foot" .}}
+{{if .Error}}<span class="field-error" role="alert">{{.Error}}</span>{{end}}
+<div class="s-meta">{{if not .Secret}}<span>Mặc định: <code>{{.DefaultText}}</code></span>{{end}}{{if .UpdatedTime}}<span>Cập nhật {{.UpdatedTime}}{{if .UpdatedBy}} · {{.UpdatedBy}}{{end}}</span>{{end}}{{if .Overridden}}<label class="reset"><input type="checkbox" name="{{.ResetName}}" value="1" id="r-{{.Key}}"> về mặc định</label>{{end}}</div></div>
+</div>{{end}}
