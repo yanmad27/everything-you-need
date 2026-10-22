@@ -1,13 +1,13 @@
-{{template "head" .}}<div class="ph"><div><h1>Hội thoại <span class="count">{{num .Data.Total}}</span></h1><p class="mut">Mọi cuộc trò chuyện của bot, mới hoạt động nhất trước.</p></div></div>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">01 / HỘI THOẠI</span><h1>Hội thoại <span class="count">{{num .Data.Total}}</span></h1><p class="mut">Mọi cuộc trò chuyện của bot, mới hoạt động nhất trước.</p></div></div>
 <form class="card filters" method="get">
 {{template "platform" (.Q.Get "platform")}}
 <label>Loại<select name="type"><option value="">Tất cả</option><option value="PRIVATE"{{if eq (.Q.Get "type") "PRIVATE"}} selected{{end}}>Riêng tư</option><option value="GROUP"{{if eq (.Q.Get "type") "GROUP"}} selected{{end}}>Nhóm</option></select></label>
 <label class="grow">Tìm (tên, id, nội dung)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
 {{template "dates" .Q}}</form>
-<div class="card"><div class="tw"><table>
+<section class="card"><div class="sec-h"><h2>Tất cả hội thoại</h2><span class="mut">Mới hoạt động nhất trước · {{num .Data.Total}} hội thoại</span></div><div class="tw"><table>
 <thead><tr><th>Tên</th><th>Loại</th><th>Nền tảng</th><th>Hoạt động đầu</th><th>Hoạt động cuối</th><th class="n">Tin nhắn</th><th class="n">Công cụ</th></tr></thead>
 <tbody>{{range .Data.Items}}<tr><td><a class="name" href="/admin/chat?platform={{.Platform}}&amp;id={{.ChatID}}">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.ChatID}}{{end}}</a>{{if .DisplayName}}<span class="id">{{.ChatID}}</span>{{end}}</td>
 <td>{{if eq .ChatType "GROUP"}}<span class="pill">Nhóm</span>{{else if eq .ChatType "PRIVATE"}}<span class="pill blocked">Riêng tư</span>{{else}}{{.ChatType}}{{end}}</td><td>{{template "plat" .Platform}}</td><td class="t">{{ftime .FirstActivity}}</td><td class="t">{{ftime .LastActivity}}</td><td class="n">{{num .Messages}}</td><td class="n">{{num .ToolCalls}}</td></tr>
-{{else}}<tr><td colspan="7" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div>
-{{template "pager" .Data.Pager}}</div>
+{{else}}<tr><td colspan="7" class="empty">Chưa có dữ liệu.<span class="empty-note">Hoạt động mới sẽ xuất hiện tại đây. Nếu đang lọc, hãy thử mở rộng khoảng thời gian.</span></td></tr>{{end}}</tbody></table></div>
+{{template "pager" .Data.Pager}}</section>
 {{template "foot" .}}

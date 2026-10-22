@@ -1,11 +1,13 @@
 {{template "head" .}}<div class="auth">
-<form class="card form" method="post" action="/admin/login">
-<a class="brand" href="/admin/login"><span class="dot"></span>Pink admin</a>
-<h1 class="sec">Đăng nhập</h1>
-<p class="lead">Bảng quản trị chỉ đọc.</p>
+<aside class="auth-story"><a class="brand" href="/admin/login"><span class="dot" aria-hidden="true">p</span><span>Pink<span class="brand-sub">CONTROL ROOM</span></span></a>
+<div class="story-copy"><h2>Mọi kết nối.<br>Một góc nhìn.</h2><p>Một không gian yên tĩnh để hiểu những cuộc trò chuyện, theo dõi hoạt động và chăm sóc bot của bạn.</p><div class="auth-art" aria-hidden="true"><span class="orbit"></span><span class="orbit two"></span><span class="orbit three"></span><span class="orbit-core">p</span></div></div><small>CONVERSATIONS, CONNECTED.</small></aside>
+<div class="auth-panel"><form class="card form" method="post" action="/admin/login">
+<span class="eyebrow">KHÔNG GIAN CỦA BẠN</span>
+<h1>Đăng nhập</h1>
+<p class="lead">Chào mừng trở lại. Đăng nhập để theo dõi hội thoại và quản lý bot của bạn.</p>
 {{if .Data}}<p class="alert bad" role="alert">Sai tên đăng nhập hoặc mật khẩu.</p>{{end}}
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <div class="fld"><label for="u">Tên đăng nhập</label><input id="u" name="username" autocomplete="username" required maxlength="100" autofocus></div>
 <div class="fld"><label for="p">Mật khẩu</label><input id="p" name="password" type="password" autocomplete="current-password" required maxlength="200"></div>
-<button class="btn" type="submit">Đăng nhập</button></form></div>
+<button class="btn" type="submit">Đăng nhập</button><p class="auth-foot">Chỉ dành cho quản trị viên được cấp quyền</p></form></div></div>
 {{template "foot" .}}
