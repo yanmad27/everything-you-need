@@ -95,7 +95,7 @@ func getText(ctx context.Context, client *http.Client, url string, stripHTML boo
 	if stripHTML {
 		s = htmlToText(s)
 	} else {
-		s = strings.TrimSpace(s) // reader returns clean markdown; keep its structure
+		s = condenseReader(s) // reader returns markdown; keep structure, drop nav boilerplate
 		if len(s) > maxPageChars {
 			s = strings.ToValidUTF8(s[:maxPageChars], "")
 		}
@@ -117,4 +117,28 @@ func htmlToText(raw string) string {
 		s = strings.ToValidUTF8(s[:maxPageChars], "")
 	}
 	return s
+}
+
+var (
+	mdLinkOnlyRe = regexp.MustCompile(`^\s*(?:[*+-]\s+)?!?\[[^\]]*\]\([^)]*\)\s*$`)
+	mdImageRe    = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+)
+
+// maxReaderLine drops giant lines (mega-menus, inlined data) from reader output.
+const maxReaderLine = 1500
+
+// condenseReader removes blank lines, link-only lines, images and huge lines so
+// the cap keeps page content instead of a site's navigation menu.
+func condenseReader(s string) string {
+	var out []string
+	for _, l := range strings.Split(s, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || len(l) > maxReaderLine || mdLinkOnlyRe.MatchString(l) {
+			continue
+		}
+		if l = strings.TrimSpace(mdImageRe.ReplaceAllString(l, "")); l != "" {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
 }

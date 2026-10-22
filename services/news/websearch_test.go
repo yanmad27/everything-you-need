@@ -104,3 +104,17 @@ func TestWebSearcherErrorChain(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestWebSearcherStatusClass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"message":"Not enough credits"}`))
+	}))
+	defer srv.Close()
+	w := NewWebSearcher("k")
+	w.baseURL = srv.URL
+	_, err := w.Search(context.Background(), "q", 1)
+	if err == nil || err.Error() != "serper status 400" {
+		t.Fatalf("err=%v", err)
+	}
+}

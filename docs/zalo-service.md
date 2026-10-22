@@ -186,7 +186,16 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
 - Tool output is wrapped as data (`<tool_result>`, closing tags neutralised case-insensitively).
 - Once untrusted content enters a message (`fetch_url`, `web_search`, `news_recent`, or an image),
   `due_dates` and all `reminder_*` tools are disabled for the rest of that message.
-- `fetch_url` only reads links the user sent or that `web_search` returned in the same message.
+- `fetch_url` reads links the user sent or that `web_search` returned in the same message (query
+  string kept). It also accepts a bare host/path (`github.com/trending`, normalised to `https://`;
+  ports other than 80/443 and userinfo are rejected). A *model-proposed* public URL is allowed only
+  while the message is still untainted (no `fetch_url`/`web_search`/`news_recent` yet, not an image
+  turn); its query string and fragment are stripped so data cannot be smuggled out. After the first
+  tool that taints, unknown URLs are refused again. Reader output has nav boilerplate (link-only
+  lines, images, lines >1500 chars) dropped before the 12k cap.
+- Tool failures log `chat tool: name=… outcome=… reason=<tag>` (fixed tags such as
+  `serper_status_400`, `invalid_url`, `url_not_allowed`, `fetch_failed`, `fetch_refused`,
+  `tool_timeout`; never URLs, queries or keys). The user/model still only see a generic "tool failed".
 - `web_search`: ≤3 per message and a per-process budget of 200/hour.
 - `reminder_create` needs reminder wording in the user's own text; `reminder_cancel` needs cancel
   wording (huỷ/xoá/bỏ/cancel/dừng nhắc). Only one successful create/cancel per message; refused or

