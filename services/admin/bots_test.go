@@ -216,6 +216,9 @@ func TestBotSecretNeverRendered(t *testing.T) {
 	if !strings.Contains(page, "đã đặt …"+botSentinel[len(botSentinel)-4:]) || !strings.Contains(api, `"last4":"`+botSentinel[len(botSentinel)-4:]+`"`) {
 		t.Fatalf("masked view missing:\n%s", api)
 	}
+	if !strings.Contains(api, `"providers":[{"name":"serper","state":`) {
+		t.Errorf("providers missing from bot view:\n%s", api)
+	}
 	// a rejected submission (validation error) does not echo secrets either
 	r = postBot(h, ck, csrf, "s.llm_api_key", botSentinel+"2", "s.llm_base_url", "http://bad.example.com", "admin_password", testPass)
 	if b := bodyOf(r); r.StatusCode != 400 || strings.Contains(b, botSentinel) {

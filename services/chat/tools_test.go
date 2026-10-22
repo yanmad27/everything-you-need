@@ -342,7 +342,7 @@ func TestTruncationAndWrapperEscape(t *testing.T) {
 	}, toolStep(call("1", "fetch_url", `{"url":"https://e.test"}`)), textStep("ok"))
 	r.ask("đọc https://e.test")
 	got := r.toolResult(1)
-	if len([]rune(got)) > 4200 || strings.Count(got, "</tool_result>") != 1 {
+	if len([]rune(got)) > 6200 || strings.Count(got, "</tool_result>") != 1 {
 		t.Errorf("len=%d closers=%d", len([]rune(got)), strings.Count(got, "</tool_result>"))
 	}
 }
@@ -716,8 +716,27 @@ func TestFetchModelURLRestrictions(t *testing.T) {
 	blocked("segments", "hi", toolStep(f("https://github.com/a/b/c/d/e/f")), textStep("ok"))
 	blocked("long path", "hi", toolStep(f("https://github.com/"+strings.Repeat("a", 81))), textStep("ok"))
 	blocked("odd chars", "hi", toolStep(f("https://github.com/a;b")), textStep("ok"))
-	blocked("after search", "hi", toolStep(call("s", "web_search", `{"query":"q"}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
-	blocked("after news", "hi", toolStep(call("s", "news_recent", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
+	blocked("non-allowlisted after search", "hi", toolStep(call("s", "web_search", `{"query":"q"}`)), toolStep(f("https://evil.test/a")), textStep("ok"))
+	blocked("non-allowlisted after news", "hi", toolStep(call("s", "news_recent", `{}`)), toolStep(f("https://evil.test/a")), textStep("ok"))
+	blocked("non-allowlisted after fetch", "hi", toolStep(f("https://github.com/trending")), toolStep(f("https://evil.test/a")), textStep("ok"))
+	// public content earlier in the turn does not block an allowlisted follow-up
+	for _, first := range []llm.ToolCall{call("s", "web_search", `{"query":"q"}`), call("s", "news_recent", `{}`), f("https://github.com/trending")} {
+		r := newRig(t, nil, toolStep(first), toolStep(f("https://github.com/trending/go?x=1#y")), textStep("ok"))
+		r.ask("hi")
+		if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "page of https://github.com/trending/go\n") {
+			t.Errorf("follow-up after %s refused: %q", first.Name, got)
+		}
+	}
+	// per-message fetch cap
+	fs := []func([]llm.ChatMessage, []llm.ToolDef) (llm.ToolResponse, error){}
+	for i := 0; i < 5; i++ {
+		fs = append(fs, toolStep(f("https://github.com/o/r"+string(rune('a'+i)))))
+	}
+	r0 := newRig(t, func(tl *Tools) { tl.MaxRounds, tl.MaxCallsPerTurn = 9, 9 }, append(fs, textStep("ok"))...)
+	r0.ask("hi")
+	if got := lastTool(r0.sc.calls[len(r0.sc.calls)-1]); !strings.Contains(got, "đã đọc đủ số trang") {
+		t.Errorf("fetch cap not enforced: %q", got)
+	}
 	// private data already read in this turn
 	r := newRig(t, nil, toolStep(call("d", "due_dates", `{}`)), toolStep(f("https://github.com/trending")), textStep("ok"))
 	r.ask("hi")

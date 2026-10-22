@@ -179,7 +179,12 @@ All pages set `.Active = "bots"` (and `.Nav = "bots"`).
 Overrides int, Problems []string, Note ("không quản lý ở đây" for telegram), URL ("" when unmanaged)}`.
 
 **`bot.html`** — `.Data` is `BotView{Platform, Enabled, SecretsDisabled, Problems []string, Settings []BotSettingRow, Flash *Flash,
-FormError string, PasswordField ("admin_password"), PostURL, TestURL}`.
+FormError string, PasswordField ("admin_password"), PostURL, TestURL, Providers []ProviderStatus}`.
+`ProviderStatus{Name ("serper"), State ("ok"|"no_credit"|"auth"|"error"|"unknown"), Since time.Time (zero when "unknown"),
+Detail (fixed Vietnamese text; never upstream body text or keys)}` is the web-search provider health as last seen by the bot's tools
+(process-wide, in memory; resets when the Serper key changes). On `no_credit` (Serper 402, or 400 whose body mentions credits) or `auth` (401/403) the bot stops
+offering `web_search` for 30 minutes (log `reason=provider_unavailable`, once per cooldown), then probes again; `error` is
+informational only. JSON field names: `name`, `state`, `since`, `detail`.
 `BotSettingRow` embeds `botconfig.SettingView{Key, Label, Kind ("bool|string|text|int|list|prices|secret"), Secret, Sensitive,
 Overridden, Value, Default, Masked{Set,Last4}, UpdatedAt, UpdatedBy}` plus `Source ("env"|"ui"), InputName ("s.<key>"),
 ResetName ("reset.<key>"), Input (current value as form text; never set for secrets), DefaultText, MaskedText ("đã đặt …last4" |
