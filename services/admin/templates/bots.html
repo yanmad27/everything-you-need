@@ -1,10 +1,11 @@
-{{template "head" .}}<div class="ph"><div><h1>{{.Title}}</h1><p class="mut">Cấu hình từng bot. Thay đổi trên UI có hiệu lực từ tin nhắn tiếp theo.</p></div></div>
-<div class="card"><div class="tw"><table>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">KHÔNG GIAN BOT</span><h1>{{.Title}}</h1><p class="mut">Cấu hình từng bot. Thay đổi trên UI có hiệu lực từ tin nhắn tiếp theo.</p></div></div>
+<aside class="card fleet-note"><span class="security-icon" aria-hidden="true">◇</span><div><h2>Bot của bạn, theo cách của bạn.</h2><p>Điều chỉnh mô hình, công cụ và persona. Cài đặt mới áp dụng từ tin nhắn tiếp theo.</p></div></aside>
+<section class="card"><div class="sec-h"><h2>Các kết nối</h2><span class="mut">Cấu hình riêng cho từng nền tảng</span></div><div class="tw"><table>
 <thead><tr><th>Bot</th><th>Trạng thái</th><th class="n">Thay đổi từ UI</th><th>Vấn đề</th><th></th></tr></thead>
 <tbody>{{range .Data.Bots}}<tr><td>{{template "plat" .Platform}}</td>
 <td class="status-{{.Status}}">{{if eq .Status "enabled"}}<span class="pill ok">đang bật</span>{{else if eq .Status "paused"}}<span class="pill timeout">tạm dừng</span>{{else}}<span class="mut">{{.Note}}</span>{{end}}</td>
 <td class="n">{{if .Managed}}{{if .Overrides}}<span class="pill">{{.Overrides}}</span>{{else}}<span class="mut">0</span>{{end}}{{else}}<span class="mut">—</span>{{end}}</td>
 <td>{{if .Problems}}<span class="chips">{{range .Problems}}<span class="pill error">{{.}}</span>{{end}}</span>{{else}}<span class="mut">—</span>{{end}}</td>
 <td class="n">{{if .URL}}<a class="btn ghost btn-link" href="{{.URL}}">Cài đặt →</a>{{end}}</td></tr>
-{{else}}<tr><td colspan="5" class="empty">Chưa có bot.</td></tr>{{end}}</tbody></table></div></div>
+{{else}}<tr><td colspan="5" class="empty">Chưa có bot.</td></tr>{{end}}</tbody></table></div></section>
 {{template "foot" .}}

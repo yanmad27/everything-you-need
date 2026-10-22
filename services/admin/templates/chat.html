@@ -1,7 +1,7 @@
 {{template "head" .}}<div class="ph"><div><a class="back" href="/admin/chats">← Danh sách hội thoại</a>
-<h1>Chi tiết hội thoại <span class="count">{{num .Data.Total}} mục</span></h1>
+<span class="eyebrow">DÒNG THỜI GIAN</span><h1>Chi tiết hội thoại <span class="count">{{num .Data.Total}} mục</span></h1>
 <p class="chips">{{template "plat" .Data.Platform}}<span class="mono mut">{{.Data.ChatID}}</span></p></div></div>
-<div class="card">{{template "pager" .Data.Pager}}
+<section class="card"><div class="sec-h"><h2>Dòng thời gian</h2><span class="mut">Tin nhắn &amp; hoạt động công cụ</span></div>{{template "pager" .Data.Pager}}
 <div class="timeline">
 {{range .Data.Items}}{{if .Message}}{{with .Message}}<div class="msg {{.Direction}}{{if eq .Kind "system"}} system{{end}}{{if .ErrorTag}} failed{{end}}">
 <div class="meta">{{if eq .Kind "system"}}<span class="pill blocked">hệ thống</span>{{else}}<span class="author">{{if eq .Direction "in"}}{{if .UserName}}{{.UserName}}{{else}}{{.UserID}}{{end}}{{else}}Pink{{end}}</span>{{end}}<span>{{ftime .CreatedAt}}</span><span class="mono">lượt {{.TurnID}}</span>{{if .ErrorTag}}<span class="pill error">{{.ErrorTag}}</span>{{end}}</div>
@@ -11,5 +11,5 @@
 <dl>{{if .ArgsSummary}}<dt>Tham số</dt><dd><code>{{.ArgsSummary}}</code></dd>{{end}}{{if .ResultSummary}}<dt>Kết quả</dt><dd><code>{{.ResultSummary}}</code></dd>{{end}}{{if not (or .ArgsSummary .ResultSummary)}}<dt>—</dt><dd class="mut">Không có tóm tắt.</dd>{{end}}</dl></details>{{end}}{{end}}
 {{else}}<p class="mut">Chưa có dữ liệu.</p>{{end}}
 </div>
-{{template "pager" .Data.Pager}}</div>
+{{template "pager" .Data.Pager}}</section>
 {{template "foot" .}}

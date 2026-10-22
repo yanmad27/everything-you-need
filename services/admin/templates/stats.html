@@ -1,14 +1,14 @@
-{{template "head" .}}<div class="ph"><div><h1>{{.Title}} <span class="count">{{len .Data.Items}}</span></h1><p class="mut">{{if .Data.ByChat}}Hoạt động, lỗi và chi phí theo từng nhóm/chat.{{else}}Hoạt động, lỗi và chi phí theo từng người dùng.{{end}}</p></div></div>
+{{template "head" .}}<div class="ph"><div><span class="eyebrow">PHÂN TÍCH HOẠT ĐỘNG</span><h1>{{.Title}} <span class="count">{{len .Data.Items}}</span></h1><p class="mut">{{if .Data.ByChat}}Hoạt động, lỗi và chi phí theo từng nhóm/chat.{{else}}Hoạt động, lỗi và chi phí theo từng người dùng.{{end}}</p></div></div>
 <form class="card filters" method="get">
 {{template "platform" (.Q.Get "platform")}}
 <label class="grow">Tìm (tên/id)<input name="q" value="{{.Q.Get "q"}}" maxlength="100"></label>
 {{if not .Data.ByChat}}<label>Chat id<input name="chat" value="{{.Q.Get "chat"}}" maxlength="100"></label>{{end}}
 {{template "dates" .Q}}</form>
-<div class="card"><div class="tw"><table>
+<section class="card insights"><div class="sec-h"><h2>{{if .Data.ByChat}}Tổng quan nhóm &amp; chat{{else}}Tổng quan người dùng{{end}}</h2><span class="mut">Hoạt động · công cụ · tài nguyên</span></div><div class="tw"><table>
 <thead><tr><th>{{if .Data.ByChat}}Chat{{else}}Người dùng{{end}}</th><th class="n">Tin nhắn</th><th class="n">Ngày h.động</th><th>Lần cuối</th><th class="n">Nhắc nhở</th><th class="n">Ảnh</th><th>Công cụ hàng đầu</th><th class="n">Lỗi</th><th class="n">Thông báo</th><th class="n">Token vào</th><th class="n">Token ra</th><th class="n">Tổng token</th><th class="n">Chi phí ước tính</th></tr></thead>
 <tbody>{{range .Data.Items}}<tr><td><span class="name">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</span> {{template "plat" .Platform}}{{if .Name}}<span class="id">{{.ID}}</span>{{end}}</td>
 <td class="n">{{num .Messages}}</td><td class="n">{{num .ActiveDays}}</td><td class="t">{{ftime .LastSeen}}</td><td class="n">{{num .RemindersCreated}}</td><td class="n">{{num .ImagesSent}}</td>
 <td><span class="chips">{{range .TopTools}}<span class="chip">{{.Name}} <b>×{{.Count}}</b></span>{{else}}<span class="mut">—</span>{{end}}</span></td><td class="n">{{if .Errors}}<span class="pill error">{{num .Errors}}</span>{{else}}<span class="mut">0</span>{{end}}</td><td class="n">{{num .Notices}}</td>
 <td class="n">{{num .PromptTokens}}</td><td class="n">{{num .CompletionTokens}}</td><td class="n"><b>{{num .TotalTokens}}</b></td><td class="n">{{estcost .EstCost .PartialPricing}}</td></tr>
-{{else}}<tr><td colspan="13" class="empty">Chưa có dữ liệu.</td></tr>{{end}}</tbody></table></div></div>
+{{else}}<tr><td colspan="13" class="empty">Chưa có dữ liệu.<span class="empty-note">Hoạt động mới sẽ xuất hiện tại đây. Nếu đang lọc, hãy thử mở rộng khoảng thời gian.</span></td></tr>{{end}}</tbody></table></div></section>
 {{template "foot" .}}
