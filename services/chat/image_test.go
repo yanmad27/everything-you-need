@@ -79,9 +79,19 @@ func TestImageFetchErrorAndTooLargeNoLLM(t *testing.T) {
 	if len(r.sc.calls) != 0 || len(r.snd.plain) != 1 || !strings.Contains(r.snd.plain[0], "không tải được ảnh") {
 		t.Fatalf("fetch error: calls=%d plain=%v", len(r.sc.calls), r.snd.plain)
 	}
-	_ = r.svc.HandleImage(context.Background(), "c", "u", "", 0, "x", okImg(6<<20))
+	_ = r.svc.HandleImage(context.Background(), "c", "u", "", 0, "x", okImg(11<<20))
 	if len(r.sc.calls) != 0 || len(r.snd.plain) != 2 || !strings.Contains(r.snd.plain[1], "lớn quá") {
 		t.Fatalf("too large: calls=%d plain=%v", len(r.sc.calls), r.snd.plain)
+	}
+}
+
+func TestImageNineMiBPassesSizeCheck(t *testing.T) {
+	r := newRig(t, nil, textStep("ok"))
+	if err := r.svc.HandleImage(context.Background(), "chat-1234", "u", "", 0, "x", okImg(9<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.sc.calls) != 1 || len(r.snd.plain) != 0 {
+		t.Fatalf("9 MiB rejected: calls=%d plain=%v", len(r.sc.calls), r.snd.plain)
 	}
 }
 

@@ -14,7 +14,10 @@ import (
 )
 
 const (
-	maxImageB64     = 7 << 20 // base64 bytes sent to the model
+	// maxImageB64 caps base64 bytes sent to the model. It must cover the
+	// fetcher's raw cap (zalobot maxImageBytes = 10 MiB): base64 of 10 MiB is
+	// 4*ceil(10MiB/3) ≈ 13.34 MiB, rounded up to 14 MiB.
+	maxImageB64     = 14 << 20
 	imageMaxRounds  = 2
 	recentQuestionW = 2 * time.Minute
 )
