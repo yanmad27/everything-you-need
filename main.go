@@ -546,6 +546,8 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 		func(c context.Context) ([]byte, string, error) { return fetchImage(c, photo) })
 	if err != nil {
 		log.Printf("chat dispatch error (zalo image): %v", err)
+		log.Printf("zalo dispatch: result=error reason=image_handle chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
+		return
 	}
 	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
 }

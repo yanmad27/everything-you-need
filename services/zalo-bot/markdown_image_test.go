@@ -125,6 +125,28 @@ func TestWebhookImageShapes(t *testing.T) {
 	}
 }
 
+func TestWebhookRealPhotoURLShape(t *testing.T) {
+	real := func(caption string) string {
+		return `{"event_name":"message.image.received","message":{` + caption +
+			`"chat":{"chat_type":"PRIVATE","id":"u1"},"date":1730000000000,` +
+			`"from":{"display_name":"An","id":"u1","is_bot":false},"message_id":"r1",` +
+			`"message_type":"CHAT_PHOTO","photo_url":"https://cdn.example/real.jpg"}}`
+	}
+	for name, c := range map[string]struct{ pre, caption string }{
+		"caption":    {`"caption":"thuốc gì đây",`, "thuốc gì đây"},
+		"no_caption": {``, ""},
+	} {
+		var got []Message
+		logs := captureLog(func() { _, got = serve(t, "s", "s", real(c.pre)) })
+		if len(got) != 1 || got[0].Kind != "image" || got[0].Photo != "https://cdn.example/real.jpg" || got[0].Caption != c.caption {
+			t.Errorf("%s: %+v", name, got)
+		}
+		if strings.Contains(logs, "dropped") {
+			t.Errorf("%s: dropped: %q", name, logs)
+		}
+	}
+}
+
 func TestWebhookImageNoPhotoDropped(t *testing.T) {
 	var got []Message
 	logs := captureLog(func() { _, got = serve(t, "s", "s", imgBody(`"photo":"not-a-url","caption":"c"`)) })
