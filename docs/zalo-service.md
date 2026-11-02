@@ -179,9 +179,13 @@ Users can ask Pink in natural Vietnamese to save, list, search, view, edit/appen
   a ≤ 200-character snippet (`note_get` returns the full body). Search ignores case and diacritics.
 - Guard: all note tools are private data like `reminder_*`/`due_dates`: disabled once the message
   is tainted, and running any of them sets `private_seen`, so a model-proposed `fetch_url` is
-  refused afterwards. Writes (`save`/`update`/`delete`) also need note wording in the user's own text
-  (note, ghi chú, lưu, thêm, sửa, xoá, ...); `delete` needs delete wording plus a note word, and the
-  id must appear as a number in the user's text. One delete and at most 3 writes per message; no bulk delete.
+  refused afterwards; `web_search` is refused too (`private_seen`) so a model-written query cannot carry private data out.
+  Writes also need wording in the user's own text, matched with Unicode-aware word boundaries
+  (so "Huy", "theme" or "lưu ý" never count): `save` needs a note word (note, ghi chú, ghi nhớ, ghi lại, lưu, ...);
+  `update` needs a note word, an edit verb (thêm, sửa, bổ sung, ...) and the note's number in the text;
+  `mode=replace` additionally needs replace wording (thay, ghi đè, sửa … thành) — otherwise it is refused and
+  the body is never overwritten (no `prev_body` kept); `delete` needs `<xoá|huỷ|bỏ|delete> <note|ghi chú> [#]N` with
+  the model's id equal to N. One delete and at most 3 writes per message; no bulk delete.
 - Privacy: note titles and bodies are never logged, and tool-call recording stores `[redacted]` for
   `note_*` arguments and results. The admin UI has a read-only **Ghi chú** page; toggle the tools
   with `tools.notes` on the Bot page (default on).

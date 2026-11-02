@@ -94,3 +94,13 @@ func TestDispatchZaloImageRouting(t *testing.T) {
 		t.Error("nil fetcher must ignore")
 	}
 }
+
+func TestNoteDBPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "data/notes.db", "convo.db": "data/notes.db", "data/convo.db": "data/notes.db", "/var/app/c.db": "/var/app/notes.db",
+	} {
+		if got := noteDBPath(in); got != want {
+			t.Errorf("noteDBPath(%q)=%q want %q", in, got, want)
+		}
+	}
+}

@@ -29,19 +29,52 @@ type NoteStore interface {
 const maxNoteWritesPerTurn = 3
 
 // Intent guards. The user's own message must carry the intent; the model's
-// arguments, tool results, web or image text never count.
-var (
-	noteWordRe   = regexp.MustCompile(`(?i)(\bnotes?\b|ghi\s*chú|ghi\s*chu|ghi\s*nhớ|ghi\s*nho|ghi\s*lại|ghi\s*lai|\bmemo\b|\blưu\b|\bluu\b|\bsave\b|\bremember\b)`)
-	deleteVerbRe = regexp.MustCompile(`(?i)(xoá|xóa|xoa|\bbỏ\b|\bbo\b|huỷ|hủy|\bhuy\b|\bdelete\b|\bremove\b)`)
-	editVerbRe   = regexp.MustCompile(`(?i)(sửa|sua|thêm|them|bổ\s*sung|bo\s*sung|cập\s*nhật|cap\s*nhat|đổi|doi|ghi\s*thêm|\bedit\b|\bupdate\b|\bappend\b|\badd\b|\bchange\b)`)
-	digitsRe     = regexp.MustCompile(`\d+`)
+// arguments, tool results, web or image text never count. Go's \b is ASCII-only
+// and would mis-handle "bỏ"/"huỷ", so boundaries are Unicode-aware: a keyword
+// must not touch another letter or digit ("theme" is not "thêm"/"them", "Huy"
+// is not a verb).
+const (
+	bL = `(?:^|[^\p{L}\p{N}])`
+	bR = `(?:$|[^\p{L}\p{N}])`
 )
 
-func noteSaveIntent(text string) bool { return noteWordRe.MatchString(text) }
-func noteDeleteIntent(text string) bool {
-	return deleteVerbRe.MatchString(text) && noteWordRe.MatchString(text)
+var (
+	// A note word that may start a save: "lưu ý" (heads-up) is removed first.
+	noteSaveWordRe = regexp.MustCompile(`(?i)` + bL + `(?:notes?|ghi\s+chú|ghi\s+chu|ghi\s+nhớ|ghi\s+nho|ghi\s+lại|ghi\s+lai|memo|lưu|luu|save|remember)` + bR)
+	luuYRe         = regexp.MustCompile(`(?i)` + bL + `(?:lưu|luu)\s+(?:ý|y)` + bR)
+	// A reference to a note itself (needed to edit/delete).
+	noteRefRe  = regexp.MustCompile(`(?i)` + bL + `(?:notes?|ghi\s+chú|ghi\s+chu|memo)` + bR)
+	editVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:sửa|sua|thêm|them|bổ\s+sung|bo\s+sung|cập\s+nhật|cap\s+nhat|đổi|thay|ghi\s+thêm|edit|update|append|add|replace|change)` + bR)
+	// Explicit replace wording; without it note_update cannot overwrite a body.
+	replaceVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:thay\s+thế|thay\s+the|thay|ghi\s+đè|ghi\s+de|replace|overwrite)` + bR +
+		`|` + bL + `(?:sửa|sua|đổi|doi)[^\n]{0,25}?\s(?:thành|thanh)` + bR)
+	// delete verb, then (within a few characters) a note word, optional "#", then the number.
+	deleteRe = regexp.MustCompile(`(?i)` + bL + `(?:xoá|xóa|xoa|huỷ|hủy|bỏ|delete|remove)\s+(?:cái\s+)?(?:notes?|ghi\s+chú|ghi\s+chu|memo)\s*(?:số\s*|so\s*|thứ\s*)?#?\s*(\d+)` + bR)
+	digitsRe = regexp.MustCompile(`\d+`)
+)
+
+func noteSaveIntent(text string) bool {
+	return noteSaveWordRe.MatchString(luuYRe.ReplaceAllString(text, " "))
 }
-func noteUpdateIntent(text string) bool { return editVerbRe.MatchString(text) }
+
+// noteUpdateIntent: a note word AND an edit verb (the id is checked separately).
+func noteUpdateIntent(text string) bool {
+	return noteRefRe.MatchString(text) && editVerbRe.MatchString(text)
+}
+
+func noteReplaceIntent(text string) bool { return replaceVerbRe.MatchString(text) }
+
+// deleteTargets returns the numbers the user explicitly named in a
+// "<delete verb> <note word> [#]N" phrase.
+func deleteTargets(text string) []int {
+	var out []int
+	for _, m := range deleteRe.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
 
 // idInText reports whether the user's own text contains id as a whole number.
 func idInText(text string, id int) bool {
@@ -205,8 +238,12 @@ func (s *Service) noteTools() []toolImpl {
 				if err := json.Unmarshal(raw, &a); err != nil || a.ID <= 0 || (a.Mode != "append" && a.Mode != "replace") {
 					return "", userError("invalid arguments: id and mode (append|replace) required")
 				}
-				if err := writeGate(t, noteUpdateIntent(t.userText) || noteSaveIntent(t.userText), "the user did not ask to edit a note; ask them to confirm first"); err != nil {
+				if err := writeGate(t, noteUpdateIntent(t.userText) && idInText(t.userText, a.ID),
+					"the user did not ask to edit this note; they must name the note number and say what to change (e.g. 'thêm vào note 2: ...')"); err != nil {
 					return "", err
+				}
+				if a.Mode == "replace" && !noteReplaceIntent(t.userText) {
+					return "", userError("the user did not ask to replace the note text (no 'thay', 'ghi đè', 'sửa … thành'); use mode append or ask them to confirm")
 				}
 				c, cancel := wctx(ctx)
 				defer cancel()
@@ -226,11 +263,12 @@ func (s *Service) noteTools() []toolImpl {
 				if err := json.Unmarshal(raw, &a); err != nil || a.ID <= 0 {
 					return "", userError("invalid arguments: id required")
 				}
-				if err := writeGate(t, noteDeleteIntent(t.userText), "the user did not ask to delete a note; ask them to confirm (e.g. 'xoá note 3') first"); err != nil {
-					return "", err
+				named := false
+				for _, n := range deleteTargets(t.userText) {
+					named = named || n == a.ID
 				}
-				if !idInText(t.userText, a.ID) {
-					return "", userError("người dùng chưa nêu số ghi chú cần xoá; hãy hỏi lại số thứ tự (ví dụ 'xoá note 3')")
+				if err := writeGate(t, named, "the user did not ask to delete this note; they must say e.g. 'xoá note 3' with the number"); err != nil {
+					return "", err
 				}
 				if t.noteDeleted() {
 					return "", userError("chỉ được xoá một ghi chú cho mỗi tin nhắn")

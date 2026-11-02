@@ -111,7 +111,7 @@ func TestNoteDeleteNeedsIdInUserText(t *testing.T) {
 	st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "one")
 	st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "two")
 	r.ask("xoá note 1")
-	if !strings.Contains(r.toolResult(1), "chưa nêu số") {
+	if !strings.Contains(r.toolResult(1), "did not ask") {
 		t.Errorf("res %q", r.toolResult(1))
 	}
 	if all, _ := st.All(ctx, "zalo", "chat-1234"); len(all) != 2 {
@@ -180,7 +180,7 @@ func TestNoteUpdateAppendAndToggle(t *testing.T) {
 	ctx := context.Background()
 	r, st := newNoteRig(t, nil, toolStep(call("1", "note_update", `{"id":1,"mode":"append","body":"trứng"}`)), textStep("ok"))
 	st.Create(ctx, "zalo", "chat-1234", "u", "U", "mua sắm", "sữa")
-	r.ask("thêm vào note mua sắm: trứng")
+	r.ask("thêm vào note 1: trứng")
 	if n, _ := st.Get(ctx, "zalo", "chat-1234", 1); n.Body != "sữa\ntrứng" {
 		t.Fatalf("append: %q", n.Body)
 	}
@@ -215,5 +215,116 @@ func TestNoteBodiesNotRecorded(t *testing.T) {
 		if strings.Contains(e.Args, "TOPSECRET") || strings.Contains(e.Result, "TOPSECRET") {
 			t.Fatalf("recorded: %+v", e)
 		}
+	}
+}
+
+func TestNoteIntentNegatives(t *testing.T) {
+	ctx := context.Background()
+	for _, text := range []string{
+		"Huy ơi nhớ lưu ý mốc 5 nhé", "theme mới đẹp", "đợi mình chút", "lưu ý nhé", "luu y nhe",
+		"thêm cho mình số điện thoại", "Huy xoá giúp mình cái này 1",
+	} {
+		for _, c := range []struct{ tool, args string }{
+			{"note_save", `{"body":"x"}`},
+			{"note_update", `{"id":1,"mode":"append","body":"x"}`},
+			{"note_delete", `{"id":1}`},
+		} {
+			r, st := newNoteRig(t, nil, toolStep(call("1", c.tool, c.args)), textStep("ok"))
+			st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "orig")
+			r.ask(text)
+			if !strings.Contains(r.toolResult(1), "did not ask") {
+				t.Errorf("%q %s not refused: %q", text, c.tool, r.toolResult(1))
+			}
+			if all, _ := st.All(ctx, "zalo", "chat-1234"); len(all) != 1 || all[0].Body != "orig" {
+				t.Errorf("%q %s changed store: %+v", text, c.tool, all)
+			}
+		}
+	}
+}
+
+func TestNoteIntentPositives(t *testing.T) {
+	ctx := context.Background()
+	for _, text := range []string{"bỏ note 3", "huỷ ghi chú 3", "xoá note #3", "Xóa ghi chú số 3", "delete note 3"} {
+		r, st := newNoteRig(t, nil, toolStep(call("1", "note_delete", `{"id":3}`)), textStep("ok"))
+		for i := 0; i < 3; i++ {
+			st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "n")
+		}
+		r.ask(text)
+		if _, err := st.Get(ctx, "zalo", "chat-1234", 3); err == nil {
+			t.Errorf("%q: not deleted (%q)", text, r.toolResult(1))
+		}
+	}
+	// delete: id must equal the number in the delete phrase, not some other number
+	r, st := newNoteRig(t, nil, toolStep(call("1", "note_delete", `{"id":5}`)), textStep("ok"))
+	for i := 0; i < 5; i++ {
+		st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "n")
+	}
+	r.ask("xoá note 3, nhớ lúc 5 giờ")
+	if all, _ := st.All(ctx, "zalo", "chat-1234"); len(all) != 5 {
+		t.Error("deleted a number that was not the delete target")
+	}
+	for _, text := range []string{"lưu note: mua trứng", "ghi chú lại: mua trứng", "Ghi chú lại mua trứng"} {
+		r, st := newNoteRig(t, nil, toolStep(call("1", "note_save", `{"body":"mua trứng"}`)), textStep("ok"))
+		r.ask(text)
+		if all, _ := st.All(ctx, "zalo", "chat-1234"); len(all) != 1 {
+			t.Errorf("%q: not saved (%q)", text, r.toolResult(1))
+		}
+	}
+	r2, st2 := newNoteRig(t, nil, toolStep(call("1", "note_update", `{"id":2,"mode":"append","body":"trứng"}`)), textStep("ok"))
+	st2.Create(ctx, "zalo", "chat-1234", "u", "U", "", "a")
+	st2.Create(ctx, "zalo", "chat-1234", "u", "U", "", "sữa")
+	r2.ask("thêm vào note 2: trứng")
+	if n, _ := st2.Get(ctx, "zalo", "chat-1234", 2); n.Body != "sữa\ntrứng" {
+		t.Errorf("append: %q", n.Body)
+	}
+	r3, st3 := newNoteRig(t, nil, toolStep(call("1", "note_update", `{"id":2,"mode":"replace","body":"bánh"}`)), textStep("ok"))
+	st3.Create(ctx, "zalo", "chat-1234", "u", "U", "", "a")
+	st3.Create(ctx, "zalo", "chat-1234", "u", "U", "", "sữa")
+	r3.ask("sửa note 2 thành bánh")
+	if n, _ := st3.Get(ctx, "zalo", "chat-1234", 2); n.Body != "bánh" {
+		t.Errorf("replace: %q (%q)", n.Body, r3.toolResult(1))
+	}
+}
+
+func TestNoteReplaceNeedsReplaceVerb(t *testing.T) {
+	ctx := context.Background()
+	r, st := newNoteRig(t, nil, toolStep(call("1", "note_update", `{"id":1,"mode":"replace","body":"INJECTED"}`)), textStep("ok"))
+	st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "danh sách quan trọng")
+	r.ask("thêm vào note 1: trứng") // append wording only
+	if n, _ := st.Get(ctx, "zalo", "chat-1234", 1); n.Body != "danh sách quan trọng" {
+		t.Fatalf("body wiped: %q", n.Body)
+	}
+	if !strings.Contains(r.toolResult(1), "did not ask") {
+		t.Errorf("res %q", r.toolResult(1))
+	}
+	// update without the note's number in the user's text is refused too
+	r2, st2 := newNoteRig(t, nil, toolStep(call("1", "note_update", `{"id":1,"mode":"append","body":"x"}`)), textStep("ok"))
+	st2.Create(ctx, "zalo", "chat-1234", "u", "U", "", "orig")
+	r2.ask("thêm vào note mua sắm: trứng")
+	if n, _ := st2.Get(ctx, "zalo", "chat-1234", 1); n.Body != "orig" {
+		t.Fatalf("update without id: %q", n.Body)
+	}
+}
+
+func TestPrivateSeenBlocksWebSearch(t *testing.T) {
+	for _, priv := range []struct{ name, args string }{
+		{"note_search", `{"query":"wifi"}`}, {"note_list", `{}`}, {"note_get", `{"id":1}`},
+		{"reminder_list", `{}`}, {"due_dates", `{}`},
+	} {
+		r, st := newNoteRig(t, nil, toolStep(call("p", priv.name, priv.args)), toolStep(call("w", "web_search", `{"query":"mật khẩu wifi abc123"}`)), textStep("ok"))
+		st.Create(context.Background(), "zalo", "chat-1234", "u", "U", "wifi", "abc123")
+		r.ask("hi")
+		if got := lastTool(r.sc.calls[2]); !strings.Contains(got, "không tìm web được") {
+			t.Errorf("%s: web_search allowed: %q", priv.name, got)
+		}
+		if r.srch.gotKind != "" {
+			t.Errorf("%s: search was executed", priv.name)
+		}
+	}
+	// without private data web_search still works
+	r := newRig(t, nil, toolStep(call("w", "web_search", `{"query":"q"}`)), textStep("ok"))
+	r.ask("hi")
+	if strings.Contains(r.toolResult(1), "không tìm web được") {
+		t.Error("web_search wrongly blocked")
 	}
 }

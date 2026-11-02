@@ -474,12 +474,25 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
 }
 
+// noteDBPath puts notes.db in the convo database's directory; an empty path
+// uses the default data directory, and never the working directory itself.
+func noteDBPath(convoPath string) string {
+	if convoPath == "" {
+		convoPath = "data/convo.db"
+	}
+	dir := filepath.Dir(convoPath)
+	if dir == "." {
+		dir = "data"
+	}
+	return filepath.Join(dir, "notes.db")
+}
+
 // buildNoteStore opens the per-chat notes database next to the convo database
 // (same data volume). It is a separate file on purpose: the convo retention
 // prune never touches it, so notes live until a user deletes them. A failure
 // disables notes only.
 func buildNoteStore(cfg *config.Config) *note.Store {
-	path := filepath.Join(filepath.Dir(cfg.Convo.DBPath), "notes.db")
+	path := noteDBPath(cfg.Convo.DBPath)
 	st, err := note.Open(path)
 	if err != nil {
 		log.Printf("Note store open failed: %v (notes disabled)", err)
