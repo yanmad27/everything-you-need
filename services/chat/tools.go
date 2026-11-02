@@ -69,6 +69,7 @@ type Tools struct {
 	News      NewsReader
 	Due       DueReader
 	Reminders ReminderTools
+	Notes     NoteStore                                             // per-chat notes; nil omits the note tools
 	Fetch     func(ctx context.Context, url string) (string, error) // default: SSRF-safe reader
 	Recorder  Recorder
 	Model     string // LLM model name, recorded with usage
@@ -338,6 +339,9 @@ func (s *Service) buildTools() []toolImpl {
 	}
 	if tl.Reminders != nil {
 		out = append(out, s.reminderTools()...)
+	}
+	if tl.Notes != nil {
+		out = append(out, s.noteTools()...)
 	}
 	return out
 }

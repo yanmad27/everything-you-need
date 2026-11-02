@@ -23,7 +23,7 @@ in the convo SQLite DB (idempotent migration). Plain values are JSON; secrets ar
 | `llm_model` | string | ≤100, `[A-Za-z0-9._:/-]`; `llm_openai.model` |
 | `llm_api_key` ★ | secret | `llm_openai.api_key` |
 | `prices` | prices | `CONVO_PRICES` format `model:prompt:completion` per 1M tokens, validated by `convo.ParsePrices` (duplicates rejected); an empty override = built-in default prices only |
-| `tools.prices` `tools.lunar` `tools.news` `tools.reminders` `tools.due_dates` `tools.images` | bool | default true |
+| `tools.prices` `tools.lunar` `tools.news` `tools.reminders` `tools.notes` `tools.due_dates` `tools.images` | bool | default true |
 | `tools.web_search` ★ `tools.fetch` ★ | bool | default true |
 | `serper_api_key` ★ | secret | `news.serper_api_key` |
 | `fetch_allow_domains` ★ | list | ≤50 hostnames; no IPs; no shared-hosting suffix (github.io, blogspot.com, netlify.app, vercel.app, pages.dev, herokuapp.com, appspot.com, azurewebsites.net, …); lowercased, deduplicated; `chat.fetch_allow_domains` |

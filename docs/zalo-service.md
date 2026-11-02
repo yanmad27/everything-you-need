@@ -158,8 +158,33 @@ When `llm_openai` is configured, the Zalo assistant answers through a bounded to
 `fetch_url` (SSRF-guarded via netguard), `due_dates`, `reminder_create/list/cancel`
 (scoped to the calling chat; create/cancel at most once per message, disabled once
 `fetch_url`/`web_search` ran, and create requires reminder wording in the user's own text).
-Replies are sent with Zalo markdown. Each chat is limited to ~6 messages/minute (burst 3).
+`note_save/list/search/get/update/delete` keep short notes per chat or group (see
+[Notes](#notes)). Replies are sent with Zalo markdown. Each chat is limited to ~6 messages/minute (burst 3).
 Telegram is unchanged. No new config keys.
+
+### Notes
+
+Users can ask Pink in natural Vietnamese to save, list, search, view, edit/append and delete notes
+("lưu note: mật khẩu wifi là …", "xem note", "tìm note wifi", "thêm vào note mua sắm: trứng",
+"xoá note 3"), and Pink searches the chat's notes when a question may be answered by one
+("wifi nhà mình là gì?"). Zalo only; Telegram is unchanged.
+
+- Scope: a note belongs to (platform, chat). The platform and chat come from the incoming message,
+  never from model arguments; the tools have no chat/platform parameter. Ids are per-chat sequence
+  numbers (`note 3` = the 3rd of this chat) and are never reused after a delete.
+- Storage: `notes.db` in the same directory as `convo.db` (the data volume), created and migrated
+  on start. It is a separate file so the convo retention prune never touches notes. Each note keeps
+  title, body, author (id and name), created/updated times.
+- Limits: body ≤ 4000 characters, title ≤ 100, ≤ 200 notes per chat, list/search ≤ 20 items with
+  a ≤ 200-character snippet (`note_get` returns the full body). Search ignores case and diacritics.
+- Guard: all note tools are private data like `reminder_*`/`due_dates`: disabled once the message
+  is tainted, and running any of them sets `private_seen`, so a model-proposed `fetch_url` is
+  refused afterwards. Writes (`save`/`update`/`delete`) also need note wording in the user's own text
+  (note, ghi chú, lưu, thêm, sửa, xoá, ...); `delete` needs delete wording plus a note word, and the
+  id must appear as a number in the user's text. One delete and at most 3 writes per message; no bulk delete.
+- Privacy: note titles and bodies are never logged, and tool-call recording stores `[redacted]` for
+  `note_*` arguments and results. The admin UI has a read-only **Ghi chú** page; toggle the tools
+  with `tools.notes` on the Bot page (default on).
 
 ### Images
 
@@ -185,7 +210,7 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
 
 - Tool output is wrapped as data (`<tool_result>`, closing tags neutralised case-insensitively).
 - Once untrusted content enters a message (`fetch_url`, `web_search`, `news_recent`, or an image),
-  `due_dates` and all `reminder_*` tools are disabled for the rest of that message.
+  `due_dates`, all `reminder_*` and all `note_*` tools are disabled for the rest of that message.
 - `fetch_url` reads links the user sent or that `web_search` returned in the same message (query
   kept; history never counts). A bare host/path (`github.com/trending`) is normalised to `https://`.
   Rejected for every URL: non-http(s), userinfo, ports other than 80/443, IP-literal hosts (v4/v6,
@@ -193,7 +218,7 @@ The image URL (beyond host) and bytes are never logged or stored. Log lines:
   applies at dial time).
 - A *model-proposed* URL (anything else) is allowed only if **all** hold: the turn was untainted
   before the call (no `fetch_url`/`web_search`/`news_recent` yet, not an image turn); no private tool
-  (`due_dates`, `reminder_*`) has run in the turn (else `reason=private_seen`); the host is on the
+  (`due_dates`, `reminder_*`, `note_*`) has run in the turn (else `reason=private_seen`); the host is on the
   allowlist (exact or subdomain; ASCII/non-IDN only); and the path has no `%`, ≤80 chars, ≤5 segments
   of `[A-Za-z0-9._~-]`. Query and fragment are stripped. Otherwise `outcome=blocked
   reason=url_not_allowed`. Default allowlist: github.com, wikipedia.org, news.ycombinator.com,

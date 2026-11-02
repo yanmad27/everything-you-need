@@ -49,6 +49,7 @@ const (
 	KeyToolWebSearch = "tools.web_search"
 	KeyToolFetch     = "tools.fetch"
 	KeyToolReminders = "tools.reminders"
+	KeyToolNotes     = "tools.notes"
 	KeyToolDueDates  = "tools.due_dates"
 	KeyToolImages    = "tools.images"
 	KeySerperAPIKey  = "serper_api_key"
@@ -118,6 +119,7 @@ var zaloSpecs = []Spec{
 	{Key: KeyToolWebSearch, Kind: KindBool, Label: "Tool: web search", Sensitive: true, validate: okAny},
 	{Key: KeyToolFetch, Kind: KindBool, Label: "Tool: fetch web pages", Sensitive: true, validate: okAny},
 	{Key: KeyToolReminders, Kind: KindBool, Label: "Tool: reminders", validate: okAny},
+	{Key: KeyToolNotes, Kind: KindBool, Label: "Tool: notes (per-chat saved notes)", validate: okAny},
 	{Key: KeyToolDueDates, Kind: KindBool, Label: "Tool: due dates", validate: okAny},
 	{Key: KeyToolImages, Kind: KindBool, Label: "Image understanding", validate: okAny},
 	{Key: KeySerperAPIKey, Kind: KindSecret, Label: "Serper (web search) API key", Secret: true, Sensitive: true, validate: validSecret},

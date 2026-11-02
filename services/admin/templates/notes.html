@@ -1,0 +1,13 @@
+{{template "head" .}}{{if .Data.ChatID}}<div class="ph"><div><a class="back" href="/admin/notes">← Các chat có ghi chú</a>
+<span class="eyebrow">GHI CHÚ</span><h1>Ghi chú của chat <span class="count">{{len .Data.Notes}}</span></h1>
+<p class="chips">{{template "plat" .Data.Platform}}<span class="mono mut">{{.Data.ChatID}}</span></p></div></div>
+<section class="card"><div class="sec-h"><h2>Ghi chú đã lưu</h2><span class="mut">Chỉ đọc · mới nhất trước</span></div><div class="tw"><table>
+<thead><tr><th class="n">#</th><th>Tiêu đề</th><th>Người tạo</th><th>Tạo lúc</th><th>Sửa lúc</th><th>Nội dung</th></tr></thead>
+<tbody>{{range .Data.Notes}}<tr><td class="n">{{.ID}}</td><td>{{if .Title}}{{.Title}}{{else}}<span class="mut">(không tiêu đề)</span>{{end}}</td><td>{{if .AuthorName}}{{.AuthorName}}{{else}}{{.AuthorID}}{{end}}</td><td class="t">{{ftime .CreatedAt}}</td><td class="t">{{ftime .UpdatedAt}}</td><td><div class="bubble">{{.Body}}</div></td></tr>
+{{else}}<tr><td colspan="6" class="empty">Chat này chưa có ghi chú.</td></tr>{{end}}</tbody></table></div></section>
+{{else}}<div class="ph"><div><span class="eyebrow">GHI CHÚ</span><h1>Ghi chú <span class="count">{{len .Data.Chats}}</span></h1><p class="mut">Các chat đã lưu ghi chú với Pink. Chỉ xem, không chỉnh sửa tại đây.</p></div></div>
+<section class="card"><div class="sec-h"><h2>Chat có ghi chú</h2><span class="mut">Mới cập nhật nhất trước</span></div><div class="tw"><table>
+<thead><tr><th>Chat</th><th>Nền tảng</th><th class="n">Số ghi chú</th><th>Cập nhật cuối</th></tr></thead>
+<tbody>{{range .Data.Chats}}<tr><td><a class="name" href="/admin/notes?platform={{.Platform}}&amp;id={{.ChatID}}">{{.ChatID}}</a></td><td>{{template "plat" .Platform}}</td><td class="n">{{num .Count}}</td><td class="t">{{ftime .UpdatedAt}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">Chưa có ghi chú nào.<span class="empty-note">Ghi chú xuất hiện khi người dùng nhờ Pink lưu note.</span></td></tr>{{end}}</tbody></table></div></section>
+{{end}}{{template "foot" .}}

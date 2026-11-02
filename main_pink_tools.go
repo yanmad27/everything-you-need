@@ -124,6 +124,6 @@ func enableZaloTools(svc *chat.Service, completer llm.Completer, tl chat.Tools) 
 		return
 	}
 	svc.WithTools(tc, tl)
-	log.Printf("Zalo chat tools enabled (prices=%t search=%t news=%t due=%t reminders=%t)",
-		tl.Prices != nil, tl.Search != nil, tl.News != nil, tl.Due != nil && len(tl.DueChats) > 0, tl.Reminders != nil)
+	log.Printf("Zalo chat tools enabled (prices=%t search=%t news=%t due=%t reminders=%t notes=%t)",
+		tl.Prices != nil, tl.Search != nil, tl.News != nil, tl.Due != nil && len(tl.DueChats) > 0, tl.Reminders != nil, tl.Notes != nil)
 }
