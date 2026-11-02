@@ -182,8 +182,8 @@ Users can ask Pink in natural Vietnamese to save, list, search, view, edit/appen
   refused afterwards; `web_search` is refused too (`private_seen`) so a model-written query cannot carry private data out.
   Writes also need wording in the user's own text, matched with Unicode-aware word boundaries
   (so "Huy", "theme" or "lưu ý" never count): `save` needs a note word (note, ghi chú, ghi nhớ, ghi lại, lưu, ...);
-  `update` needs a note word, an edit verb (thêm, sửa, bổ sung, ...) and the note's number in the text;
-  `mode=replace` additionally needs replace wording (thay, ghi đè, sửa … thành) — otherwise it is refused and
+  `update` needs a note word, an edit verb (thêm, sửa, bổ sung, ...) and the id must be the number right after the note word (`note 2`, `ghi chú số 2`);
+  `mode=replace` additionally needs replace wording (thay thế, thay bằng, ghi đè, sửa … thành) — otherwise it is refused and
   the body is never overwritten (no `prev_body` kept); `delete` needs `<xoá|huỷ|bỏ|delete> <note|ghi chú> [#]N` with
   the model's id equal to N. One delete and at most 3 writes per message; no bulk delete.
 - Privacy: note titles and bodies are never logged, and tool-call recording stores `[redacted]` for

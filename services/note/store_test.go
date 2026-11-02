@@ -3,6 +3,7 @@ package note
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,6 +126,20 @@ func TestUpdateAppendReplace(t *testing.T) {
 	if err := s.Update(ctx, "zalo", "A", id, nil, "", true); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("empty append: %v", err)
 	}
+	if err := s.Update(ctx, "zalo", "A", id, nil, "  ", false); !errors.Is(err, ErrEmpty) {
+		t.Fatalf("empty replace must not report success: %v", err)
+	}
+	before, _ := s.Get(ctx, "zalo", "A", id)
+	nt := "Tiêu đề mới"
+	for _, appendMode := range []bool{true, false} {
+		if err := s.Update(ctx, "zalo", "A", id, &nt, "", appendMode); err != nil {
+			t.Fatalf("title-only (append=%v): %v", appendMode, err)
+		}
+		after, _ := s.Get(ctx, "zalo", "A", id)
+		if after.Title != nt || after.Body != before.Body {
+			t.Fatalf("title-only changed body: %+v", after)
+		}
+	}
 }
 
 func TestSearchFoldsDiacritics(t *testing.T) {
@@ -183,5 +198,30 @@ func TestSnippet(t *testing.T) {
 	}
 	if Snippet("a\n\n b") != "a b" {
 		t.Fatal("whitespace")
+	}
+}
+
+func TestFileModeIs0600(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "n.db")
+	if err := os.WriteFile(p, nil, 0o644); err != nil { // pre-existing, too-open file
+		t.Fatal(err)
+	}
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.Create(ctx, "zalo", "A", "", "", "", "x")
+	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v %v", fi.Mode().Perm(), err)
+	}
+	p2 := filepath.Join(t.TempDir(), "sub", "n.db")
+	s2, err := Open(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if fi, _ := os.Stat(p2); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("new file mode %v", fi.Mode().Perm())
 	}
 }

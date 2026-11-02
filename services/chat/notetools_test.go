@@ -328,3 +328,36 @@ func TestPrivateSeenBlocksWebSearch(t *testing.T) {
 		t.Error("web_search wrongly blocked")
 	}
 }
+
+func TestNoteUpdateIDBoundToNoteReference(t *testing.T) {
+	ctx := context.Background()
+	mk := func(call1 string) (*rig, *note.Store) {
+		r, st := newNoteRig(t, nil, toolStep(call("1", "note_update", call1)), textStep("ok"))
+		for i := 0; i < 5; i++ {
+			st.Create(ctx, "zalo", "chat-1234", "u", "U", "", "orig")
+		}
+		return r, st
+	}
+	// the 5 in "mua 5 cái" is not the note reference
+	r, st := mk(`{"id":5,"mode":"append","body":"x"}`)
+	r.ask("thêm vào note 2: mua 5 cái")
+	if n, _ := st.Get(ctx, "zalo", "chat-1234", 5); n.Body != "orig" || !strings.Contains(r.toolResult(1), "did not ask") {
+		t.Errorf("id 5 accepted: %q / %q", n.Body, r.toolResult(1))
+	}
+	r, st = mk(`{"id":2,"mode":"append","body":"x"}`)
+	r.ask("thêm vào note 2: mua 5 cái")
+	if n, _ := st.Get(ctx, "zalo", "chat-1234", 2); n.Body != "orig\nx" {
+		t.Errorf("id 2 refused: %q", n.Body)
+	}
+	// "thay vì" is not replace wording
+	r, st = mk(`{"id":2,"mode":"replace","body":"INJECTED"}`)
+	r.ask("thay vì note 2 thì thêm trứng vào note 2")
+	if n, _ := st.Get(ctx, "zalo", "chat-1234", 2); n.Body != "orig" {
+		t.Errorf("thay vì treated as replace: %q", n.Body)
+	}
+	r, st = mk(`{"id":2,"mode":"replace","body":"mới"}`)
+	r.ask("thay bằng nội dung mới cho note 2")
+	if n, _ := st.Get(ctx, "zalo", "chat-1234", 2); n.Body != "mới" {
+		t.Errorf("thay bằng refused: %q", n.Body)
+	}
+}

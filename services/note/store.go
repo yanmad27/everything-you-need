@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -65,6 +67,20 @@ type Store struct {
 // Open opens (creating if needed) the notes database. The migration is
 // idempotent.
 func Open(path string) (*Store, error) {
+	// Notes are private: the file is always 0600 (SQLite gives -wal/-shm the same mode).
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("note: create dir: %w", err)
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("note: create db file: %w", err)
+	}
+	_ = f.Close()
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("note: chmod db file: %w", err)
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("note: open sqlite: %w", err)
@@ -326,11 +342,13 @@ func (s *Store) Update(ctx context.Context, platform, chatID string, seq int, ti
 	}
 	body = strings.TrimSpace(body)
 	switch {
-	case appendMode && body != "":
+	case body != "" && appendMode:
 		newBody = cur.Body + "\n" + body
-	case !appendMode && body != "":
+	case body != "":
 		newBody = body
-	case appendMode: // nothing to append
+	case title == nil:
+		// Empty body and no new title: nothing to change, never a silent success.
+		// (With a title, only the title is updated, in either mode.)
 		return ErrEmpty
 	}
 	if err := validate(newTitle, newBody); err != nil {

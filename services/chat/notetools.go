@@ -44,9 +44,9 @@ var (
 	luuYRe         = regexp.MustCompile(`(?i)` + bL + `(?:lưu|luu)\s+(?:ý|y)` + bR)
 	// A reference to a note itself (needed to edit/delete).
 	noteRefRe  = regexp.MustCompile(`(?i)` + bL + `(?:notes?|ghi\s+chú|ghi\s+chu|memo)` + bR)
-	editVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:sửa|sua|thêm|them|bổ\s+sung|bo\s+sung|cập\s+nhật|cap\s+nhat|đổi|thay|ghi\s+thêm|edit|update|append|add|replace|change)` + bR)
+	editVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:sửa|sua|thêm|them|bổ\s+sung|bo\s+sung|cập\s+nhật|cap\s+nhat|đổi|thay\s+thế|thay\s+the|thay\s+bằng|thay\s+bang|ghi\s+thêm|edit|update|append|add|replace|change)` + bR)
 	// Explicit replace wording; without it note_update cannot overwrite a body.
-	replaceVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:thay\s+thế|thay\s+the|thay|ghi\s+đè|ghi\s+de|replace|overwrite)` + bR +
+	replaceVerbRe = regexp.MustCompile(`(?i)` + bL + `(?:thay\s+thế|thay\s+the|thay\s+bằng|thay\s+bang|ghi\s+đè|ghi\s+de|replace|overwrite)` + bR +
 		`|` + bL + `(?:sửa|sua|đổi|doi)[^\n]{0,25}?\s(?:thành|thanh)` + bR)
 	// delete verb, then (within a few characters) a note word, optional "#", then the number.
 	deleteRe = regexp.MustCompile(`(?i)` + bL + `(?:xoá|xóa|xoa|huỷ|hủy|bỏ|delete|remove)\s+(?:cái\s+)?(?:notes?|ghi\s+chú|ghi\s+chu|memo)\s*(?:số\s*|so\s*|thứ\s*)?#?\s*(\d+)` + bR)
@@ -76,10 +76,14 @@ func deleteTargets(text string) []int {
 	return out
 }
 
-// idInText reports whether the user's own text contains id as a whole number.
-func idInText(text string, id int) bool {
-	for _, d := range digitsRe.FindAllString(text, -1) {
-		if n, err := strconv.Atoi(d); err == nil && n == id {
+// noteNumRe captures the number that follows a note word: "<note word> [số|thứ] [#]N".
+var noteNumRe = regexp.MustCompile(`(?i)` + bL + `(?:notes?|ghi\s+chú|ghi\s+chu|memo)\s*(?:số\s*|so\s*|thứ\s*)?#?\s*(\d+)` + bR)
+
+// noteIDNamed reports whether the user's text names id right after a note word
+// ("thêm vào note 2: mua 5 cái" names only 2, not 5).
+func noteIDNamed(text string, id int) bool {
+	for _, m := range noteNumRe.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil && n == id {
 			return true
 		}
 	}
@@ -238,7 +242,7 @@ func (s *Service) noteTools() []toolImpl {
 				if err := json.Unmarshal(raw, &a); err != nil || a.ID <= 0 || (a.Mode != "append" && a.Mode != "replace") {
 					return "", userError("invalid arguments: id and mode (append|replace) required")
 				}
-				if err := writeGate(t, noteUpdateIntent(t.userText) && idInText(t.userText, a.ID),
+				if err := writeGate(t, noteUpdateIntent(t.userText) && noteIDNamed(t.userText, a.ID),
 					"the user did not ask to edit this note; they must name the note number and say what to change (e.g. 'thêm vào note 2: ...')"); err != nil {
 					return "", err
 				}
