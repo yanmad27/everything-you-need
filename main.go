@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -279,11 +283,58 @@ const (
 	maxZaloWebhookSecret = 256
 )
 
-func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
+// buildSHA is the short git sha of this build (-ldflags "-X main.buildSHA=...").
+var buildSHA = "dev"
+
+// instanceID identifies this process; random per start, never host-derived.
+var instanceID = newInstanceID()
+
+func newInstanceID() string {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "000000"
+	}
+	return hex.EncodeToString(b)
+}
+
+// unavailable answers 503 + Retry-After for paths that exist in no mounted route.
+func unavailable(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Retry-After", "5")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = io.WriteString(w, "not available\n")
+}
+
+// withBuildHeaders stamps every response with the build and instance markers
+// so a response can be attributed to the copy of the app that produced it.
+func withBuildHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-EYN-Build", buildSHA)
+		h.Set("X-EYN-Instance", instanceID)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// buildAppHandler assembles the full routing table. ready is flipped by the
+// caller once the handler is about to serve; /healthz reports 200 only then.
+func buildAppHandler(cfg *config.Config, teleSvc *reminder.Service,
 	teleService *telebot.TeleBotService, teleChat *chat.Service,
 	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service,
-	extra ...func(*http.ServeMux) int) *http.Server {
+	ready *atomic.Bool, extra ...func(*http.ServeMux) int) (http.Handler, int) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if !ready.Load() {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "not ready\n")
+			return
+		}
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/", unavailable)
 	mounted := 0
 	for _, m := range extra {
 		if m != nil {
@@ -291,14 +342,17 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 		}
 	}
 
+	telePath := cfg.Telegram.WebhookPath
+	if telePath == "" {
+		telePath = "/telegram-webhook"
+	}
+	teleMounted := false
 	if teleService != nil && (teleSvc != nil || teleChat != nil) {
 		if cfg.Telegram.WebhookSecret == "" {
 			log.Printf("Telegram webhook disabled: telegram.webhook_secret is empty")
 		} else {
-			path := cfg.Telegram.WebhookPath
-			if path == "" {
-				path = "/telegram-webhook"
-			}
+			path := telePath
+			teleMounted = true
 			dispatcher := func(ctx context.Context, update telebot.Update) {
 				msg := update.AnyMessage()
 				if msg == nil || msg.Text == "" {
@@ -312,14 +366,21 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 		}
 	}
 
+	if !teleMounted {
+		mux.HandleFunc(telePath, unavailable)
+	}
+
+	zaloPath := cfg.Zalo.WebhookPath
+	if zaloPath == "" {
+		zaloPath = "/zalo-webhook"
+	}
+	zaloMounted := false
 	if zaloService != nil && (zaloSvc != nil || zaloChat != nil) {
 		if n := len(cfg.Zalo.WebhookSecret); n < minZaloWebhookSecret || n > maxZaloWebhookSecret {
 			log.Printf("Zalo webhook disabled: zalo.webhook_secret must be %d-%d characters (got %d)", minZaloWebhookSecret, maxZaloWebhookSecret, n)
 		} else {
-			path := cfg.Zalo.WebhookPath
-			if path == "" {
-				path = "/zalo-webhook"
-			}
+			path := zaloPath
+			zaloMounted = true
 			var botNames []string
 			nameCtx, cancelName := context.WithTimeout(context.Background(), 10*time.Second)
 			if names, err := zaloService.BotNames(nameCtx); err != nil {
@@ -337,6 +398,19 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 		}
 	}
 
+	if !zaloMounted {
+		mux.HandleFunc(zaloPath, unavailable)
+	}
+
+	return withBuildHeaders(mux), mounted
+}
+
+func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
+	teleService *telebot.TeleBotService, teleChat *chat.Service,
+	zaloSvc *reminder.Service, zaloService *zalobot.ZaloBotService, zaloChat *chat.Service,
+	extra ...func(*http.ServeMux) int) *http.Server {
+	var ready atomic.Bool
+	handler, mounted := buildAppHandler(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, &ready, extra...)
 	if mounted == 0 {
 		return nil
 	}
@@ -347,13 +421,15 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 	}
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
 
+	// All routes are registered; /healthz turns 200 from here on.
+	ready.Store(true)
 	go func() {
-		log.Printf("🌐 Webhook server listening on %s", addr)
+		log.Printf("🌐 Webhook server listening on %s (build=%s instance=%s)", addr, buildSHA, instanceID)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Webhook server error: %v", err)
 		}

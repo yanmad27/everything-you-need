@@ -271,6 +271,27 @@ built from the `main` branch. **Auto-deploy is on** — pushing to `main`
 rebuilds and redeploys automatically. To redeploy by hand, hit **Deploy** on the
 Compose service in the Dokploy dashboard.
 
+### Health check and attributing a response
+
+- `GET /healthz` returns `200 ok` only once every route is mounted and the
+  server is serving (`503` before that). The compose healthcheck uses it
+  (`wget` on `127.0.0.1:8080`, 15s interval, 3s timeout, 3 retries, 10s start).
+  It is only served when at least one of admin/Telegram/Zalo is mounted
+  (otherwise no HTTP listener starts and the container reports unhealthy).
+- Any path that matches no route answers `503` + `Retry-After: 5` + `not available`
+  (never a bare 404). A webhook path whose secret/service is missing also
+  answers 503; its "webhook disabled" log line is unchanged.
+- Every response carries `X-EYN-Build: <git sha>` (from the `GIT_SHA` build arg,
+  `dev` if unset) and `X-EYN-Instance: <6 hex>` (random per process start; not
+  the hostname). To attribute a bad response, run `curl -sI https://<host>/healthz`
+  (or read the headers of the bad response) and compare: a response with no
+  `X-EYN-*` headers, or an unexpected build/instance, did not come from this app
+  (e.g. a stale second origin behind Cloudflare). The startup log line
+  `Webhook server listening ... (build=... instance=...)` shows the same values.
+- Compose has no start-first rollover: overlapping old/new containers needs swarm
+  `deploy.update_config`, so there is a short gap on redeploy; the 503 + Retry-After
+  makes that gap explicit instead of a 404.
+
 ### How config & secrets work
 
 The image bakes in `config.docker.yaml` (renamed to `config.yaml` inside the

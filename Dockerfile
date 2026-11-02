@@ -16,8 +16,9 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+# Build the application; GIT_SHA is exposed as the X-EYN-Build response header
+ARG GIT_SHA=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags "-X main.buildSHA=${GIT_SHA}" -o main .
 
 # Final stage
 FROM alpine:latest
