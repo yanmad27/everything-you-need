@@ -76,7 +76,7 @@ func ZaloDefaults(cfg *config.Config, pricesSpec string) Defaults {
 		KeyEnabled: b(cfg.Zalo.Enabled), KeyLLMBaseURL: cfg.LLMOpenAI.BaseURL, KeyLLMModel: cfg.LLMOpenAI.Model, KeyLLMAPIKey: cfg.LLMOpenAI.APIKey,
 		KeyPrices: pricesSpec, KeySerperAPIKey: cfg.News.SerperAPIKey,
 		KeyToolPrices: "true", KeyToolLunar: "true", KeyToolNews: "true", KeyToolWebSearch: "true", KeyToolFetch: "true",
-		KeyToolReminders: "true", KeyToolDueDates: "true", KeyToolImages: "true",
+		KeyToolReminders: "true", KeyToolNotes: "true", KeyToolDueDates: "true", KeyToolImages: "true",
 		KeyFetchAllow: cfg.Chat.FetchAllowDomains, KeyPrivateChats: cfg.Zalo.PrivateToolChats,
 		KeyRatePerMin: "6", KeyRateBurst: "3", KeyPersona: "", KeyRetentionDays: fmt.Sprint(ret),
 	}
@@ -118,13 +118,13 @@ func (s *Snapshot) Zalo() ZaloSettings {
 		Enabled: s.Bool(KeyEnabled), LLMBaseURL: s.Str(KeyLLMBaseURL), LLMModel: s.Str(KeyLLMModel), LLMAPIKey: s.Secret(KeyLLMAPIKey),
 		Prices: s.Prices(),
 		Tools: ToolFlags{Prices: s.Bool(KeyToolPrices), Lunar: s.Bool(KeyToolLunar), News: s.Bool(KeyToolNews), WebSearch: s.Bool(KeyToolWebSearch),
-			Fetch: s.Bool(KeyToolFetch), Reminders: s.Bool(KeyToolReminders), DueDates: s.Bool(KeyToolDueDates), Images: s.Bool(KeyToolImages)},
+			Fetch: s.Bool(KeyToolFetch), Reminders: s.Bool(KeyToolReminders), Notes: s.Bool(KeyToolNotes), DueDates: s.Bool(KeyToolDueDates), Images: s.Bool(KeyToolImages)},
 		SerperAPIKey: s.Secret(KeySerperAPIKey), FetchAllowDomains: s.List(KeyFetchAllow), PrivateToolChats: s.List(KeyPrivateChats),
 		RateLimitPerMin: s.Int(KeyRatePerMin), RateLimitBurst: s.Int(KeyRateBurst), Persona: s.Str(KeyPersona), RetentionDays: s.Int(KeyRetentionDays),
 	}
 }
 
-type ToolFlags struct{ Prices, Lunar, News, WebSearch, Fetch, Reminders, DueDates, Images bool }
+type ToolFlags struct{ Prices, Lunar, News, WebSearch, Fetch, Reminders, Notes, DueDates, Images bool }
 
 // ZaloSettings is the typed effective zalo configuration. Secret fields print redacted.
 type ZaloSettings struct {

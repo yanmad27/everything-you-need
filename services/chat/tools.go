@@ -69,6 +69,7 @@ type Tools struct {
 	News      NewsReader
 	Due       DueReader
 	Reminders ReminderTools
+	Notes     NoteStore                                             // per-chat notes; nil omits the note tools
 	Fetch     func(ctx context.Context, url string) (string, error) // default: SSRF-safe reader
 	Recorder  Recorder
 	Model     string // LLM model name, recorded with usage
@@ -262,6 +263,10 @@ func (s *Service) buildTools() []toolImpl {
 				if err := json.Unmarshal(raw, &a); err != nil || strings.TrimSpace(a.Query) == "" {
 					return "", withReason("invalid_args", userError("invalid arguments: query required"))
 				}
+				if preFrom(ctx).private {
+					// Private data (notes, reminders, due dates) is in this turn: a model-written query could leak it.
+					return "", blockedReason("private_seen", userError("không tìm web được trong tin nhắn đã đọc dữ liệu riêng của chat; hãy trả lời bằng thông tin đã có"))
+				}
 				if t.countSearch() > maxSearchesPerTurn || !s.searchBudget.take(tl.Now()) {
 					return "", withReason("search_budget", userError("đã hết lượt tìm kiếm, hãy trả lời bằng thông tin đã có"))
 				}
@@ -338,6 +343,9 @@ func (s *Service) buildTools() []toolImpl {
 	}
 	if tl.Reminders != nil {
 		out = append(out, s.reminderTools()...)
+	}
+	if tl.Notes != nil {
+		out = append(out, s.noteTools()...)
 	}
 	return out
 }

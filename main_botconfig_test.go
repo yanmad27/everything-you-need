@@ -15,6 +15,7 @@ import (
 	"everything-you-need/m/services/config"
 	"everything-you-need/m/services/convo"
 	"everything-you-need/m/services/llm"
+	"everything-you-need/m/services/note"
 	"everything-you-need/m/services/reminder"
 	zalobot "everything-you-need/m/services/zalo-bot"
 )
@@ -271,5 +272,39 @@ func TestPausedInboundTextNotStored(t *testing.T) {
 	tl, _, _ := st.Timeline(ctx, "zalo", "chat-1", convo.Page{})
 	if len(tl) != 1 || tl[0].Message == nil || tl[0].Message.ErrorTag != "paused" || tl[0].Message.Text != "" {
 		t.Fatalf("%+v", tl)
+	}
+}
+
+func TestZaloNotesToggleDefaultOnAndLive(t *testing.T) {
+	st, err := convo.Open(filepath.Join(t.TempDir(), "c.db"), convo.Options{NoBackground: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ns, err := note.Open(filepath.Join(t.TempDir(), "n.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ns.Close() })
+	cfg := &config.Config{}
+	cfg.Zalo.Enabled = true
+	prov, err := botconfig.New(context.Background(), st, "0123456789abcdef0123456789abcdef-M", map[string]botconfig.Defaults{"zalo": botconfig.ZaloDefaults(cfg, "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spy, snd := &toolSpy{}, &sink{}
+	zl := &zaloLive{prov: prov}
+	svc := chat.NewServiceWithCompleter(&countLLM{}, snd).WithTools(spy, chat.Tools{Platform: "zalo", Notes: ns, Recorder: st}).WithLive(zl.source)
+	ctx := context.Background()
+	dispatchZalo(ctx, nil, svc, nil, zmsg("xin chào"))
+	if !strings.Contains(spy.defs[0], "note_save") || !strings.Contains(spy.defs[0], "note_search") {
+		t.Fatalf("notes default on: %s", spy.defs[0])
+	}
+	if err := prov.Save(ctx, "zalo", map[string]string{botconfig.KeyToolNotes: "false"}, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	dispatchZalo(ctx, nil, svc, nil, zmsg("lần hai"))
+	if strings.Contains(spy.defs[1], "note_") {
+		t.Fatalf("notes toggle off ignored: %s", spy.defs[1])
 	}
 }

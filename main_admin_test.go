@@ -35,7 +35,7 @@ func TestAdminMountGating(t *testing.T) {
 		"all empty": {config.AdminConfig{}, store, false},
 	}
 	for name, c := range cases {
-		m := adminMount(&config.Config{Admin: c.a}, c.store)
+		m := adminMount(&config.Config{Admin: c.a}, c.store, nil)
 		if (m != nil) != c.want {
 			t.Errorf("%s: mounted=%v want %v", name, m != nil, c.want)
 			continue

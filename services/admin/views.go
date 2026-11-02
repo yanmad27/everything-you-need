@@ -110,7 +110,7 @@ type page struct {
 	Data                    any
 }
 
-var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password", "bots": "bots"}
+var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password", "bots": "bots", "notes": "notes"}
 
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, name string, p page) {
 	p.Nonce, _ = r.Context().Value(nonceKey{}).(string)
@@ -274,6 +274,29 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 		base.Title, base.Nav = "Công cụ", "tools"
 		base.Data = rep
 		h.render(w, r, http.StatusOK, "tools.html", base)
+	case "/admin/notes":
+		if h.notes == nil {
+			http.NotFound(w, r)
+			return
+		}
+		platform, chatID := clip(q.Get("platform"), 20), clip(q.Get("id"), 100)
+		base.Title, base.Nav = "Ghi chú", "notes"
+		if platform == "" || chatID == "" {
+			chats, err := h.notes.Chats(ctx)
+			if err != nil {
+				fail(err)
+				return
+			}
+			base.Data = map[string]any{"Chats": chats}
+		} else {
+			ns, err := h.notes.ChatNotes(ctx, platform, chatID)
+			if err != nil {
+				fail(err)
+				return
+			}
+			base.Data = map[string]any{"Platform": platform, "ChatID": chatID, "Notes": ns}
+		}
+		h.render(w, r, http.StatusOK, "notes.html", base)
 	case "/admin/usage", "/admin/api/usage":
 		if h.usage == nil {
 			if api {

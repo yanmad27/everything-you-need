@@ -105,7 +105,7 @@ tunnel); otherwise the per-IP limit can be evaded by spoofing them.
 
 Data notes: the DB file is created `0600` (its directory `0700` only if we create it).
 Prune runs ~10s after start and daily, then truncates the WAL; `Dropped()` also counts
-events lost to failed writes. `due_dates`, `reminder_list`, `news_recent`, `fetch_url`
+events lost to failed writes. The **Ghi chú** page (`/admin/notes`) is a read-only view of the per-chat notes kept in `notes.db` (not subject to retention); bodies are shown as escaped text. `due_dates`, `reminder_list`, `news_recent`, `fetch_url`
 and `web_search` store only `ok (N chars)` as the result. Insights: **Errors** = tool
 calls with outcome error/timeout + failed bot replies (attributed to the turn's user);
 rate-limit / image-too-large replies are **Notices**. Tool success rate =

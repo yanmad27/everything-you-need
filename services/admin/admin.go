@@ -26,6 +26,7 @@ import (
 	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/convo"
 	"everything-you-need/m/services/netguard"
+	"everything-you-need/m/services/note"
 )
 
 //go:embed templates/*.html assets/app.css
@@ -71,6 +72,13 @@ type UsageData interface {
 	Prices() []convo.Price
 }
 
+// NoteData is the read-only notes query surface (implemented by *note.Store).
+// nil disables /admin/notes.
+type NoteData interface {
+	Chats(ctx context.Context) ([]note.ChatSummary, error)
+	ChatNotes(ctx context.Context, platform, chatID string) ([]note.Note, error)
+}
+
 // Config holds the owner credentials. Both Username and PasswordHash (bcrypt)
 // are required; otherwise New fails and the UI stays unmounted.
 type Config struct {
@@ -93,6 +101,7 @@ type Options struct {
 	LoginWindow        time.Duration       // default 15m
 	PasswordAttempts   int                 // failed password-change attempts per session and per IP per window (default 5)
 	TestAttempts       int                 // connection tests per session and per IP per 15 min (default 10)
+	Notes              NoteData            // per-chat notes; nil = /admin/notes is off
 	Bots               *botconfig.Provider // live per-bot settings; nil = /admin/bots is off
 	Outbound           *http.Client        // connection tests (default: SSRF-guarded client); tests inject
 }
@@ -124,6 +133,7 @@ type Handler struct {
 	testSess *limiter     // connection tests per session
 	testIP   *limiter     // ... per client IP
 	botsP    *botconfig.Provider
+	notes    NoteData
 	outbound *http.Client
 
 	mu       sync.Mutex
@@ -249,7 +259,7 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		pwSess:   newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
 		pwIP:     newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
 		testSess: newLimiter(opt.TestAttempts, testWindow, opt.Now), testIP: newLimiter(opt.TestAttempts, testWindow, opt.Now),
-		botsP: opt.Bots, outbound: opt.Outbound,
+		botsP: opt.Bots, notes: opt.Notes, outbound: opt.Outbound,
 	}, nil
 }
 

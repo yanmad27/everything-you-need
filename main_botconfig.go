@@ -118,7 +118,8 @@ func (z *zaloLive) source() chat.Live {
 		FetchAllow: s.FetchAllowDomains, DueChats: s.PrivateToolChats, RatePerMin: float64(s.RateLimitPerMin), Burst: s.RateLimitBurst,
 		DisabledTools: map[string]bool{}}
 	for name, on := range map[string]bool{"get_prices": s.Tools.Prices, "lunar_date": s.Tools.Lunar, "news_recent": s.Tools.News, "web_search": s.Tools.WebSearch,
-		"fetch_url": s.Tools.Fetch, "due_dates": s.Tools.DueDates, "reminder_create": s.Tools.Reminders, "reminder_list": s.Tools.Reminders, "reminder_cancel": s.Tools.Reminders} {
+		"fetch_url": s.Tools.Fetch, "due_dates": s.Tools.DueDates, "reminder_create": s.Tools.Reminders, "reminder_list": s.Tools.Reminders, "reminder_cancel": s.Tools.Reminders,
+		"note_save": s.Tools.Notes, "note_list": s.Tools.Notes, "note_search": s.Tools.Notes, "note_get": s.Tools.Notes, "note_update": s.Tools.Notes, "note_delete": s.Tools.Notes} {
 		if !on {
 			lv.DisabledTools[name] = true
 		}

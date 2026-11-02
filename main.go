@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/llm"
 	"everything-you-need/m/services/news"
+	"everything-you-need/m/services/note"
 	pricetracker "everything-you-need/m/services/price-tracker"
 	"everything-you-need/m/services/reminder"
 	telebot "everything-you-need/m/services/tele-bot"
@@ -51,6 +53,7 @@ func main() {
 
 	dueDateService := buildDueDateService(cfg)
 	var convoStore *convo.Store
+	var noteStore *note.Store
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
@@ -74,6 +77,10 @@ func main() {
 			zaloRem = reminderService
 		}
 		zaloTools := buildZaloTools(cfg, priceService, newsStore, dueDateService, zaloRem)
+		if noteStore = buildNoteStore(cfg); noteStore != nil { // Zalo only; Telegram has no tool path
+			defer noteStore.Close()
+			zaloTools.Notes = noteStore
+		}
 		if convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
@@ -96,7 +103,7 @@ func main() {
 	if zaloOn {
 		zaloSvc = reminderService
 	}
-	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore))
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore, noteStore))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -467,6 +474,42 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 	log.Printf("zalo dispatch: result=chat_image chat_type=%q chat=%s", zalobot.SafeField(msg.Chat.ChatType, 40), zalobot.MaskID(msg.Chat.ID))
 }
 
+// noteDBPath puts notes.db in the convo database's directory; an empty path
+// uses the default data directory, and never the working directory itself.
+func noteDBPath(convoPath string) string {
+	if convoPath == "" {
+		convoPath = "data/convo.db"
+	}
+	dir := filepath.Dir(convoPath)
+	if dir == "." {
+		dir = "data"
+	}
+	return filepath.Join(dir, "notes.db")
+}
+
+// buildNoteStore opens the per-chat notes database next to the convo database
+// (same data volume). It is a separate file on purpose: the convo retention
+// prune never touches it, so notes live until a user deletes them. A failure
+// disables notes only.
+func buildNoteStore(cfg *config.Config) *note.Store {
+	path := noteDBPath(cfg.Convo.DBPath)
+	st, err := note.Open(path)
+	if err != nil {
+		log.Printf("Note store open failed: %v (notes disabled)", err)
+		return nil
+	}
+	log.Printf("Note store initialized (db=%s)", path)
+	return st
+}
+
+// noteData avoids a typed-nil interface when notes are off.
+func noteData(st *note.Store) admin.NoteData {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
 // buildConvoStore opens the Zalo conversation store; a failure disables
 // recording only (the bot keeps working).
 func buildConvoStore(cfg *config.Config) *convo.Store {
@@ -536,7 +579,7 @@ func convoPrices(c config.ConvoConfig, env string) (out []convo.Price, bad []str
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not
 // fully configured (credentials + conversation store). No default password.
-func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int {
+func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store) func(*http.ServeMux) int {
 	a := cfg.Admin
 	if a.Username == "" || (a.PasswordHash == "" && a.PasswordHashB64 == "") {
 		log.Printf("Admin UI disabled: admin.username and admin.password_hash (or password_hash_b64) are not both set")
@@ -546,7 +589,7 @@ func adminMount(cfg *config.Config, store *convo.Store) func(*http.ServeMux) int
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load()})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load(), Notes: noteData(notes)})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil
