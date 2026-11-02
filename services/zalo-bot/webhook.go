@@ -26,7 +26,7 @@ const (
 )
 
 // photoKeys are the message fields that may carry an image URL, in priority order.
-var photoKeys = []string{"photo", "url", "image", "image_url"}
+var photoKeys = []string{"photo_url", "photo", "url", "image", "image_url"}
 
 func httpURL(r json.RawMessage) string {
 	var s string
