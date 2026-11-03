@@ -110,7 +110,7 @@ type page struct {
 	Data                    any
 }
 
-var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password", "bots": "bots", "notes": "notes"}
+var navActive = map[string]string{"chats": "chats", "users": "users", "chatstats": "chat-stats", "tools": "tools", "usage": "usage", "password": "password", "bots": "bots", "notes": "notes", "memory": "memory"}
 
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, name string, p page) {
 	p.Nonce, _ = r.Context().Value(nonceKey{}).(string)
@@ -297,6 +297,29 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request, path string, s *
 			base.Data = map[string]any{"Platform": platform, "ChatID": chatID, "Notes": ns}
 		}
 		h.render(w, r, http.StatusOK, "notes.html", base)
+	case "/admin/memory":
+		if h.memory == nil {
+			http.NotFound(w, r)
+			return
+		}
+		platform, userID := clip(q.Get("platform"), 20), clip(q.Get("id"), 100)
+		base.Title, base.Nav = "Bộ nhớ", "memory"
+		if platform == "" || userID == "" {
+			us, err := h.memory.Users(ctx)
+			if err != nil {
+				fail(err)
+				return
+			}
+			base.Data = map[string]any{"Users": us, "Notice": memoryNotice(q.Get("flash"))}
+		} else {
+			ms, err := h.memory.UserMemories(ctx, platform, userID)
+			if err != nil {
+				fail(err)
+				return
+			}
+			base.Data = map[string]any{"Platform": platform, "UserID": userID, "Memories": ms, "Notice": memoryNotice(q.Get("flash")), "PasswordField": "admin_password"}
+		}
+		h.render(w, r, http.StatusOK, "memory.html", base)
 	case "/admin/usage", "/admin/api/usage":
 		if h.usage == nil {
 			if api {
@@ -373,9 +396,12 @@ type UsageView struct {
 	To       string        `json:"to"`       // inclusive end day echo
 	Prices   []convo.Price `json:"prices"`
 
-	Totals convo.UsageSum     `json:"totals"`
-	Days   []convo.UsageDay   `json:"days"` // ascending; zero-filled when From and To are set
-	Models []convo.UsageModel `json:"models"`
+	Totals convo.UsageSum `json:"totals"` // chat + memory extraction
+	// ChatTotals and MemoryTotals split Totals by usage kind.
+	ChatTotals   convo.UsageSum     `json:"chat_totals"`
+	MemoryTotals convo.UsageSum     `json:"memory_totals"`
+	Days         []convo.UsageDay   `json:"days"` // ascending; zero-filled when From and To are set
+	Models       []convo.UsageModel `json:"models"`
 
 	Chats      []convo.UsageChat `json:"chats"` // this page, most tokens first
 	ChatsTotal int               `json:"chats_total"`
@@ -403,6 +429,14 @@ func (h *Handler) usageView(ctx context.Context, q url.Values) (UsageView, error
 	}
 	var err error
 	if v.Totals, err = h.usage.UsageTotals(ctx, f); err != nil {
+		return v, err
+	}
+	fc, fm := f, f
+	fc.Kind, fm.Kind = "chat", "memory" // chat.UsageKindChat / UsageKindMemory
+	if v.ChatTotals, err = h.usage.UsageTotals(ctx, fc); err != nil {
+		return v, err
+	}
+	if v.MemoryTotals, err = h.usage.UsageTotals(ctx, fm); err != nil {
 		return v, err
 	}
 	if v.Days, err = h.usage.UsageByDay(ctx, f); err != nil {

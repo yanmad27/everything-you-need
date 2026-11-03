@@ -114,7 +114,7 @@ func main() {
 	if zaloOn {
 		zaloSvc = reminderService
 	}
-	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore, noteStore))
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore, noteStore, memoryStore))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -598,6 +598,14 @@ func noteData(st *note.Store) admin.NoteData {
 	return st
 }
 
+// memoryData avoids a typed-nil interface when memory is off.
+func memoryData(st *memory.Store) admin.MemoryData {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
 // buildConvoStore opens the Zalo conversation store; a failure disables
 // recording only (the bot keeps working).
 func buildConvoStore(cfg *config.Config) *convo.Store {
@@ -667,7 +675,7 @@ func convoPrices(c config.ConvoConfig, env string) (out []convo.Price, bad []str
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not
 // fully configured (credentials + conversation store). No default password.
-func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store) func(*http.ServeMux) int {
+func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store, memStore *memory.Store) func(*http.ServeMux) int {
 	a := cfg.Admin
 	if a.Username == "" || (a.PasswordHash == "" && a.PasswordHashB64 == "") {
 		log.Printf("Admin UI disabled: admin.username and admin.password_hash (or password_hash_b64) are not both set")
@@ -677,7 +685,7 @@ func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store) func(
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load(), Notes: noteData(notes)})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load(), Notes: noteData(notes), Memory: memoryData(memStore)})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

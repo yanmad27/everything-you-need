@@ -219,3 +219,7 @@ like a rate-limited one. A base URL saved from the UI dials through the SSRF gua
 env-configured base URL keeps the plain client. `llm_base_url` / `llm_api_key` cannot be saved empty (use reset to return to the env value);
 an empty `prices` override is valid and means "built-in default prices only"; a model listed twice in `prices` / `CONVO_PRICES` is rejected
 (the first entry is kept in the env form, the later ones are reported as bad).
+
+## Memory page (`/admin/memory`)
+
+**Bộ nhớ** lists the people Pink remembers (platform, user id, count, last seen) and, per person, each memory: kind, text (escaped), importance, confidence, shareable, source, created and last seen. It is off (404) when the memory store is not running. The owner can delete one memory or all of a person's memories; both are POST forms that need the CSRF token **and** the admin password (same check and lockout as a sensitive bot setting), and a GET never deletes. Each delete writes an `admin_audit` row (`memory_delete` / `memory_delete_all`, actor, `platform/user_id n=<count>`) that never contains memory text. The Usage page shows **Bộ nhớ (trích xuất)** cost next to **Chat**; the overall totals include both.

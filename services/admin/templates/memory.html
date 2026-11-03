@@ -1,0 +1,20 @@
+{{template "head" .}}{{if .Data.UserID}}<div class="ph"><div><a class="back" href="/admin/memory">← Người có bộ nhớ</a>
+<span class="eyebrow">BỘ NHỚ</span><h1>Bộ nhớ của người dùng <span class="count">{{len .Data.Memories}}</span></h1>
+<p class="chips">{{template "plat" .Data.Platform}}<span class="mono mut">{{.Data.UserID}}</span></p></div></div>
+{{with .Data.Notice}}<p class="alert flash {{.Kind}}" role="status">{{.Text}}</p>{{end}}
+<section class="card"><div class="sec-h"><h2>Ký ức đã lưu</h2><span class="mut">Xoá cần mật khẩu quản trị</span></div><div class="tw"><table>
+<thead><tr><th class="n">#</th><th>Loại</th><th>Nội dung</th><th class="n">Quan trọng</th><th class="n">Tin cậy</th><th>Chia sẻ</th><th>Nguồn</th><th>Tạo lúc</th><th>Thấy lúc</th><th>Xoá</th></tr></thead>
+<tbody>{{range .Data.Memories}}<tr><td class="n">{{.ID}}</td><td>{{.Kind}}</td><td><div class="bubble">{{.Text}}</div></td><td class="n">{{printf "%.2f" .Importance}}</td><td class="n">{{printf "%.2f" .Confidence}}</td><td>{{if .Shareable}}có{{else}}không{{end}}</td><td>{{.Source}}</td><td class="t">{{ftime .CreatedAt}}</td><td class="t">{{ftime .LastSeen}}</td>
+<td><form method="post" action="/admin/memory/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="platform" value="{{$.Data.Platform}}"><input type="hidden" name="id" value="{{$.Data.UserID}}"><input type="hidden" name="memory_id" value="{{.ID}}">
+<input type="password" name="admin_password" placeholder="Mật khẩu quản trị" autocomplete="current-password" required aria-label="Mật khẩu quản trị"><button class="btn ghost" type="submit">Xoá</button></form></td></tr>
+{{else}}<tr><td colspan="10" class="empty">Người này chưa có ký ức nào.</td></tr>{{end}}</tbody></table></div></section>
+{{if .Data.Memories}}<section class="card sec"><div class="sec-h"><h2>Xoá toàn bộ</h2><span class="mut">Không thể hoàn tác</span></div>
+<form method="post" action="/admin/memory/delete"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="platform" value="{{.Data.Platform}}"><input type="hidden" name="id" value="{{.Data.UserID}}"><input type="hidden" name="all" value="1">
+<input type="password" name="admin_password" placeholder="Mật khẩu quản trị" autocomplete="current-password" required aria-label="Mật khẩu quản trị"><button class="btn ghost" type="submit">Xoá toàn bộ bộ nhớ của người này</button></form></section>{{end}}
+{{else}}<div class="ph"><div><span class="eyebrow">BỘ NHỚ</span><h1>Bộ nhớ <span class="count">{{len .Data.Users}}</span></h1><p class="mut">Những gì Pink nhớ về từng người. Xem và xoá tại đây; xoá cần mật khẩu quản trị.</p></div></div>
+{{with .Data.Notice}}<p class="alert flash {{.Kind}}" role="status">{{.Text}}</p>{{end}}
+<section class="card"><div class="sec-h"><h2>Người có bộ nhớ</h2><span class="mut">Mới thấy nhất trước</span></div><div class="tw"><table>
+<thead><tr><th>Người dùng</th><th>Nền tảng</th><th class="n">Số ký ức</th><th>Thấy lần cuối</th></tr></thead>
+<tbody>{{range .Data.Users}}<tr><td><a class="name" href="/admin/memory?platform={{.Platform}}&amp;id={{.UserID}}">{{.UserID}}</a></td><td>{{template "plat" .Platform}}</td><td class="n">{{num .Count}}</td><td class="t">{{ftime .LastSeen}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">Chưa có ký ức nào.<span class="empty-note">Ký ức xuất hiện khi Pink ghi nhớ điều người dùng chia sẻ.</span></td></tr>{{end}}</tbody></table></div></section>
+{{end}}{{template "foot" .}}

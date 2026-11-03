@@ -29,7 +29,7 @@ func TestAppHandlerRoutingAndMarkers(t *testing.T) {
 	zalo := zalobot.NewClient("t", "http://127.0.0.1:1")
 	chatSvc := chat.NewServiceWithCompleter(nil, &captureSender{})
 	var ready atomic.Bool
-	h, mounted := buildAppHandler(cfg, nil, nil, nil, nil, zalo, chatSvc, &ready, adminMount(cfg, store, nil))
+	h, mounted := buildAppHandler(cfg, nil, nil, nil, nil, zalo, chatSvc, &ready, adminMount(cfg, store, nil, nil))
 	if mounted != 2 {
 		t.Fatalf("mounted=%d want 2 (admin+zalo)", mounted)
 	}
