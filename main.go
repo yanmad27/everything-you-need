@@ -89,6 +89,7 @@ func main() {
 		}
 		if memoryStore = buildMemoryStore(cfg); memoryStore != nil { // Zalo only; Telegram unchanged
 			defer memoryStore.Close()
+			zaloTools.Memory = memoryStore
 		}
 		if convoStore != nil {
 			defer convoStore.Close()

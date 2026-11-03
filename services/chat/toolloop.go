@@ -110,6 +110,10 @@ func (s *Service) WithTools(tc llm.ToolCompleter, tl Tools) *Service {
 			s.dueChats[c] = true
 		}
 	}
+	s.mem = nil
+	if tl.Memory != nil {
+		s.mem = newMemExtractor(tl.MemoryWorkers, tl.MemoryQueue)
+	}
 	s.toolImpls = s.buildTools()
 	return s
 }
@@ -361,6 +365,9 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 		if ti.def.Name == "due_dates" && !lv.dueChat(s.dueChats, chatID) {
 			continue // private data: only for allow-listed chats
 		}
+		if strings.HasPrefix(ti.def.Name, "memory_") && !s.memoryOn(lv) {
+			continue
+		}
 		if lv.Set && (lv.DisabledTools[ti.def.Name] || (ti.def.Name == "web_search" && lv.Search == nil && tl.Search == nil)) {
 			continue
 		}
@@ -380,6 +387,12 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 		t.taint() // image turn: untrusted content from the start
 	}
 	system := s.systemPromptWith(tl.Now(), lv.Persona)
+	if s.memoryOn(lv) {
+		system += memoryRulePrompt
+		if block := s.memoryBlock(ctx, t, lv, isGroupChat(ctx)); block != "" {
+			system += "\n\n" + block
+		}
+	}
 
 	var usage llm.Usage
 	rounds := 0
@@ -515,7 +528,7 @@ func (s *Service) runTool(ctx context.Context, t *turn, byName map[string]toolIm
 			log.Printf("chat tool: name=%s dur=%dms outcome=%s chat=%s", safeName(call.Name), d.Milliseconds(), outcome, maskChat(t.chatID))
 		}
 		recArgs, recRet := call.Arguments, ret
-		if strings.HasPrefix(call.Name, "note_") { // note titles/bodies are never copied into the tool-call log
+		if strings.HasPrefix(call.Name, "note_") || strings.HasPrefix(call.Name, "memory_") { // note/memory text are never copied into the tool-call log
 			recArgs, recRet = "[redacted]", "[redacted]"
 		}
 		s.record(func() {

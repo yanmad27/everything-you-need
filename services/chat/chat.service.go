@@ -68,6 +68,7 @@ type Service struct {
 	dueChats     map[string]bool
 	fetchAllow   []string // domains the model may fetch unprompted
 	liveSrc      LiveSource
+	mem          *memExtractor // asynchronous memory extraction; nil without a memory store
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -206,6 +207,7 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply})
 	s.remember(chatID, prompt, reply)
 	s.noteUserText(chatID, userID, prompt)
+	s.queueMemory(ctx, chatID, userID, prompt) // async, bounded, never blocks the reply
 	return nil
 }
 
