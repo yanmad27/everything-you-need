@@ -25,6 +25,7 @@ import (
 	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/llm"
+	"everything-you-need/m/services/memory"
 	"everything-you-need/m/services/news"
 	"everything-you-need/m/services/note"
 	pricetracker "everything-you-need/m/services/price-tracker"
@@ -58,6 +59,7 @@ func main() {
 	dueDateService := buildDueDateService(cfg)
 	var convoStore *convo.Store
 	var noteStore *note.Store
+	var memoryStore *memory.Store // per-user memory; nil = off. T2/T3 pass this on, see main_memory.go
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
@@ -85,6 +87,10 @@ func main() {
 			defer noteStore.Close()
 			zaloTools.Notes = noteStore
 		}
+		if memoryStore = buildMemoryStore(cfg); memoryStore != nil { // Zalo only; Telegram unchanged
+			defer memoryStore.Close()
+			zaloTools.Memory = memoryStore
+		}
 		if convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
@@ -98,6 +104,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	startMemoryPrune(ctx, memoryStore, memoryPruneEvery)
 
 	teleOn, zaloOn := reminderPlatforms(cfg, teleService != nil, zaloService != nil, zaloCompleter != nil)
 	var teleSvc, zaloSvc *reminder.Service
@@ -107,7 +114,7 @@ func main() {
 	if zaloOn {
 		zaloSvc = reminderService
 	}
-	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore, noteStore))
+	webhookServer := startWebhookServer(cfg, teleSvc, teleService, teleChat, zaloSvc, zaloService, zaloChat, adminMount(cfg, convoStore, noteStore, memoryStore))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -124,6 +131,13 @@ func main() {
 		_ = webhookServer.Shutdown(shutdownCtx)
 		shutdownCancel()
 	}
+	// No new messages arrive now: let queued memory extractions finish (bounded) before
+	// the deferred closes of the convo and memory stores run.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := zaloChat.ShutdownMemory(drainCtx); err != nil {
+		log.Printf("memory extraction drain: %v", err)
+	}
+	drainCancel()
 	scheduler.Stop()
 	cancel()
 
@@ -554,7 +568,10 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 
 // noteDBPath puts notes.db in the convo database's directory; an empty path
 // uses the default data directory, and never the working directory itself.
-func noteDBPath(convoPath string) string {
+func noteDBPath(convoPath string) string { return siblingDBPath(convoPath, "notes.db") }
+
+// siblingDBPath is name in the convo database's directory (default data/).
+func siblingDBPath(convoPath, name string) string {
 	if convoPath == "" {
 		convoPath = "data/convo.db"
 	}
@@ -562,7 +579,7 @@ func noteDBPath(convoPath string) string {
 	if dir == "." {
 		dir = "data"
 	}
-	return filepath.Join(dir, "notes.db")
+	return filepath.Join(dir, name)
 }
 
 // buildNoteStore opens the per-chat notes database next to the convo database
@@ -582,6 +599,14 @@ func buildNoteStore(cfg *config.Config) *note.Store {
 
 // noteData avoids a typed-nil interface when notes are off.
 func noteData(st *note.Store) admin.NoteData {
+	if st == nil {
+		return nil
+	}
+	return st
+}
+
+// memoryData avoids a typed-nil interface when memory is off.
+func memoryData(st *memory.Store) admin.MemoryData {
 	if st == nil {
 		return nil
 	}
@@ -657,7 +682,7 @@ func convoPrices(c config.ConvoConfig, env string) (out []convo.Price, bad []str
 
 // adminMount returns a mux mounter for the admin UI, or nil when it is not
 // fully configured (credentials + conversation store). No default password.
-func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store) func(*http.ServeMux) int {
+func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store, memStore *memory.Store) func(*http.ServeMux) int {
 	a := cfg.Admin
 	if a.Username == "" || (a.PasswordHash == "" && a.PasswordHashB64 == "") {
 		log.Printf("Admin UI disabled: admin.username and admin.password_hash (or password_hash_b64) are not both set")
@@ -667,7 +692,7 @@ func adminMount(cfg *config.Config, store *convo.Store, notes *note.Store) func(
 		log.Printf("Admin UI disabled: conversation store is not available")
 		return nil
 	}
-	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load(), Notes: noteData(notes)})
+	h, err := admin.New(admin.Config{Username: a.Username, PasswordHash: a.PasswordHash, PasswordHashB64: a.PasswordHashB64, SessionSecret: a.SessionSecret, ResetPassword: a.PasswordReset}, store, admin.Options{Bots: botProvider.Load(), Notes: noteData(notes), Memory: memoryData(memStore)})
 	if err != nil {
 		log.Printf("Admin UI disabled: %v", err)
 		return nil

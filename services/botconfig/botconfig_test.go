@@ -422,7 +422,7 @@ func TestEmptyBaseURLAndDuplicatePricesRejected(t *testing.T) {
 	}
 	for _, sp := range Specs("zalo") {
 		want := map[string]bool{KeyPersona: true, KeyRetentionDays: true, KeyLLMBaseURL: true, KeyLLMAPIKey: true, KeySerperAPIKey: true, KeyFetchAllow: true,
-			KeyPrivateChats: true, KeyToolFetch: true, KeyToolWebSearch: true}[sp.Key]
+			KeyPrivateChats: true, KeyToolFetch: true, KeyToolWebSearch: true, KeyToolMemory: true, KeyMemoryRetentionDays: true}[sp.Key]
 		if sp.Sensitive != want {
 			t.Errorf("%s sensitive=%v want %v", sp.Key, sp.Sensitive, want)
 		}

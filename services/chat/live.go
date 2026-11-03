@@ -33,6 +33,9 @@ type Live struct {
 	FetchAllow []string
 	DueChats   []string
 
+	// Memory is the live memory.* setting; with Set, memory is on only if Enabled.
+	Memory MemoryLive
+
 	RatePerMin float64 // 0 = unchanged
 	Burst      int
 }

@@ -11,6 +11,9 @@ import (
 // inclusive and To exclusive (Vietnam-day boundaries are chosen by the caller).
 type UsageFilter struct {
 	Platform string
+	// Kind narrows to one usage kind (chat.UsageKindChat or chat.UsageKindMemory);
+	// "" = all kinds, which is what the cost totals use.
+	Kind     string
 	From, To time.Time
 }
 
@@ -47,6 +50,10 @@ func (s *Store) usageGroup(ctx context.Context, f UsageFilter, dim string, extra
 	if f.Platform != "" {
 		w += " AND platform = ?"
 		a = append(a, f.Platform)
+	}
+	if f.Kind != "" {
+		w += " AND kind = ?"
+		a = append(a, f.Kind)
 	}
 	w += timeClause("created_at", f.From, f.To, &a)
 	rows, err := s.db.QueryContext(ctx, `SELECT `+dim+`, model, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), SUM(total_tokens)

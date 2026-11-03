@@ -11,6 +11,10 @@
 <div class="card kpi"><div class="k">Completion</div><div class="v">{{num .CompletionTokens}}</div></div>
 <div class="card kpi"><div class="k">Lượt</div><div class="v">{{num .Turns}}</div></div>
 </div>{{end}}
+<div class="kpis">
+<div class="card kpi"><div class="k">Chat — chi phí ({{.Data.Currency}})</div><div class="v sm">{{money .Data.ChatTotals.Cost .Data.ChatTotals.PartialPricing}}</div><div class="s">{{num .Data.ChatTotals.TotalTokens}} token · {{num .Data.ChatTotals.Turns}} lượt</div></div>
+<div class="card kpi"><div class="k">Bộ nhớ (trích xuất) — chi phí ({{.Data.Currency}})</div><div class="v sm">{{money .Data.MemoryTotals.Cost .Data.MemoryTotals.PartialPricing}}</div><div class="s">{{num .Data.MemoryTotals.TotalTokens}} token · {{num .Data.MemoryTotals.Turns}} lượt</div></div>
+</div>
 
 {{$first := ""}}{{$last := ""}}{{range .Data.Days}}{{if not $first}}{{$first = .Day}}{{end}}{{$last = .Day}}{{end}}
 <div class="card chart"><div class="ph"><h2><span class="section-index">01</span>Token theo ngày</h2><div class="legend"><span><i class="sw"></i>prompt</span><span><i class="sw p2"></i>completion</span><span>cao nhất {{num .Data.MaxDayTokens}}</span></div></div>

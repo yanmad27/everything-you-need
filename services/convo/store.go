@@ -239,6 +239,10 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	// admin_audit gained detail/actor for setting changes; add them idempotently.
+	// usage gained kind (chat | memory); existing rows read as 'chat'.
+	if err := addColumn(db, "usage", "kind", `TEXT NOT NULL DEFAULT 'chat'`); err != nil {
+		return err
+	}
 	for _, col := range []string{"detail", "actor"} {
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('admin_audit') WHERE name = ?`, col).Scan(&n); err != nil {
@@ -248,6 +252,20 @@ func migrate(db *sql.DB) error {
 			if _, err := db.Exec(`ALTER TABLE admin_audit ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`); err != nil {
 				return fmt.Errorf("convo: migrate: %w", err)
 			}
+		}
+	}
+	return nil
+}
+
+// addColumn adds table.col idempotently. table and col are literals from this file.
+func addColumn(db *sql.DB, table, col, def string) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('`+table+`') WHERE name = ?`, col).Scan(&n); err != nil {
+		return fmt.Errorf("convo: migrate: %w", err)
+	}
+	if n == 0 {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + def); err != nil {
+			return fmt.Errorf("convo: migrate: %w", err)
 		}
 	}
 	return nil

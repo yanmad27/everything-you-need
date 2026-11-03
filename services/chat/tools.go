@@ -70,6 +70,7 @@ type Tools struct {
 	Due       DueReader
 	Reminders ReminderTools
 	Notes     NoteStore                                             // per-chat notes; nil omits the note tools
+	Memory    MemoryStore                                           // per-user memory; nil = off
 	Fetch     func(ctx context.Context, url string) (string, error) // default: SSRF-safe reader
 	Recorder  Recorder
 	Model     string // LLM model name, recorded with usage
@@ -82,6 +83,11 @@ type Tools struct {
 	FetchAllowDomains []string
 	// SearchPerHour is the per-process web_search budget (default 200).
 	SearchPerHour int
+
+	// OnFirstMemory, when set, is called once when a user's first memory is stored.
+	OnFirstMemory func(platform, userID string)
+	// Memory extraction pool; zero values use the defaults (2 workers, queue 32, 20/day/user).
+	MemoryWorkers, MemoryQueue, MemoryDailyCap int
 
 	// Limits; zero values use the defaults below.
 	MaxRounds       int
@@ -346,6 +352,9 @@ func (s *Service) buildTools() []toolImpl {
 	}
 	if tl.Notes != nil {
 		out = append(out, s.noteTools()...)
+	}
+	if tl.Memory != nil {
+		out = append(out, s.memoryTools()...)
 	}
 	return out
 }

@@ -77,6 +77,7 @@ func ZaloDefaults(cfg *config.Config, pricesSpec string) Defaults {
 		KeyPrices: pricesSpec, KeySerperAPIKey: cfg.News.SerperAPIKey,
 		KeyToolPrices: "true", KeyToolLunar: "true", KeyToolNews: "true", KeyToolWebSearch: "true", KeyToolFetch: "true",
 		KeyToolReminders: "true", KeyToolNotes: "true", KeyToolDueDates: "true", KeyToolImages: "true",
+		KeyToolMemory: "true", KeyMemoryMaxPerUser: "200", KeyMemoryRetentionDays: "365",
 		KeyFetchAllow: cfg.Chat.FetchAllowDomains, KeyPrivateChats: cfg.Zalo.PrivateToolChats,
 		KeyRatePerMin: "6", KeyRateBurst: "3", KeyPersona: "", KeyRetentionDays: fmt.Sprint(ret),
 	}
@@ -121,7 +122,15 @@ func (s *Snapshot) Zalo() ZaloSettings {
 			Fetch: s.Bool(KeyToolFetch), Reminders: s.Bool(KeyToolReminders), Notes: s.Bool(KeyToolNotes), DueDates: s.Bool(KeyToolDueDates), Images: s.Bool(KeyToolImages)},
 		SerperAPIKey: s.Secret(KeySerperAPIKey), FetchAllowDomains: s.List(KeyFetchAllow), PrivateToolChats: s.List(KeyPrivateChats),
 		RateLimitPerMin: s.Int(KeyRatePerMin), RateLimitBurst: s.Int(KeyRateBurst), Persona: s.Str(KeyPersona), RetentionDays: s.Int(KeyRetentionDays),
+		Memory: MemorySettings{Enabled: s.Bool(KeyToolMemory), MaxPerUser: s.Int(KeyMemoryMaxPerUser), RetentionDays: s.Int(KeyMemoryRetentionDays)},
 	}
+}
+
+// MemorySettings is the per-user memory configuration (services/memory).
+type MemorySettings struct {
+	Enabled       bool // tools.memory
+	MaxPerUser    int  // memory.max_per_user, 20..500
+	RetentionDays int  // memory.retention_days, 30..1095
 }
 
 type ToolFlags struct{ Prices, Lunar, News, WebSearch, Fetch, Reminders, Notes, DueDates, Images bool }
@@ -141,6 +150,7 @@ type ZaloSettings struct {
 	RateLimitBurst    int
 	Persona           string
 	RetentionDays     int
+	Memory            MemorySettings
 }
 
 // String is safe to log: secrets are redacted and the persona is summarised.

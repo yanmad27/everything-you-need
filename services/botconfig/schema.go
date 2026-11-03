@@ -50,15 +50,19 @@ const (
 	KeyToolFetch     = "tools.fetch"
 	KeyToolReminders = "tools.reminders"
 	KeyToolNotes     = "tools.notes"
-	KeyToolDueDates  = "tools.due_dates"
-	KeyToolImages    = "tools.images"
-	KeySerperAPIKey  = "serper_api_key"
-	KeyFetchAllow    = "fetch_allow_domains"
-	KeyPrivateChats  = "private_tool_chats"
-	KeyRatePerMin    = "rate_limit_per_min"
-	KeyRateBurst     = "rate_limit_burst"
-	KeyPersona       = "persona"
-	KeyRetentionDays = "retention_days"
+	// Per-user long-term memory (services/memory). Zalo only.
+	KeyToolMemory          = "tools.memory"
+	KeyMemoryMaxPerUser    = "memory.max_per_user"
+	KeyMemoryRetentionDays = "memory.retention_days"
+	KeyToolDueDates        = "tools.due_dates"
+	KeyToolImages          = "tools.images"
+	KeySerperAPIKey        = "serper_api_key"
+	KeyFetchAllow          = "fetch_allow_domains"
+	KeyPrivateChats        = "private_tool_chats"
+	KeyRatePerMin          = "rate_limit_per_min"
+	KeyRateBurst           = "rate_limit_burst"
+	KeyPersona             = "persona"
+	KeyRetentionDays       = "retention_days"
 )
 
 var (
@@ -120,6 +124,9 @@ var zaloSpecs = []Spec{
 	{Key: KeyToolFetch, Kind: KindBool, Label: "Tool: fetch web pages", Sensitive: true, validate: okAny},
 	{Key: KeyToolReminders, Kind: KindBool, Label: "Tool: reminders", validate: okAny},
 	{Key: KeyToolNotes, Kind: KindBool, Label: "Tool: notes (per-chat saved notes)", validate: okAny},
+	{Key: KeyToolMemory, Kind: KindBool, Label: "Memory (remember facts about each user)", Sensitive: true, validate: okAny},
+	{Key: KeyMemoryMaxPerUser, Kind: KindInt, Label: "Memory: max facts per user (20-500)", validate: intRange(20, 500)},
+	{Key: KeyMemoryRetentionDays, Kind: KindInt, Label: "Memory: forget facts unused for (days, 30-1095)", Sensitive: true, validate: intRange(30, 1095)},
 	{Key: KeyToolDueDates, Kind: KindBool, Label: "Tool: due dates", validate: okAny},
 	{Key: KeyToolImages, Kind: KindBool, Label: "Image understanding", validate: okAny},
 	{Key: KeySerperAPIKey, Kind: KindSecret, Label: "Serper (web search) API key", Secret: true, Sensitive: true, validate: validSecret},
