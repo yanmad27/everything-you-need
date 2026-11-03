@@ -34,6 +34,16 @@ func (a priceAdapter) Get(ctx context.Context, source string) ([]chat.PriceQuote
 	return out, at, nil
 }
 
+type fearGreedAdapter struct{ s *pricetracker.FearGreedSource }
+
+func (a fearGreedAdapter) Get(ctx context.Context) (chat.FearGreedInfo, error) {
+	f, err := a.s.Get(ctx)
+	if err != nil {
+		return chat.FearGreedInfo{}, err
+	}
+	return chat.FearGreedInfo{Value: f.Value, Class: f.Classification, ClassVN: f.ClassificationVN(), Date: f.Date, HasChange: f.HasPrev, Change: f.Change}, nil
+}
+
 func toHits(rs []news.WebResult) []chat.WebHit {
 	out := make([]chat.WebHit, len(rs))
 	for i, r := range rs {
@@ -97,6 +107,7 @@ func buildZaloTools(cfg *config.Config, prices *pricetracker.PriceTrackerService
 	if prices != nil {
 		tl.Prices = priceAdapter{pricetracker.NewCachedPriceReader(prices, 2*time.Minute)}
 	}
+	tl.FearGreed = fearGreedAdapter{sharedFearGreed()}
 	if cfg.News.SerperAPIKey != "" { // independent of the news digest being enabled
 		tl.Search = searchAdapter{news.NewWebSearcher(cfg.News.SerperAPIKey)}
 	}
