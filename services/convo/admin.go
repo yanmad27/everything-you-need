@@ -53,6 +53,16 @@ func (s *Store) RecordAdminAudit(ctx context.Context, event, ip string) error {
 	return nil
 }
 
+// RecordAdminAuditDetail writes an audit row with the acting admin and a short
+// detail (no user content: callers pass ids and counts only).
+func (s *Store) RecordAdminAuditDetail(ctx context.Context, event, ip, detail, actor string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO admin_audit(at, event, ip, detail, actor) VALUES(?,?,?,?,?)`, s.now().UnixMilli(), truncRunes(event, 40), truncRunes(ip, 64), truncRunes(detail, 200), truncRunes(actor, 64))
+	if err != nil {
+		return fmt.Errorf("convo: admin audit: %w", err)
+	}
+	return nil
+}
+
 // AdminAuditEntry is one audit row.
 type AdminAuditEntry struct {
 	At     int64

@@ -25,6 +25,7 @@ import (
 
 	"everything-you-need/m/services/botconfig"
 	"everything-you-need/m/services/convo"
+	"everything-you-need/m/services/memory"
 	"everything-you-need/m/services/netguard"
 	"everything-you-need/m/services/note"
 )
@@ -79,6 +80,15 @@ type NoteData interface {
 	ChatNotes(ctx context.Context, platform, chatID string) ([]note.Note, error)
 }
 
+// MemoryData is the per-user memory surface (implemented by *memory.Store).
+// nil disables /admin/memory.
+type MemoryData interface {
+	Users(ctx context.Context) ([]memory.UserSummary, error)
+	UserMemories(ctx context.Context, platform, userID string) ([]memory.Memory, error)
+	DeleteID(ctx context.Context, sc memory.Scope, id int64) error
+	DeleteAll(ctx context.Context, sc memory.Scope) (int, error)
+}
+
 // Config holds the owner credentials. Both Username and PasswordHash (bcrypt)
 // are required; otherwise New fails and the UI stays unmounted.
 type Config struct {
@@ -102,6 +112,7 @@ type Options struct {
 	PasswordAttempts   int                 // failed password-change attempts per session and per IP per window (default 5)
 	TestAttempts       int                 // connection tests per session and per IP per 15 min (default 10)
 	Notes              NoteData            // per-chat notes; nil = /admin/notes is off
+	Memory             MemoryData          // per-user memories; nil = /admin/memory is off
 	Bots               *botconfig.Provider // live per-bot settings; nil = /admin/bots is off
 	Outbound           *http.Client        // connection tests (default: SSRF-guarded client); tests inject
 }
@@ -134,6 +145,7 @@ type Handler struct {
 	testIP   *limiter     // ... per client IP
 	botsP    *botconfig.Provider
 	notes    NoteData
+	memory   MemoryData
 	outbound *http.Client
 
 	mu       sync.Mutex
@@ -259,7 +271,7 @@ func New(cfg Config, data Data, opt Options) (*Handler, error) {
 		pwSess:   newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
 		pwIP:     newLimiter(opt.PasswordAttempts, opt.LoginWindow, opt.Now),
 		testSess: newLimiter(opt.TestAttempts, testWindow, opt.Now), testIP: newLimiter(opt.TestAttempts, testWindow, opt.Now),
-		botsP: opt.Bots, notes: opt.Notes, outbound: opt.Outbound,
+		botsP: opt.Bots, notes: opt.Notes, memory: opt.Memory, outbound: opt.Outbound,
 	}, nil
 }
 
@@ -303,6 +315,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if path == "/admin/password" {
 		h.password(w, r, sess)
+		return
+	}
+	if path == "/admin/memory/delete" {
+		h.memoryDelete(w, r, sess)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
