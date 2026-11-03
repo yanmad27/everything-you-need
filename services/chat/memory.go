@@ -73,7 +73,7 @@ var (
 	memForgetA      = regexp.MustCompile(bL + `xoa(?:\s+(?:het|tat\s+ca|nhung|cac|cai|moi|gi|ma|ban|pink|da|tri|bo|thong\s+tin|dieu))*\s+(?:nho|memory|ky\s+uc)` + bR)
 	// "quên" must open the message (after an addressee/politeness prefix) and be
 	// followed by a memory object plus, for "chuyện <x>", a closing imperative.
-	memForgetB = regexp.MustCompile(`^\s*(?:(?:pink|bot|hay|vui\s+long|lam\s+on|giup\s+minh|giup)\s+)*quen\s+(?:di\s+)?(?:het\s+)?(?:` +
+	memForgetB = regexp.MustCompile(`^[\s,!.:;]*(?:(?:pink|bot|oi|hay|vui\s+long|lam\s+on|giup\s+minh|giup)[\s,!.:;]+)*quen\s+(?:di\s+)?(?:het\s+)?(?:` +
 		`chuyen\s+(?:do|nay|ay)|ve\s+(?:minh|toi|tui)|dieu\s+(?:do|nay)|cai\s+(?:do|nay)|chuyen\s+.{1,40}?\s+(?:di|nhe|nha))` + bR)
 )
 

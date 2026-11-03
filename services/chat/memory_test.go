@@ -132,7 +132,7 @@ func TestMemoryNoInjectionLeavesFetchAllowed(t *testing.T) {
 
 func TestMemoryIntentGates(t *testing.T) {
 	forget := []string{"quên chuyện đó đi", "Pink quên hết về mình", "quen het ve minh", "xoá hết trí nhớ", "xóa trí nhớ về mình đi",
-		"Pink quên chuyện cà phê đi", "hãy quên điều đó", "xoa memory cua minh", "quên cái đó đi nhé", "đừng nhớ cái này", "dung nho cai nay"}
+		"Pink quên chuyện cà phê đi", "hãy quên điều đó", "xoa memory cua minh", "quên cái đó đi nhé", "Pink ơi, quên chuyện cà phê đi", "Pink ơi quên hết về mình", "ơi pink quên chuyện đó nhé", "Bot ơi! quên điều đó đi", "pink oi, quen ve minh nhe", "đừng nhớ cái này", "dung nho cai nay"}
 	for _, s := range forget {
 		if !memoryForgetIntent(s) {
 			t.Errorf("should be forget intent: %q", s)
@@ -140,13 +140,13 @@ func TestMemoryIntentGates(t *testing.T) {
 	}
 	notForget := []string{"quên mất chìa khoá", "tôi hay quên", "quen biết", "quên mật khẩu thì sao", "hôm qua tôi quên chuyện đó rồi",
 		"bạn quên chuyện đó rồi hả", "đừng xoá trí nhớ của tôi", "không xóa trí nhớ nhé", "quên chuyện đó đi?", "mình quên mang ví", "xoá ảnh này đi, tôi nhớ rồi",
-		"quên hết rồi", "quên", "Quên đi", "nhớ mua sữa", "quên mất về mình"}
+		"quên hết rồi", "pink ơi quên rồi à", "Pink ơi, quên chuyện đó rồi hả?", "Pink ơi đừng quên chuyện đó", "quên", "Quên đi", "nhớ mua sữa", "quên mất về mình"}
 	for _, s := range notForget {
 		if memoryForgetIntent(s) {
 			t.Errorf("must NOT be forget intent: %q", s)
 		}
 	}
-	for _, s := range []string{"Pink nhớ gì về mình", "bạn nhớ gì về tôi", "nho gi ve minh", "Pink nhớ những gì về mình nhỉ"} {
+	for _, s := range []string{"Pink nhớ gì về mình", "bạn nhớ gì về tôi", "nho gi ve minh", "Pink nhớ những gì về mình nhỉ", "Pink ơi, Pink nhớ gì về mình?", "pink nhớ những gì về mình vậy"} {
 		if !memoryListIntent(s) {
 			t.Errorf("list intent expected: %q", s)
 		}
