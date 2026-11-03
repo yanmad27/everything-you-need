@@ -20,9 +20,17 @@ import (
 // MessageEvent is the per-turn LLM usage; ToolEvent additionally carries the raw
 // arguments/result so a recorder can summarise them (recorders must not keep
 // them verbatim).
+// Usage kinds recorded in the convo usage table (column usage.kind). Rows that
+// predate the column read as UsageKindChat.
+const (
+	UsageKindChat   = "chat"
+	UsageKindMemory = "memory" // the extractor LLM call of services/memory
+)
+
 type MessageEvent struct {
 	Platform, ChatID                      string
 	UserID, TurnID, Model                 string
+	Kind                                  string // usage kind: "" or UsageKindChat = normal reply, UsageKindMemory = memory extraction
 	Rounds                                int
 	PromptTokens, CompletionTokens, Total int
 	Duration                              time.Duration

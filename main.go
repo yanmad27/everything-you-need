@@ -25,6 +25,7 @@ import (
 	"everything-you-need/m/services/duedate"
 	jobscheduler "everything-you-need/m/services/job-scheduler"
 	"everything-you-need/m/services/llm"
+	"everything-you-need/m/services/memory"
 	"everything-you-need/m/services/news"
 	"everything-you-need/m/services/note"
 	pricetracker "everything-you-need/m/services/price-tracker"
@@ -58,6 +59,7 @@ func main() {
 	dueDateService := buildDueDateService(cfg)
 	var convoStore *convo.Store
 	var noteStore *note.Store
+	var memoryStore *memory.Store // per-user memory; nil = off. T2/T3 pass this on, see main_memory.go
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
@@ -85,6 +87,9 @@ func main() {
 			defer noteStore.Close()
 			zaloTools.Notes = noteStore
 		}
+		if memoryStore = buildMemoryStore(cfg); memoryStore != nil { // Zalo only; Telegram unchanged
+			defer memoryStore.Close()
+		}
 		if convoStore != nil {
 			defer convoStore.Close()
 			zaloTools.Recorder = convoStore
@@ -98,6 +103,7 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	startMemoryPrune(ctx, memoryStore, memoryPruneEvery)
 
 	teleOn, zaloOn := reminderPlatforms(cfg, teleService != nil, zaloService != nil, zaloCompleter != nil)
 	var teleSvc, zaloSvc *reminder.Service
@@ -554,7 +560,10 @@ func dispatchZaloImage(ctx context.Context, chatSvc *chat.Service, botNames []st
 
 // noteDBPath puts notes.db in the convo database's directory; an empty path
 // uses the default data directory, and never the working directory itself.
-func noteDBPath(convoPath string) string {
+func noteDBPath(convoPath string) string { return siblingDBPath(convoPath, "notes.db") }
+
+// siblingDBPath is name in the convo database's directory (default data/).
+func siblingDBPath(convoPath, name string) string {
 	if convoPath == "" {
 		convoPath = "data/convo.db"
 	}
@@ -562,7 +571,7 @@ func noteDBPath(convoPath string) string {
 	if dir == "." {
 		dir = "data"
 	}
-	return filepath.Join(dir, "notes.db")
+	return filepath.Join(dir, name)
 }
 
 // buildNoteStore opens the per-chat notes database next to the convo database

@@ -39,6 +39,7 @@ type toolRow struct {
 type usageRow struct {
 	at                                      int64
 	platform, chatID, userID, turnID, model string
+	kind                                    string
 	rounds, prompt, completion, total       int
 }
 
@@ -111,7 +112,16 @@ func (s *Store) RecordConvo(_ context.Context, e chat.ConvoEvent) {
 // RecordMessage stores the LLM usage of one turn.
 func (s *Store) RecordMessage(_ context.Context, e chat.MessageEvent) {
 	s.enqueue(op{use: &usageRow{at: s.now().UnixMilli(), platform: e.Platform, chatID: e.ChatID, userID: e.UserID, turnID: e.TurnID,
-		model: truncRunes(e.Model, 80), rounds: e.Rounds, prompt: e.PromptTokens, completion: e.CompletionTokens, total: e.Total}})
+		model: truncRunes(e.Model, 80), kind: normUsageKind(e.Kind), rounds: e.Rounds, prompt: e.PromptTokens, completion: e.CompletionTokens, total: e.Total}})
+}
+
+// normUsageKind maps the empty or an unknown kind to "chat" so the column only
+// ever holds the known kinds.
+func normUsageKind(k string) string {
+	if k == chat.UsageKindMemory {
+		return k
+	}
+	return chat.UsageKindChat
 }
 
 // RecordToolCall stores one tool invocation with summarised arguments/result.
@@ -251,8 +261,8 @@ func (s *Store) write(batch []op) error {
 				VALUES(?,?,?,?,?,?,?,?,?,?)`, t.turnID, t.platform, t.chatID, t.userID, t.name, t.args, t.result, t.outcome, t.latencyMS, t.at)
 		case o.use != nil:
 			u := o.use
-			_, err = tx.ExecContext(ctx, `INSERT INTO usage(turn_id,platform,chat_id,user_id,rounds,prompt_tokens,completion_tokens,total_tokens,model,created_at)
-				VALUES(?,?,?,?,?,?,?,?,?,?)`, u.turnID, u.platform, u.chatID, u.userID, u.rounds, u.prompt, u.completion, u.total, u.model, u.at)
+			_, err = tx.ExecContext(ctx, `INSERT INTO usage(turn_id,platform,chat_id,user_id,rounds,prompt_tokens,completion_tokens,total_tokens,model,created_at,kind)
+				VALUES(?,?,?,?,?,?,?,?,?,?,?)`, u.turnID, u.platform, u.chatID, u.userID, u.rounds, u.prompt, u.completion, u.total, u.model, u.at, u.kind)
 		}
 		if err != nil {
 			return err

@@ -25,6 +25,9 @@ in the convo SQLite DB (idempotent migration). Plain values are JSON; secrets ar
 | `prices` | prices | `CONVO_PRICES` format `model:prompt:completion` per 1M tokens, validated by `convo.ParsePrices` (duplicates rejected); an empty override = built-in default prices only |
 | `tools.prices` `tools.lunar` `tools.news` `tools.reminders` `tools.notes` `tools.due_dates` `tools.images` | bool | default true |
 | `tools.web_search` ★ `tools.fetch` ★ | bool | default true |
+| `tools.memory` ★ | bool | default true; per-user long-term memory (`services/memory`, Zalo only) |
+| `memory.max_per_user` | int | 20..500 (default 200); non-core facts are evicted first |
+| `memory.retention_days` ★ | int | 30..1095 (default 365); facts unused this long are deleted daily |
 | `serper_api_key` ★ | secret | `news.serper_api_key` |
 | `fetch_allow_domains` ★ | list | ≤50 hostnames; no IPs; no shared-hosting suffix (github.io, blogspot.com, netlify.app, vercel.app, pages.dev, herokuapp.com, appspot.com, azurewebsites.net, …); lowercased, deduplicated; `chat.fetch_allow_domains` |
 | `private_tool_chats` ★ | list | ≤100 ids `[A-Za-z0-9_.:-]`; `zalo.private_tool_chats` |
