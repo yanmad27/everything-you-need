@@ -31,7 +31,7 @@ const (
 // FearGreed is the index for the latest day, with the previous day when known.
 type FearGreed struct {
 	Value          int
-	Classification string // original label, e.g. "Extreme Fear"
+	Classification string // original label, one of the five known ones; "" when upstream sent anything else
 	Date           time.Time
 	HasPrev        bool
 	Change         int // Value - yesterday's value; meaningful only when HasPrev
@@ -64,11 +64,15 @@ func (f FearGreed) changeText() string {
 	return " · không đổi so với hôm qua"
 }
 
+// UnknownLabel is shown when the upstream label is not one of the five known
+// ones. Upstream text is never rendered.
+const UnknownLabel = "Không rõ"
+
 func (f FearGreed) label() string {
 	if vn := f.ClassificationVN(); vn != "" {
 		return fmt.Sprintf("%s (%s)", vn, f.Classification)
 	}
-	return f.Classification
+	return UnknownLabel
 }
 
 // Line is the one-line Telegram rendering.
@@ -88,6 +92,8 @@ func (f FearGreed) Text() string {
 	}
 	return s
 }
+
+func utcDay(unix int64) int64 { return time.Unix(unix, 0).UTC().Unix() / 86400 }
 
 type fngResponse struct {
 	Data []struct {
@@ -122,24 +128,42 @@ func parseFearGreed(body []byte) (FearGreed, error) {
 		return FearGreed{}, errors.New("fear&greed: no valid data")
 	}
 	sort.SliceStable(es, func(i, j int) bool { return es[i].unix > es[j].unix })
-	out := FearGreed{Value: es[0].v, Classification: es[0].cls, Date: time.Unix(es[0].unix, 0).UTC()}
-	if len(es) > 1 {
-		out.HasPrev, out.Change = true, es[0].v-es[1].v
+	cls := es[0].cls
+	if _, ok := fearGreedVN[cls]; !ok {
+		cls = "" // never carry upstream text further
+	}
+	out := FearGreed{Value: es[0].v, Classification: cls, Date: time.Unix(es[0].unix, 0).UTC()}
+	// "Yesterday" means the previous UTC calendar day (entries are UTC midnight).
+	today := utcDay(es[0].unix)
+	for _, e := range es[1:] {
+		if utcDay(e.unix) == today-1 {
+			out.HasPrev, out.Change = true, es[0].v-e.v
+			break
+		}
 	}
 	return out, nil
 }
 
-// FearGreedSource fetches and caches the index. Safe for concurrent use.
-type FearGreedSource struct {
-	url    string
-	client *http.Client
-	ttl    time.Duration
-	now    func() time.Time
+type fgFlight struct {
+	done chan struct{}
+	val  FearGreed
+	err  error
+}
 
-	mu    sync.Mutex // also serialises fetches: one live request at a time
-	val   FearGreed
-	at    time.Time
-	valid bool
+// FearGreedSource fetches and caches the index. Safe for concurrent use: at
+// most one upstream fetch runs at a time and every waiter honours its own ctx.
+type FearGreedSource struct {
+	url     string
+	client  *http.Client
+	ttl     time.Duration
+	now     func() time.Time
+	fetchFn func(ctx context.Context) (FearGreed, error) // test seam; defaults to s.fetch
+
+	mu       sync.Mutex
+	val      FearGreed
+	at       time.Time
+	valid    bool
+	inflight *fgFlight
 }
 
 func NewFearGreedSource() *FearGreedSource {
@@ -147,33 +171,68 @@ func NewFearGreedSource() *FearGreedSource {
 }
 
 func newFearGreedSource(url string, c *http.Client) *FearGreedSource {
-	return &FearGreedSource{url: url, client: c, ttl: fearGreedTTL, now: time.Now}
+	s := &FearGreedSource{url: url, client: c, ttl: fearGreedTTL, now: time.Now}
+	s.fetchFn = s.fetch
+	return s
 }
 
 // Get returns the index from cache (TTL 1h). When a refresh fails it serves the
-// last value if it is under 24h old, otherwise the error. ctx bounds the wait.
+// last value if it is under 24h old (measured when the fetch finished),
+// otherwise the error. ctx bounds only this caller's wait.
 func (s *FearGreedSource) Get(ctx context.Context) (FearGreed, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.valid && s.now().Sub(s.at) < s.ttl {
+		v := s.val
+		s.mu.Unlock()
+		return v, nil
+	}
+	f := s.inflight
+	if f == nil {
+		f = &fgFlight{done: make(chan struct{})}
+		s.inflight = f
+		go s.run(f)
+	}
+	s.mu.Unlock()
+
+	select {
+	case <-f.done:
+		return f.val, f.err
+	case <-ctx.Done():
+		return FearGreed{}, ctx.Err()
+	}
+}
+
+func (s *FearGreedSource) run(f *fgFlight) {
+	var v FearGreed
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.New("fear&greed: fetch panic")
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), fearGreedTimeout)
+		defer cancel()
+		v, err = s.fetchFn(ctx)
+	}()
+	s.mu.Lock()
 	now := s.now()
-	if s.valid && now.Sub(s.at) < s.ttl {
-		return s.val, nil
+	switch {
+	case err == nil:
+		s.val, s.at, s.valid = v, now, true
+		f.val = v
+	case s.valid && now.Sub(s.at) < fearGreedMaxStale:
+		log.Printf("fear&greed refresh failed, serving stale value: %v", err)
+		f.val = s.val
+	default:
+		f.err = err
 	}
-	v, err := s.fetch(ctx)
-	if err != nil {
-		if s.valid && now.Sub(s.at) < fearGreedMaxStale {
-			log.Printf("fear&greed refresh failed, serving stale value: %v", err)
-			return s.val, nil
-		}
-		return FearGreed{}, err
-	}
-	s.val, s.at, s.valid = v, now, true
-	return v, nil
+	s.inflight = nil
+	s.mu.Unlock()
+	close(f.done)
 }
 
 func (s *FearGreedSource) fetch(ctx context.Context) (FearGreed, error) {
-	ctx, cancel := context.WithTimeout(ctx, fearGreedTimeout)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)
 	if err != nil {
 		return FearGreed{}, errors.New("fear&greed: bad request")

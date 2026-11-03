@@ -2,9 +2,11 @@ package pricetracker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,22 +42,22 @@ func TestFearGreedClassificationMapping(t *testing.T) {
 	if (FearGreed{Classification: "Weird"}).ClassificationVN() != "" {
 		t.Error("unknown label must have no VN mapping")
 	}
-	if l := (FearGreed{Value: 50, Classification: "Weird"}).Line(); !strings.Contains(l, "Weird") {
-		t.Errorf("unknown label dropped: %q", l)
+	if l := (FearGreed{Value: 50, Classification: "Weird"}).Line(); strings.Contains(l, "Weird") || !strings.Contains(l, UnknownLabel) {
+		t.Errorf("unknown label not neutralised: %q", l)
 	}
 }
 
 func TestFearGreedChangeCalculation(t *testing.T) {
-	up, _ := parseFearGreed([]byte(`{"data":[{"value":"70","value_classification":"Greed","timestamp":"200"},{"value":"60","value_classification":"Greed","timestamp":"100"}]}`))
+	up, _ := parseFearGreed([]byte(`{"data":[{"value":"70","value_classification":"Greed","timestamp":"1762128000"},{"value":"60","value_classification":"Greed","timestamp":"1762041600"}]}`))
 	if up.Change != 10 || !strings.Contains(up.Line(), "▲10") {
 		t.Errorf("up: %+v %s", up, up.Line())
 	}
-	same, _ := parseFearGreed([]byte(`{"data":[{"value":"50","value_classification":"Neutral","timestamp":"200"},{"value":"50","value_classification":"Neutral","timestamp":"100"}]}`))
+	same, _ := parseFearGreed([]byte(`{"data":[{"value":"50","value_classification":"Neutral","timestamp":"1762128000"},{"value":"50","value_classification":"Neutral","timestamp":"1762041600"}]}`))
 	if !strings.Contains(same.Line(), "không đổi") {
 		t.Errorf("same: %s", same.Line())
 	}
 	// out-of-order entries: newest timestamp is today
-	ooo, _ := parseFearGreed([]byte(`{"data":[{"value":"10","value_classification":"Extreme Fear","timestamp":"100"},{"value":"15","value_classification":"Extreme Fear","timestamp":"200"}]}`))
+	ooo, _ := parseFearGreed([]byte(`{"data":[{"value":"10","value_classification":"Extreme Fear","timestamp":"1762041600"},{"value":"15","value_classification":"Extreme Fear","timestamp":"1762128000"}]}`))
 	if ooo.Value != 15 || ooo.Change != 5 {
 		t.Errorf("ooo: %+v", ooo)
 	}
@@ -70,14 +72,14 @@ func TestFearGreedMissingYesterday(t *testing.T) {
 		t.Errorf("line %q", got)
 	}
 	// an unparsable yesterday is treated as missing
-	f, err = parseFearGreed([]byte(`{"data":[{"value":"25","value_classification":"Fear","timestamp":"200"},{"value":"x","value_classification":"Fear","timestamp":"100"}]}`))
+	f, err = parseFearGreed([]byte(`{"data":[{"value":"25","value_classification":"Fear","timestamp":"1762128000"},{"value":"x","value_classification":"Fear","timestamp":"1762041600"}]}`))
 	if err != nil || f.HasPrev {
 		t.Fatalf("%+v %v", f, err)
 	}
 }
 
 func TestParseFearGreedRejectsGarbage(t *testing.T) {
-	for _, in := range []string{``, `{}`, `{"data":[]}`, `{"data":[{"value":"abc","timestamp":"1"}]}`, `{"data":[{"value":"250","timestamp":"1"}]}`, `<html>`} {
+	for _, in := range []string{``, `{}`, `{"data":[]}`, `{"data":[{"value":"abc","timestamp":"1762128000"}]}`, `{"data":[{"value":"250","timestamp":"1762128000"}]}`, `<html>`} {
 		if _, err := parseFearGreed([]byte(in)); err == nil {
 			t.Errorf("%q accepted", in)
 		}
@@ -190,5 +192,153 @@ func TestFearGreedProductionClientIsNetguarded(t *testing.T) {
 	}
 	if !strings.HasPrefix(FearGreedURL, "https://api.alternative.me/") {
 		t.Fatalf("pinned URL changed: %s", FearGreedURL)
+	}
+}
+
+func fngDays(vals ...[2]string) []byte { // {value, unix}
+	out := `{"data":[`
+	for i, v := range vals {
+		if i > 0 {
+			out += ","
+		}
+		out += `{"value":"` + v[0] + `","value_classification":"Fear","timestamp":"` + v[1] + `"}`
+	}
+	return []byte(out + `]}`)
+}
+
+// item 3
+func TestFearGreedPrevMustBePreviousUTCDay(t *testing.T) {
+	const nov3, nov2, nov1 = "1762128000", "1762041600", "1761955200"
+	f, _ := parseFearGreed(fngDays([2]string{"30", nov3}, [2]string{"20", nov2}))
+	if !f.HasPrev || f.Change != 10 {
+		t.Errorf("Nov3+Nov2: %+v", f)
+	}
+	f, _ = parseFearGreed(fngDays([2]string{"30", nov3}, [2]string{"20", nov1}))
+	if f.HasPrev {
+		t.Errorf("Nov3+Nov1 (gap) must have no change: %+v", f)
+	}
+	f, _ = parseFearGreed(fngDays([2]string{"30", nov3}, [2]string{"20", "1762128000"}))
+	if f.HasPrev {
+		t.Errorf("two Nov3 entries must have no change: %+v", f)
+	}
+	f, _ = parseFearGreed(fngDays([2]string{"30", nov3}, [2]string{"20", "1762171199"})) // same UTC day, later hour
+	if f.HasPrev {
+		t.Errorf("same-day entry: %+v", f)
+	}
+}
+
+// item 1
+func TestFearGreedUnknownLabelNeverRendered(t *testing.T) {
+	evil := "_x_ *y* `z` [l](http://evil) " + strings.Repeat("A", 5000)
+	body := []byte(`{"data":[{"value":"40","value_classification":` + jsonQuote(evil) + `,"timestamp":"1762128000"}]}`)
+	f, err := parseFearGreed(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range []string{f.Line(), f.Text(), f.Classification, f.ClassificationVN()} {
+		if strings.Contains(out, "evil") || strings.Contains(out, "AAAA") || strings.Contains(out, "_x_") {
+			t.Fatalf("upstream text leaked: %q", out)
+		}
+	}
+	if got, want := f.Line(), "📉 Fear & Greed: 40 — Không rõ"; got != want {
+		t.Fatalf("line %q want %q", got, want)
+	}
+	t.Logf("unknown-label sample: %s", f.Line())
+}
+
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// item 2
+func TestFearGreedWaitersHonourOwnContextAndShareOneFetch(t *testing.T) {
+	var fetches atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	s := newFearGreedSource("x", nil)
+	s.fetchFn = func(context.Context) (FearGreed, error) {
+		if fetches.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return FearGreed{Value: 7, Classification: "Fear"}, nil
+	}
+	aDone := make(chan FearGreed, 1)
+	go func() { f, _ := s.Get(context.Background()); aDone <- f }()
+	<-entered
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := s.Get(ctx); !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 2*time.Second {
+		t.Fatalf("B err=%v after %v", err, time.Since(start))
+	}
+	close(release)
+	if f := <-aDone; f.Value != 7 {
+		t.Fatalf("A got %+v", f)
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("fetches=%d, want exactly 1", fetches.Load())
+	}
+}
+
+func TestFearGreedFailureSharedByQueuedCallers(t *testing.T) {
+	var fetches atomic.Int32
+	release := make(chan struct{})
+	s := newFearGreedSource("x", nil)
+	s.fetchFn = func(context.Context) (FearGreed, error) {
+		fetches.Add(1)
+		<-release
+		return FearGreed{}, errors.New("down")
+	}
+	errs := make(chan error, 5)
+	for i := 0; i < 5; i++ {
+		go func() { _, err := s.Get(context.Background()); errs <- err }()
+	}
+	for fetches.Load() == 0 { // fetch has started; the rest queue on it
+		runtime.Gosched()
+	}
+	close(release)
+	for i := 0; i < 5; i++ {
+		if err := <-errs; err == nil {
+			t.Fatal("want error")
+		}
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Fatalf("fetches=%d, want 1 shared", n)
+	}
+}
+
+// item 5
+func TestFearGreedStaleCeilingMeasuredAfterFetch(t *testing.T) {
+	var clock atomic.Int64
+	clock.Store(1_000_000)
+	s := newFearGreedSource("x", nil)
+	s.now = func() time.Time { return time.Unix(clock.Load(), 0) }
+	calls := 0
+	s.fetchFn = func(context.Context) (FearGreed, error) {
+		calls++
+		if calls == 1 {
+			return FearGreed{Value: 25, Classification: "Fear"}, nil
+		}
+		clock.Add(int64(fearGreedMaxStale/time.Second) - 100) // before the fetch it is still eligible...
+		clock.Add(200)                                        // ...but the failing fetch ends past 24h
+		return FearGreed{}, errors.New("slow failure")
+	}
+	if _, err := s.Get(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Add(int64(2 * fearGreedTTL / time.Second))
+	if f, err := s.Get(context.Background()); err == nil {
+		t.Fatalf("stale served past 24h: %+v", f)
+	}
+	// success records completion time
+	s2 := newFearGreedSource("x", nil)
+	var c2 atomic.Int64
+	c2.Store(500)
+	s2.now = func() time.Time { return time.Unix(c2.Load(), 0) }
+	s2.fetchFn = func(context.Context) (FearGreed, error) { c2.Add(30); return FearGreed{Value: 1}, nil }
+	_, _ = s2.Get(context.Background())
+	if s2.at.Unix() != 530 {
+		t.Fatalf("at=%d, want completion time 530", s2.at.Unix())
 	}
 }

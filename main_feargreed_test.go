@@ -70,12 +70,52 @@ func TestPriceNotificationFearGreedLineAndFallback(t *testing.T) {
 	t.Logf("=== price message WITH F&G line ===\n%s\n=== price message, F&G source failed ===\n%s", with, without)
 }
 
+// item 4
 func TestFearGreedCommandDetection(t *testing.T) {
-	for in, want := range map[string]bool{"/feargreed": true, "/FearGreed@PinkBot": true, "/fng": true, " /feargreed now": true,
-		"feargreed": false, "hello /feargreed": false, "/feargreeds": false, "": false} {
-		if got := fearGreedCommand(in); got != want {
-			t.Errorf("%q -> %v want %v", in, got, want)
+	for _, alias := range []string{"/feargreed", "/fng"} {
+		for _, c := range []struct {
+			text, user string
+			want       bool
+		}{
+			{alias, "", true}, {alias, "PinkBot", true}, {alias + " now", "PinkBot", true},
+			{alias + "@PinkBot", "pinkbot", true}, {alias + "@pinkbot", "@PinkBot", true}, // own suffix, case-insensitive
+			{alias + "@OtherBot", "PinkBot", false}, // foreign suffix
+			{alias + "@PinkBot", "", false},         // username unknown: suffixed commands ignored
+			{alias + "@", "PinkBot", false},
+		} {
+			if got := fearGreedCommand(c.text, c.user); got != c.want {
+				t.Errorf("%q (bot %q) -> %v want %v", c.text, c.user, got, c.want)
+			}
 		}
+	}
+	for _, in := range []string{"feargreed", "hello /feargreed", "/feargreeds", "/fngx", ""} {
+		if fearGreedCommand(in, "PinkBot") {
+			t.Errorf("%q matched", in)
+		}
+	}
+}
+
+// item 6: the old renderer is pinned (time line is the only moving part).
+func TestGeneratePriceNotificationPinned(t *testing.T) {
+	m := generatePriceNotification(cryptoPrices(), nil, nil)
+	lines := strings.Split(m, "\n")
+	lines[1] = "<time>"
+	want := "📊 *Price Update*\n<time>\n\n*CoinGecko* (2 items)\n• 💵 USD: *68.000* - Bitcoin\n• 💵 USD: *3.400* - Ethereum\n\n🤖 _Automated update_"
+	if got := strings.Join(lines, "\n"); got != want {
+		t.Fatalf("renderer changed:\n%q\nwant\n%q", got, want)
+	}
+	if generatePriceNotificationFG(cryptoPrices(), nil, nil, "") != generatePriceNotificationFG(cryptoPrices(), nil, nil, "") {
+		t.Fatal("non-deterministic")
+	}
+}
+
+// item 1 in the Telegram message.
+func TestPriceNotificationUnknownLabelFallback(t *testing.T) {
+	f := sampleFG()
+	f.Classification = ""
+	m := generatePriceNotificationFG(cryptoPrices(), nil, nil, f.Line())
+	if !strings.Contains(m, "📉 Fear & Greed: 25 — Không rõ · ▼3 so với hôm qua") || !strings.Contains(m, "Bitcoin") {
+		t.Fatalf("%s", m)
 	}
 }
 

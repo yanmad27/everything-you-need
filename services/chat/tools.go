@@ -40,6 +40,9 @@ type FearGreedInfo struct {
 	Change    int // today - yesterday
 }
 
+var fearGreedLabels = map[string]string{"Extreme Fear": "Sợ hãi tột độ", "Fear": "Sợ hãi", "Neutral": "Trung lập",
+	"Greed": "Tham lam", "Extreme Greed": "Tham lam tột độ"}
+
 // FearGreedReader serves the cached index.
 type FearGreedReader interface {
 	Get(ctx context.Context) (FearGreedInfo, error)
@@ -245,7 +248,11 @@ func (s *Service) buildTools() []toolImpl {
 					return "", err
 				}
 				var b strings.Builder
-				fmt.Fprintf(&b, "Fear & Greed: %d/100\nNhãn: %s (%s)\nNgày: %s\n", f.Value, f.ClassVN, f.Class, f.Date.UTC().Format("2006-01-02"))
+				label := "Không rõ" // upstream text never reaches the model: only the five known labels pass
+				if vn, ok := fearGreedLabels[f.Class]; ok {
+					label = vn + " (" + f.Class + ")"
+				}
+				fmt.Fprintf(&b, "Fear & Greed: %d/100\nNhãn: %s\nNgày: %s\n", f.Value, label, f.Date.UTC().Format("2006-01-02"))
 				if f.HasChange {
 					fmt.Fprintf(&b, "Thay đổi so với hôm qua: %+d\n", f.Change)
 				} else {

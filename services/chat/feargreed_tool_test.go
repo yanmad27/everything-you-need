@@ -97,3 +97,15 @@ func TestFetchAllowlistExcludesAlternativeMe(t *testing.T) {
 		t.Fatalf("defaultFetchAllow changed: %v", defaultFetchAllow)
 	}
 }
+
+// item 1: only the five known labels reach the model.
+func TestFearGreedToolUnknownLabelNeverReachesModel(t *testing.T) {
+	i := sampleFG
+	i.Class, i.ClassVN = "_x_ *y* `z` [l](http://evil)", "_vn_ *evil*"
+	r := newRig(t, withFG(fakeFG{info: i}), toolStep(call("1", "fear_greed_index", `{}`)), textStep("ok"))
+	r.ask("fng")
+	got := r.toolResult(1)
+	if !strings.Contains(got, "Không rõ") || strings.Contains(got, "evil") || strings.Contains(got, "_x_") {
+		t.Fatalf("%q", got)
+	}
+}

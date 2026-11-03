@@ -373,7 +373,7 @@ func buildAppHandler(cfg *config.Config, teleSvc *reminder.Service,
 				if msg == nil || msg.Text == "" {
 					return
 				}
-				if fearGreedCommand(msg.Text) {
+				if fearGreedCommand(msg.Text, teleBotUsername) {
 					chatID := strconv.FormatInt(msg.Chat.ID, 10)
 					replyFearGreed(ctx, sharedFearGreed(), func(t string) error {
 						return teleService.SendReply(ctx, chatID, msg.MessageID, t)
@@ -464,6 +464,11 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 // handles wake-word messages that aren't reminder commands. addressed means the
 // platform only delivers messages aimed at the bot (Zalo group @mention/reply),
 // so the chat assistant answers without requiring a wake word.
+// teleBotUsername is this bot's Telegram username, used to tell /cmd@us from
+// /cmd@other. Nothing in config or TeleBotService knows it yet, so it is empty
+// and only bare commands are answered.
+var teleBotUsername = ""
+
 var (
 	fearGreedOnce sync.Once
 	fearGreedSrc  *pricetracker.FearGreedSource
@@ -476,18 +481,20 @@ func sharedFearGreed() *pricetracker.FearGreedSource {
 	return fearGreedSrc
 }
 
-// fearGreedCommand reports whether text asks for the index directly
-// (/feargreed, optionally /feargreed@botname).
-func fearGreedCommand(text string) bool {
+// fearGreedCommand reports whether text asks for the index directly: a bare
+// /feargreed or /fng, or one suffixed with this bot's own username
+// (case-insensitive). A suffix for another bot, or any suffix when the
+// username is unknown (""), is not ours.
+func fearGreedCommand(text, botUsername string) bool {
 	f := strings.Fields(strings.ToLower(text))
 	if len(f) == 0 {
 		return false
 	}
-	c := f[0]
-	if i := strings.IndexByte(c, '@'); i >= 0 {
-		c = c[:i]
+	c, who, hasAt := strings.Cut(f[0], "@")
+	if c != "/feargreed" && c != "/fng" {
+		return false
 	}
-	return c == "/feargreed" || c == "/fng"
+	return !hasAt || (botUsername != "" && who == strings.ToLower(strings.TrimPrefix(botUsername, "@")))
 }
 
 type fearGreedGetter interface {
