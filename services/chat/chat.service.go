@@ -189,6 +189,7 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 		return nil
 	}
 	s.recordConvo(ctx, in)
+	memEpoch := s.memEpoch(userID) // delete generation when the turn was accepted, before completion and send
 	reply, err := s.completeTools(ctx, chatID, userID, userName, prompt)
 	reply = strings.TrimSpace(reply)
 	if err != nil || reply == "" {
@@ -207,7 +208,7 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 	s.recordConvo(ctx, ConvoEvent{ChatID: chatID, Direction: "out", Kind: "text", Text: reply})
 	s.remember(chatID, prompt, reply)
 	s.noteUserText(chatID, userID, prompt)
-	s.queueMemory(ctx, chatID, userID, prompt) // async, bounded, never blocks the reply
+	s.queueMemoryAt(ctx, chatID, userID, prompt, memEpoch) // async, bounded, never blocks the reply
 	return nil
 }
 

@@ -78,6 +78,22 @@ var (
 		`chuyen\s+(?:do|nay|ay)|ve\s+(?:minh|toi|tui)|dieu\s+(?:do|nay)|cai\s+(?:do|nay)|chuyen\s+.{1,40}?\s+(?:di|nhe|nha))` + bR)
 )
 
+// forgetCommandWords are stripped from a forget query: they name the command, not
+// the thing to forget.
+var forgetCommandWords = map[string]bool{"quen": true, "chuyen": true, "di": true, "nhe": true, "nha": true, "pink": true, "oi": true,
+	"het": true, "ve": true, "minh": true, "toi": true, "xoa": true, "nho": true, "cai": true, "dieu": true, "do": true, "nay": true}
+
+// forgetKeyword folds the model's query and drops command words.
+func forgetKeyword(q string) string {
+	var keep []string
+	for _, w := range strings.Fields(fold(q)) {
+		if !forgetCommandWords[w] {
+			keep = append(keep, w)
+		}
+	}
+	return strings.Join(keep, " ")
+}
+
 func fold(s string) string { return strings.Join(strings.Fields(note.Fold(s)), " ") }
 
 // memoryListIntent: "Pink nhớ gì về mình", "bạn nhớ gì về tôi" (and unaccented).
@@ -253,9 +269,9 @@ func (s *Service) memoryTools() []toolImpl {
 					}
 					return fmt.Sprintf("Đã xoá %d điều Pink nhớ về bạn.", n), nil
 				}
-				q := fold(a.Query)
+				q := forgetKeyword(a.Query)
 				if utf8.RuneCountInString(q) < 3 {
-					return "", userError("query too short; use a specific keyword from what the user wants forgotten")
+					return "", userError("query too short or only command words; use a specific keyword from what the user wants forgotten")
 				}
 				if !strings.Contains(fold(t.userText), q) {
 					return "", userError("the keyword must be something the user named; ask them to say exactly what to forget (e.g. 'quên chuyện cà phê đi')")
@@ -276,7 +292,7 @@ func (s *Service) memoryTools() []toolImpl {
 				if hits > memForgetMaxRows {
 					return "", userError("query matches too many memories; use a more specific keyword, or the user can say 'quên hết về mình'")
 				}
-				n, err := tl.Memory.DeleteMatching(c, sc, a.Query)
+				n, err := tl.Memory.DeleteMatching(c, sc, q)
 				if err != nil {
 					return "", err
 				}
@@ -377,6 +393,24 @@ func extractGate(text string) bool {
 
 // queueMemory is called after the reply was sent. It never blocks.
 func (s *Service) queueMemory(ctx context.Context, chatID, userID, text string) {
+	s.queueMemoryAt(ctx, chatID, userID, text, s.memEpoch(userID))
+}
+
+// memEpoch is the speaker's delete generation now (0 without memory).
+func (s *Service) memEpoch(userID string) uint64 {
+	if s.mem == nil || s.tools.Memory == nil {
+		return 0
+	}
+	sc, ok := s.memScope(userID)
+	if !ok {
+		return 0
+	}
+	return s.tools.Memory.Epoch(sc)
+}
+
+// queueMemoryAt queues an extraction whose writes are valid only while the user's
+// delete generation is still epoch (captured when the turn was accepted).
+func (s *Service) queueMemoryAt(ctx context.Context, chatID, userID, text string, epoch uint64) {
 	lv := liveFrom(ctx)
 	if s.mem == nil || !s.memoryOn(lv) {
 		return
@@ -408,7 +442,7 @@ func (s *Service) queueMemory(ctx context.Context, chatID, userID, text string) 
 		log.Printf("chat memory: extract outcome=daily_cap chat=%s", maskChat(chatID))
 		return
 	}
-	job := memJob{sc: sc, text: text, group: isGroupChat(ctx), client: client, model: model, epoch: s.tools.Memory.Epoch(sc),
+	job := memJob{sc: sc, text: text, group: isGroupChat(ctx), client: client, model: model, epoch: epoch,
 		chatID: chatID, turnID: turnIDFrom(ctx), userID: userID, platform: s.tools.Platform}
 	s.mem.start(s)
 	s.mem.pending.Add(1)
@@ -577,7 +611,9 @@ func (s *Service) runExtract(j memJob) {
 func (s *Service) upsertMemory(ctx context.Context, sc memory.Scope, c memory.Candidate, epoch uint64) (ok, stale bool) {
 	s.mem.upMu.Lock()
 	defer s.mem.upMu.Unlock()
-	if ctx.Err() != nil {
+	// Re-check inside the critical section: a job that waited here for the lock must
+	// not write after memory was switched off or shutdown began.
+	if ctx.Err() != nil || !s.memoryOn(s.liveNow()) {
 		return false, false
 	}
 	before, cerr := s.tools.Memory.Count(ctx, sc)

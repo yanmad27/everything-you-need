@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -665,7 +666,7 @@ func TestMemoryShutdownDrainsAndNeverWritesAfterClose(t *testing.T) {
 	fc := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích mèo"}
 	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay)
 	<-fc.started
-	go func() { time.Sleep(50 * time.Millisecond); close(fc.gate) }()
+	go close(fc.gate) // released concurrently with Shutdown: either order must end with the row stored
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.svc.ShutdownMemory(ctx); err != nil {
@@ -693,7 +694,7 @@ func TestMemoryShutdownDrainsAndNeverWritesAfterClose(t *testing.T) {
 	st2.mu.Lock()
 	st2.frozen = true // the stores would be closed here
 	st2.mu.Unlock()
-	time.Sleep(100 * time.Millisecond)
+	r2.svc.WaitMemory() // deterministic: the cancelled job has fully returned (the fake client only returns after cancellation)
 	st2.mu.Lock()
 	defer st2.mu.Unlock()
 	if st2.late != 0 || st2.upserts != 0 {
@@ -795,5 +796,71 @@ func TestMemoryGroupHealthExtractedNotShared(t *testing.T) {
 	r.askIn("PRIVATE", "u1", "đi khám ở BV Xanh nhé hôm nay")
 	if !strings.Contains(r.sc.sys[6], "tiểu đường") {
 		t.Fatalf("DM did not see its own health fact: %q", r.sc.sys[6])
+	}
+}
+
+func TestMemoryEpochCapturedWhenTurnAcceptedNotAfterReply(t *testing.T) {
+	started, gate := make(chan struct{}), make(chan struct{})
+	block := func([]llm.ChatMessage, []llm.ToolDef) (llm.ToolResponse, error) {
+		close(started)
+		<-gate
+		return llm.ToolResponse{Text: "chào Na", Assistant: llm.ChatMessage{Role: "assistant", Content: "chào Na"}}, nil
+	}
+	fact := extractStep(`{"memories":[{"kind":"preference","text":"thích cà phê sữa","importance":0.9,"confidence":0.9,"shareable":true}]}`)
+	r, st := newMemRig(t, nil, block, fact)
+	done := make(chan struct{})
+	go func() { r.askIn("PRIVATE", "u1", memSay); close(done) }()
+	<-started                                                                                                   // the turn was accepted and the reply is still being completed
+	if _, err := st.DeleteAll(context.Background(), memory.Scope{Platform: "zalo", UserID: "u1"}); err != nil { // admin "delete all"
+		t.Fatal(err)
+	}
+	close(gate)
+	<-done
+	if len(r.sc.calls) != 2 {
+		t.Fatalf("extraction did not run (calls=%d): the test would prove nothing", len(r.sc.calls))
+	}
+	if n, _ := st.Count(context.Background(), memory.Scope{Platform: "zalo", UserID: "u1"}); n != 0 {
+		t.Fatalf("extraction of a turn accepted before the delete wrote %d row(s)", n)
+	}
+}
+
+func TestMemoryDisabledWhileWaitingOnWriteLockStoresNothing(t *testing.T) {
+	var calls atomic.Int32
+	r, st := newRecRig(t, nil)
+	// liveNow is read by runExtract at start (1), after the LLM (2) and then inside the
+	// write critical section (3+): memory is on for the first two and off from the third.
+	r.svc.WithLive(func() Live { return Live{Memory: MemoryLive{Enabled: calls.Add(1) <= 2, MaxPerUser: 100}} })
+	fc := &factClient{text: "thích mèo"}
+	r.svc.mem.upMu.Lock() // the job passes the earlier checks and then waits for the write lock
+	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay)
+	for calls.Load() < 2 {
+		runtime.Gosched() // both earlier checks done: the job is now at (or heading to) upMu
+	}
+	r.svc.mem.upMu.Unlock()
+	r.svc.WaitMemory()
+	if n, _ := st.Count(context.Background(), memory.Scope{Platform: "zalo", UserID: "u1"}); n != 0 || st.upserts != 0 {
+		t.Fatalf("stored after disable: count=%d upserts=%d", n, st.upserts)
+	}
+}
+
+func TestMemoryForgetQueryCommandWordsStripped(t *testing.T) {
+	ctx := context.Background()
+	sc := memory.Scope{Platform: "zalo", UserID: "u1"}
+	for _, q := range []string{"chuyen", "chuyện đó", "quên chuyện", "pink ơi quên hết"} {
+		r, st := newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"`+q+`"}`)), textStep("ok"))
+		putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+		putMem(t, st, "u1", memory.KindTopic, "hay nói chuyện phiếm", true)
+		r.askIn("PRIVATE", "u1", "Pink ơi quên chuyện cà phê đi, quên hết nhé")
+		if n, _ := st.Count(ctx, sc); n != 2 {
+			t.Errorf("command-word query %q deleted rows (count=%d)", q, n)
+		}
+	}
+	// a real keyword combined with command words still works
+	r, st := newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"chuyện cà phê"}`)), textStep("ok"))
+	putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+	putMem(t, st, "u1", memory.KindPreference, "thích mèo", true)
+	r.askIn("PRIVATE", "u1", "quên chuyện cà phê đi")
+	if n, _ := st.Count(ctx, sc); n != 1 {
+		t.Errorf("keyword with command words: count=%d, want 1", n)
 	}
 }

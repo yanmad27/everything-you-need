@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.57.0
 	github.com/spf13/viper v1.20.1
 	github.com/submodule-org/submodule.go/v2 v2.0.4
+	golang.org/x/text v0.27.0
 	modernc.org/sqlite v1.48.2
 )
 
@@ -40,7 +41,6 @@ require (
 	golang.org/x/crypto v0.40.0
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

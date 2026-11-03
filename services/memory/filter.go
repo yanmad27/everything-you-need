@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"everything-you-need/m/services/note"
+	"golang.org/x/text/unicode/norm"
 )
 
 // MaxTextRunes is the longest memory text accepted.
@@ -76,6 +77,7 @@ var ibanRe = regexp.MustCompile(`(?i)\b[a-z]{2}\d{2}(?:[ -]?[a-z0-9]{3,4}){3,8}\
 // digits, covered by the digit rule) and credential keywords in Vietnamese
 // (with or without accents) and English.
 func SecretLike(text string) bool {
+	text = norm.NFC.String(text) // decomposed (NFD) input must see the same keywords
 	if maxDigitRun(text) >= minSecretDigits || cardLike(text) || ibanRe.MatchString(text) ||
 		keyPrefixRe.MatchString(text) || highEntropyWord(text) || khoaRe.MatchString(strings.ToLower(text)) {
 		return true
@@ -140,7 +142,8 @@ func digitRuns(text string) []string {
 			sep = 0
 		case unicode.IsLetter(r) || unicode.Is(unicode.Mn, r):
 			flush()
-		default: // separator
+		case unicode.IsSpace(r): // whitespace never counts toward the gap
+		default: // a non-space, non-alphanumeric separator
 			if len(cur) > 0 {
 				sep++
 			}
@@ -215,8 +218,7 @@ var accentedInstructionRe = regexp.MustCompile(`(^|[^\p{L}])(hãy|bạn là|bạ
 // trả lời ...", "nếu ... thì ...", "luôn trả lời ...", "từ giờ hãy ...". They need a
 // reply verb so ordinary facts ("mình thích trả lời tin nhắn sớm") pass.
 var condInstructionRes = []*regexp.Regexp{
-	regexp.MustCompile(`(^| )khi .{0,80}? thi (?:hay |ban |pink |bot )?(?:tra loi|noi|bao|dap|gui|doi|goi|phai|xung)( |$)`),
-	regexp.MustCompile(`(^| )neu .{0,80}? thi (?:hay |ban |pink |bot )?(?:tra loi|noi|bao|dap|gui|doi|goi|phai|xung)( |$)`),
+	regexp.MustCompile(`(^| )(?:moi khi|moi lan|moi luc|khi|neu) .{0,80}? thi (?:cu |hay )?(?:ban |pink |bot )?(?:tra loi|noi|bao|dap|gui|doi|goi|phai|xung)( |$)`),
 	regexp.MustCompile(`(^| )luon (?:luon )?(?:tra loi|noi|dap|goi|xung|tu choi|tuan theo|lam theo)( |$)`),
 	regexp.MustCompile(`(^| )tu (?:gio|nay) (?:tro di )?(?:hay|ban|pink|bot|phai|luon|dung|moi)( |$)`),
 }
@@ -228,6 +230,7 @@ var urlRe = regexp.MustCompile(`(?i)(://|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|vn
 // fences, backticks, brackets, headings, bold), URLs, or an imperative aimed at
 // the bot or about rules (Vietnamese and English, with or without accents).
 func InstructionLike(text string) bool {
+	text = norm.NFC.String(text)
 	if strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > MaxTextRunes {
 		return true
 	}
@@ -272,6 +275,7 @@ func InstructionLike(text string) bool {
 // and InstructionLike. ok is false when the text must be rejected; the returned
 // string is only meaningful when ok is true.
 func Sanitize(text string) (string, bool) {
+	text = norm.NFC.String(text)
 	text = strings.NewReplacer("`", "", "<", "", ">", "").Replace(text)
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" || SecretLike(text) || InstructionLike(text) {
