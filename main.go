@@ -131,6 +131,13 @@ func main() {
 		_ = webhookServer.Shutdown(shutdownCtx)
 		shutdownCancel()
 	}
+	// No new messages arrive now: let queued memory extractions finish (bounded) before
+	// the deferred closes of the convo and memory stores run.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := zaloChat.ShutdownMemory(drainCtx); err != nil {
+		log.Printf("memory extraction drain: %v", err)
+	}
+	drainCancel()
 	scheduler.Stop()
 	cancel()
 

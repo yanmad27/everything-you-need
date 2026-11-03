@@ -20,6 +20,14 @@ const minSecretDigits = 6
 // spaces and padded with a space on both sides, so " phrase " can be searched
 // as whole words.
 func paddedWords(s string) string {
+	// Decomposed (NFD) Vietnamese carries its accents as combining marks; drop
+	// them so "mật" typed as a + marks still folds to "mat" instead of splitting.
+	s = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) {
+			return -1
+		}
+		return r
+	}, s)
 	w := strings.FieldsFunc(note.Fold(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	return " " + strings.Join(w, " ") + " "
 }
@@ -31,6 +39,32 @@ var secretWords = []string{
 	"mat khau", "matkhau", "mk", "password", "passwd", "passcode", "pass", "otp", "ma pin", "pin", "stk",
 	"so tai khoan", "tai khoan ngan hang", "cvv", "cvc", "cccd", "cmnd", "can cuoc", "the tin dung",
 	"api key", "apikey", "secret key", "private key", "token", "seed phrase",
+	"key", "wifi", "wi fi", "ma xac", "ma so", "ma bao mat", "khoa bi mat",
+}
+
+// khoaRe: "khoá/khóa" (lock, key) only with its accent; unaccented "khoa" is also
+// the everyday word for a faculty/department, so it is not a secret marker.
+var khoaRe = regexp.MustCompile(`(^|[^\p{L}])(?:khoá|khóa)([^\p{L}]|$)`)
+
+// keyPrefixRe matches well-known API key / token prefixes.
+var keyPrefixRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{6,}|gh[pousr]_[A-Za-z0-9]{6,}|AKIA[0-9A-Z]{8,}|xox[a-zA-Z]-?[A-Za-z0-9-]{6,}|AIza[0-9A-Za-z_-]{10,}|eyJ[A-Za-z0-9_-]{10,})`)
+
+// highEntropyWord: a 16+ character word mixing letters and digits (tokens, keys, hashes).
+func highEntropyWord(text string) bool {
+	for _, w := range strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' }) {
+		if utf8.RuneCountInString(w) < 16 {
+			continue
+		}
+		var l, d bool
+		for _, r := range w {
+			l = l || unicode.IsLetter(r)
+			d = d || unicode.IsDigit(r)
+		}
+		if l && d {
+			return true
+		}
+	}
+	return false
 }
 
 var ibanRe = regexp.MustCompile(`(?i)\b[a-z]{2}\d{2}(?:[ -]?[a-z0-9]{3,4}){3,8}\b`)
@@ -42,7 +76,8 @@ var ibanRe = regexp.MustCompile(`(?i)\b[a-z]{2}\d{2}(?:[ -]?[a-z0-9]{3,4}){3,8}\
 // digits, covered by the digit rule) and credential keywords in Vietnamese
 // (with or without accents) and English.
 func SecretLike(text string) bool {
-	if maxDigitRun(text) >= minSecretDigits || cardLike(text) || ibanRe.MatchString(text) {
+	if maxDigitRun(text) >= minSecretDigits || cardLike(text) || ibanRe.MatchString(text) ||
+		keyPrefixRe.MatchString(text) || highEntropyWord(text) || khoaRe.MatchString(strings.ToLower(text)) {
 		return true
 	}
 	pw := paddedWords(text)
@@ -54,28 +89,61 @@ func SecretLike(text string) bool {
 	return false
 }
 
-func isDigitSep(r rune) bool {
-	return r == ' ' || r == '-' || r == '.' || r == ',' || r == '_' || r == ' '
+// maxSepBetweenDigits is how many non-alphanumeric characters may sit between two
+// digits of one run ("0912/345/678", "079:203:123:456", "12 - 34").
+const maxSepBetweenDigits = 2
+
+// dateRe: a plausible dd/mm/yyyy date is a birthday-style fact, not an identifier;
+// it is blanked before digit runs are measured.
+var dateRe = regexp.MustCompile(`(^|\D)(?:0?[1-9]|[12]\d|3[01])[/.\-](?:0?[1-9]|1[0-2])[/.\-](?:19|20)\d{2}($|\D)`)
+
+// digitVal returns the decimal value of a Unicode decimal digit (ASCII, fullwidth,
+// Arabic-Indic, ...).
+func digitVal(r rune) rune {
+	if r >= '0' && r <= '9' {
+		return r - '0'
+	}
+	for _, rg := range unicode.Nd.R16 {
+		if r <= 0xFFFF && uint16(r) >= rg.Lo && uint16(r) <= rg.Hi {
+			return (r - rune(rg.Lo)) % 10
+		}
+	}
+	for _, rg := range unicode.Nd.R32 {
+		if uint32(r) >= rg.Lo && uint32(r) <= rg.Hi {
+			return (r - rune(rg.Lo)) % 10
+		}
+	}
+	return 0
 }
 
-// digitRuns returns the digit strings of text; separators between digits do not
-// break a run, any other rune does.
+// digitRuns returns the digit strings of text (any Unicode decimal digits,
+// normalised to ASCII). Up to maxSepBetweenDigits non-alphanumeric characters
+// between digits do not break a run; a letter, or a longer gap, does.
 func digitRuns(text string) []string {
+	text = dateRe.ReplaceAllString(text, "$1 $2")
 	var runs []string
 	var cur []rune
+	sep := 0
 	flush := func() {
 		if len(cur) > 0 {
 			runs = append(runs, string(cur))
 		}
-		cur = nil
+		cur, sep = nil, 0
 	}
 	for _, r := range text {
 		switch {
-		case r >= '0' && r <= '9':
-			cur = append(cur, r)
-		case isDigitSep(r) && len(cur) > 0:
-		default:
+		case unicode.IsDigit(r):
+			if len(cur) > 0 && sep > maxSepBetweenDigits {
+				flush()
+			}
+			cur = append(cur, '0'+digitVal(r))
+			sep = 0
+		case unicode.IsLetter(r) || unicode.Is(unicode.Mn, r):
 			flush()
+		default: // separator
+			if len(cur) > 0 {
+				sep++
+			}
 		}
 	}
 	flush()
@@ -143,6 +211,16 @@ var instructionPhrases = []string{
 // "bạn là/hãy/phải ...", "chỉ dẫn". "hay" (often / or) never matches.
 var accentedInstructionRe = regexp.MustCompile(`(^|[^\p{L}])(hãy|bạn là|bạn hãy|bạn phải|chỉ dẫn|chỉ thị)([^\p{L}]|$)`)
 
+// Conditional / standing-order shapes (matched on folded text): "khi ai hỏi ... thì
+// trả lời ...", "nếu ... thì ...", "luôn trả lời ...", "từ giờ hãy ...". They need a
+// reply verb so ordinary facts ("mình thích trả lời tin nhắn sớm") pass.
+var condInstructionRes = []*regexp.Regexp{
+	regexp.MustCompile(`(^| )khi .{0,80}? thi (?:hay |ban |pink |bot )?(?:tra loi|noi|bao|dap|gui|doi|goi|phai|xung)( |$)`),
+	regexp.MustCompile(`(^| )neu .{0,80}? thi (?:hay |ban |pink |bot )?(?:tra loi|noi|bao|dap|gui|doi|goi|phai|xung)( |$)`),
+	regexp.MustCompile(`(^| )luon (?:luon )?(?:tra loi|noi|dap|goi|xung|tu choi|tuan theo|lam theo)( |$)`),
+	regexp.MustCompile(`(^| )tu (?:gio|nay) (?:tro di )?(?:hay|ban|pink|bot|phai|luon|dung|moi)( |$)`),
+}
+
 var urlRe = regexp.MustCompile(`(?i)(://|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|vn|io|app|dev|me|ly|co|info|xyz|gov|edu|ai|tk|ru|cn)\b)`)
 
 // InstructionLike reports whether text must not be stored: empty text, text over
@@ -172,6 +250,12 @@ func InstructionLike(text string) bool {
 	}
 	if accentedInstructionRe.MatchString(strings.ToLower(text)) {
 		return true
+	}
+	flat := strings.TrimSpace(paddedWords(text))
+	for _, re := range condInstructionRes {
+		if re.MatchString(flat) {
+			return true
+		}
 	}
 	pw := paddedWords(text)
 	for _, p := range instructionPhrases {

@@ -346,12 +346,12 @@ func TestRetrieveGroup(t *testing.T) {
 		if !m.Shareable {
 			t.Errorf("non-shareable returned: %q", m.Text)
 		}
-		if groupForbidden[m.Kind] {
-			t.Errorf("forbidden kind %s returned in group", m.Kind)
+		if !groupAllowed[m.Kind] {
+			t.Errorf("kind %s returned in group (not on the allow-list)", m.Kind)
 		}
 	}
 	tx := strings.Join(texts(got), "|")
-	for _, want := range []string{"Na", "Bin", "nói ngắn gọn", "thích cà phê sữa", "hay nói về cà phê rang xay"} {
+	for _, want := range []string{"Na", "Bin", "nói ngắn gọn", "thích cà phê sữa"} {
 		if !strings.Contains(tx, want) {
 			t.Errorf("group missing %q: %v", want, texts(got))
 		}

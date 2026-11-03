@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,7 +133,7 @@ func TestMemoryNoInjectionLeavesFetchAllowed(t *testing.T) {
 
 func TestMemoryIntentGates(t *testing.T) {
 	forget := []string{"quên chuyện đó đi", "Pink quên hết về mình", "quen het ve minh", "xoá hết trí nhớ", "xóa trí nhớ về mình đi",
-		"Pink quên chuyện cà phê đi", "hãy quên điều đó", "xoa memory cua minh", "quên cái đó đi nhé", "Pink ơi, quên chuyện cà phê đi", "Pink ơi quên hết về mình", "ơi pink quên chuyện đó nhé", "Bot ơi! quên điều đó đi", "pink oi, quen ve minh nhe", "đừng nhớ cái này", "dung nho cai nay"}
+		"Pink quên chuyện cà phê đi", "hãy quên điều đó", "xoa memory cua minh", "quên cái đó đi nhé", "Pink ơi, quên chuyện cà phê đi", "Pink ơi quên hết về mình", "ơi pink quên chuyện đó nhé", "Bot ơi! quên điều đó đi", "pink oi, quen ve minh nhe"}
 	for _, s := range forget {
 		if !memoryForgetIntent(s) {
 			t.Errorf("should be forget intent: %q", s)
@@ -140,7 +141,7 @@ func TestMemoryIntentGates(t *testing.T) {
 	}
 	notForget := []string{"quên mất chìa khoá", "tôi hay quên", "quen biết", "quên mật khẩu thì sao", "hôm qua tôi quên chuyện đó rồi",
 		"bạn quên chuyện đó rồi hả", "đừng xoá trí nhớ của tôi", "không xóa trí nhớ nhé", "quên chuyện đó đi?", "mình quên mang ví", "xoá ảnh này đi, tôi nhớ rồi",
-		"quên hết rồi", "pink ơi quên rồi à", "Pink ơi, quên chuyện đó rồi hả?", "Pink ơi đừng quên chuyện đó", "quên", "Quên đi", "nhớ mua sữa", "quên mất về mình"}
+		"đừng nhớ cái này", "dung nho cai nay", "Pink ơi đừng nhớ chuyện này", "quên hết rồi", "pink ơi quên rồi à", "Pink ơi, quên chuyện đó rồi hả?", "Pink ơi đừng quên chuyện đó", "quên", "Quên đi", "nhớ mua sữa", "quên mất về mình"}
 	for _, s := range notForget {
 		if memoryForgetIntent(s) {
 			t.Errorf("must NOT be forget intent: %q", s)
@@ -507,5 +508,292 @@ func TestMemoryTelegramPathUnaffected(t *testing.T) {
 	}
 	if strings.Contains(r.sc.sys[0], "Trí nhớ về người dùng") {
 		t.Error("memory prompt line present without store")
+	}
+}
+
+// ---- repair round: regression tests ----
+
+// recStore wraps the real store and records cap changes and writes after a mark.
+type recStore struct {
+	*memory.Store
+	mu      sync.Mutex
+	caps    []int
+	upserts int
+	frozen  bool // set once Shutdown returned and the store is "closed"
+	late    int  // writes seen after frozen
+}
+
+func (r *recStore) SetMaxPerUser(n int) {
+	r.mu.Lock()
+	r.caps = append(r.caps, n)
+	r.mu.Unlock()
+	r.Store.SetMaxPerUser(n)
+}
+
+func (r *recStore) UpsertIf(ctx context.Context, sc memory.Scope, c memory.Candidate, e uint64) (int64, bool, error) {
+	r.mu.Lock()
+	r.upserts++
+	if r.frozen {
+		r.late++
+	}
+	r.mu.Unlock()
+	return r.Store.UpsertIf(ctx, sc, c, e)
+}
+
+func newRecRig(t *testing.T, mod func(*Tools)) (*rig, *recStore) {
+	t.Helper()
+	st, err := memory.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	rs := &recStore{Store: st}
+	r := newRig(t, func(tl *Tools) {
+		tl.Memory = rs
+		if mod != nil {
+			mod(tl)
+		}
+	})
+	return r, rs
+}
+
+// factClient answers every extraction with one candidate, after the gate opens.
+type factClient struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	gate    chan struct{}
+	text    string
+}
+
+func (f *factClient) CompleteWithTools(ctx context.Context, _ string, _ []llm.ChatMessage, _ []llm.ToolDef, _ int) (llm.ToolResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	n := f.calls
+	f.mu.Unlock()
+	if f.started != nil && n == 1 {
+		close(f.started)
+	}
+	if f.gate != nil {
+		select {
+		case <-f.gate:
+		case <-ctx.Done():
+		}
+	}
+	return llm.ToolResponse{Text: `{"memories":[{"kind":"preference","text":"` + f.text + `","importance":0.5,"confidence":0.9,"shareable":true}]}`}, nil
+}
+
+const memSay = "mình tên là Na và mình thích cà phê sữa"
+
+func TestMemoryForgetDuringInFlightExtractionStaysGone(t *testing.T) {
+	ctx := context.Background()
+	sc := memory.Scope{Platform: "zalo", UserID: "u1"}
+	for _, how := range []string{"memory_forget path (DeleteMatching)", "admin DeleteID", "admin DeleteAll"} {
+		r, st := newRecRig(t, nil)
+		putMem(t, st.Store, "u1", memory.KindPreference, "thích cà phê sữa", true)
+		fc := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích cà phê sữa"}
+		r.svc.queueMemory(memCtx(fc), "chat-1234", "u1", memSay)
+		<-fc.started // the extractor is running, its epoch was captured at queue time
+		switch how {
+		case "admin DeleteID":
+			ms, _ := st.List(ctx, sc, 0)
+			if err := st.DeleteID(ctx, sc, ms[0].ID); err != nil {
+				t.Fatal(err)
+			}
+		case "admin DeleteAll":
+			st.DeleteAll(ctx, sc)
+		default:
+			st.DeleteMatching(ctx, sc, "cà phê")
+		}
+		close(fc.gate)
+		r.svc.WaitMemory()
+		if n, _ := st.Count(ctx, sc); n != 0 {
+			t.Fatalf("%s: forgotten fact came back (count=%d)", how, n)
+		}
+	}
+}
+
+func TestMemoryDisabledWhileQueuedStopsExtraction(t *testing.T) {
+	var off atomic.Bool
+	r, st := newRecRig(t, func(tl *Tools) { tl.MemoryWorkers, tl.MemoryQueue = 1, 4 })
+	r.svc.WithLive(func() Live { return Live{Memory: MemoryLive{Enabled: !off.Load(), MaxPerUser: 100}} })
+	fc := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích mèo"}
+	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay)
+	<-fc.started // worker 1 is blocked inside the LLM call
+	r.svc.queueMemory(memCtx(fc), "c", "u2", memSay)
+	off.Store(true)
+	close(fc.gate)
+	r.svc.WaitMemory()
+	if fc.calls != 1 {
+		t.Fatalf("LLM calls=%d, want 1 (queued job must not call the LLM once disabled)", fc.calls)
+	}
+	for _, u := range []string{"u1", "u2"} {
+		if n, _ := st.Count(context.Background(), memory.Scope{Platform: "zalo", UserID: u}); n != 0 {
+			t.Fatalf("%s stored %d row(s) after memory was disabled", u, n)
+		}
+	}
+}
+
+func TestMemoryStaleJobDoesNotRaiseLiveCap(t *testing.T) {
+	r, st := newRecRig(t, nil)
+	live := MemoryLive{Enabled: true, MaxPerUser: 500}
+	var mu sync.Mutex
+	r.svc.WithLive(func() Live { mu.Lock(); defer mu.Unlock(); return Live{Memory: live} })
+	fc := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích mèo"}
+	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay) // captured cap: 500 (memCtx says 50, live says 500)
+	<-fc.started
+	mu.Lock()
+	live.MaxPerUser = 30 // admin lowers it while the job waits
+	mu.Unlock()
+	close(fc.gate)
+	r.svc.WaitMemory()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(st.caps) == 0 || st.caps[len(st.caps)-1] != 30 {
+		t.Fatalf("store cap writes %v, the last must be the live value 30", st.caps)
+	}
+	for _, c := range st.caps {
+		if c == 50 {
+			t.Fatalf("stale queued cap 50 applied: %v", st.caps)
+		}
+	}
+}
+
+func TestMemoryShutdownDrainsAndNeverWritesAfterClose(t *testing.T) {
+	// 1) a running extraction finishes before Shutdown returns
+	r, st := newRecRig(t, nil)
+	fc := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích mèo"}
+	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay)
+	<-fc.started
+	go func() { time.Sleep(50 * time.Millisecond); close(fc.gate) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.svc.ShutdownMemory(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if n, _ := st.Count(context.Background(), memory.Scope{Platform: "zalo", UserID: "u1"}); n != 1 {
+		t.Fatalf("running extraction was not finished before shutdown returned (count=%d)", n)
+	}
+	// no new jobs after shutdown
+	r.svc.queueMemory(memCtx(&factClient{text: "x"}), "c", "u3", memSay)
+	if r.svc.mem.pending.Wait(); st.upserts != 1 {
+		t.Fatalf("job accepted after shutdown (upserts=%d)", st.upserts)
+	}
+
+	// 2) a stuck extraction is cancelled at the deadline and never writes afterwards
+	r2, st2 := newRecRig(t, nil)
+	fc2 := &factClient{started: make(chan struct{}), gate: make(chan struct{}), text: "thích chó"} // never released: only ctx ends it
+	r2.svc.queueMemory(memCtx(fc2), "c", "u1", memSay)
+	<-fc2.started
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	if err := r2.svc.ShutdownMemory(ctx2); err == nil {
+		t.Fatal("expected deadline error for a stuck job")
+	}
+	st2.mu.Lock()
+	st2.frozen = true // the stores would be closed here
+	st2.mu.Unlock()
+	time.Sleep(100 * time.Millisecond)
+	st2.mu.Lock()
+	defer st2.mu.Unlock()
+	if st2.late != 0 || st2.upserts != 0 {
+		t.Fatalf("write after shutdown: late=%d upserts=%d", st2.late, st2.upserts)
+	}
+}
+
+func TestMemoryGroupOtherKindShareableNotRetrieved(t *testing.T) {
+	r, st := newMemRig(t, nil, textStep("ok"), toolStep(call("1", "memory_list", `{}`)), textStep("ok"))
+	putMem(t, st, "u1", memory.KindOther, "mình hay đi khám ở BV Xanh", true)
+	putMem(t, st, "u1", memory.KindTopic, "hay đi khám ở BV Xanh", true)
+	putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+	r.askIn("GROUP", "u1", "đi khám ở BV Xanh nhé hôm nay")
+	if strings.Contains(r.sc.sys[0], "BV Xanh") || !strings.Contains(r.sc.sys[0], "cà phê sữa") {
+		t.Fatalf("group injection: %q", r.sc.sys[0])
+	}
+	r.askIn("GROUP", "u1", "Pink nhớ gì về mình?")
+	if got := r.toolResult(2); strings.Contains(got, "BV Xanh") || !strings.Contains(got, "cà phê sữa") {
+		t.Fatalf("group memory_list: %q", got)
+	}
+}
+
+func TestMemoryForgetQueryMustBeNamedByUser(t *testing.T) {
+	ctx := context.Background()
+	sc := memory.Scope{Platform: "zalo", UserID: "u1"}
+	r, st := newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"thích"}`)), textStep("ok"))
+	putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+	putMem(t, st, "u1", memory.KindPreference, "thích mèo", true)
+	r.askIn("PRIVATE", "u1", "quên chuyện cà phê đi")
+	if n, _ := st.Count(ctx, sc); n != 2 {
+		t.Fatalf("model-chosen query deleted rows (count=%d)", n)
+	}
+	r, st = newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"cà phê"}`)), textStep("ok"))
+	putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+	putMem(t, st, "u1", memory.KindPreference, "thích mèo", true)
+	r.askIn("PRIVATE", "u1", "quên chuyện cà phê đi")
+	if n, _ := st.Count(ctx, sc); n != 1 {
+		t.Fatalf("named query should delete exactly one (count=%d)", n)
+	}
+}
+
+func TestMemoryDungNhoNeverDeletes(t *testing.T) {
+	ctx := context.Background()
+	sc := memory.Scope{Platform: "zalo", UserID: "u1"}
+	for _, txt := range []string{"đừng nhớ cái này", "dung nho cai nay, ca phe", "Pink ơi đừng nhớ chuyện cà phê"} {
+		if memoryForgetIntent(txt) || memoryForgetAll(txt) {
+			t.Errorf("%q must not be a forget intent", txt)
+		}
+		if !memoryDontRemember(txt) {
+			t.Errorf("%q must still skip extraction", txt)
+		}
+		r, st := newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"cà phê"}`), call("2", "memory_forget", `{"all":true}`)), textStep("ok"))
+		putMem(t, st, "u1", memory.KindPreference, "thích cà phê sữa", true)
+		r.askIn("PRIVATE", "u1", txt)
+		if n, _ := st.Count(ctx, sc); n != 1 {
+			t.Errorf("%q deleted via the tool (count=%d)", txt, n)
+		}
+	}
+}
+
+func TestMemoryGroupHealthExtractedNotShared(t *testing.T) {
+	health := `{"memories":[{"kind":"health","text":"đang điều trị tiểu đường ở BV Xanh","importance":0.9,"confidence":0.9,"shareable":true}]}`
+	r, st := newMemRig(t, func(tl *Tools) { tl.RateBurst = 50 },
+		textStep("chào"), extractStep(health), // 0,1: the GROUP turn and its extraction
+		textStep("ok"),                                           // 2: later GROUP turn from u1
+		toolStep(call("1", "memory_list", `{}`)), textStep("ok"), // 3,4: GROUP memory_list by u1
+		textStep("ok"), // 5: GROUP turn from u2
+		textStep("ok")) // 6: PRIVATE turn from u1
+	r.askIn("GROUP", "u1", "mình đang điều trị tiểu đường ở BV Xanh")
+	// 2) extraction ran, usage recorded as memory, stored with Source=group
+	if len(r.sc.calls) != 2 {
+		t.Fatalf("LLM calls=%d, want 2 (reply + extraction)", len(r.sc.calls))
+	}
+	mem := 0
+	for _, e := range r.rec.msgs {
+		if e.Kind == UsageKindMemory {
+			mem++
+		}
+	}
+	ms, _ := st.List(context.Background(), memory.Scope{Platform: "zalo", UserID: "u1"}, 0)
+	if mem != 1 || len(ms) != 1 || ms[0].Kind != memory.KindHealth || ms[0].Source != memory.SourceGroup || !ms[0].Shareable {
+		t.Fatalf("usage rows=%d stored=%+v", mem, ms)
+	}
+	// 3) later GROUP turn from u1: neither injected nor listed
+	r.askIn("GROUP", "u1", "đi khám ở BV Xanh nhé hôm nay")
+	if strings.Contains(r.sc.sys[2], "tiểu đường") || strings.Contains(r.sc.sys[2], memory.RenderTitle) {
+		t.Fatalf("group injected a health fact: %q", r.sc.sys[2])
+	}
+	r.askIn("GROUP", "u1", "Pink nhớ gì về mình?")
+	if got := r.toolResult(4); strings.Contains(got, "tiểu đường") {
+		t.Fatalf("group memory_list showed it: %q", got)
+	}
+	// u2 never sees it
+	r.askIn("GROUP", "u2", "đi khám ở BV Xanh nhé hôm nay")
+	if strings.Contains(r.sc.sys[5], "tiểu đường") {
+		t.Fatalf("u2 saw u1's fact")
+	}
+	// 4) PRIVATE turn from u1 does
+	r.askIn("PRIVATE", "u1", "đi khám ở BV Xanh nhé hôm nay")
+	if !strings.Contains(r.sc.sys[6], "tiểu đường") {
+		t.Fatalf("DM did not see its own health fact: %q", r.sc.sys[6])
 	}
 }

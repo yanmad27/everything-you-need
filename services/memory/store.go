@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,9 @@ var (
 	ErrNotFound = errors.New("memory: not found")
 	ErrRetain   = errors.New("memory: retention must be positive")
 	ErrSchema   = errors.New("memory: database schema is newer than this build")
+	// ErrStale: the user's memories were deleted (forget, admin delete) after the
+	// write was planned; UpsertIf drops it so a forgotten fact cannot come back.
+	ErrStale = errors.New("memory: stale write dropped (user data changed since it was queued)")
 )
 
 var validKinds = map[string]bool{
@@ -117,8 +121,15 @@ var singleValued = map[string]bool{KindName: true, KindNickname: true, KindLocat
 // coreKinds form the always-included profile and are exempt from eviction.
 var coreKinds = map[string]bool{KindName: true, KindNickname: true, KindStyle: true}
 
-// groupForbidden kinds are never returned for a group chat, shareable or not.
-var groupForbidden = map[string]bool{KindFamily: true, KindHealth: true, KindLocation: true, KindWork: true, KindProject: true}
+// groupAllowed is the allow-list of kinds that may be shown in a group chat, and
+// only for rows the extractor marked shareable: name, nickname, preference and
+// communication style. Everything else (family, health, location, work, project,
+// topic, other) never leaves a DM, whatever the shareable flag says: the flag is
+// set by an LLM and is not trusted on its own.
+var groupAllowed = map[string]bool{KindName: true, KindNickname: true, KindPreference: true, KindStyle: true}
+
+// GroupVisible reports whether m may be shown in a group chat.
+func GroupVisible(m Memory) bool { return m.Shareable && groupAllowed[m.Kind] }
 
 // Kinds lists all valid kinds.
 func Kinds() []string {
@@ -188,6 +199,8 @@ type Store struct {
 	now func() time.Time
 	max atomic.Int64
 	emb atomic.Pointer[embHolder]
+
+	epochs map[string]uint64 // per user: bumped by every delete, guarded by mu
 }
 
 type embHolder struct{ e Embedder }
@@ -208,7 +221,7 @@ func Open(path string) (*Store, error) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, fmt.Errorf("memory: chmod db file: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("memory: open sqlite: %w", err)
 	}
@@ -217,12 +230,32 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{db: db, now: time.Now}
+	s := &Store{db: db, now: time.Now, epochs: map[string]uint64{}}
 	s.max.Store(DefaultMaxPerUser)
 	return s, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+// dsn is the sqlite connection string. secure_delete is a per-connection pragma,
+// so it is set in the DSN (applied to every connection the pool opens) rather
+// than by a single Exec: hard deletes must really erase content from the pages.
+func dsn(path string) string {
+	return "file:" + (&url.URL{Path: path}).EscapedPath() + "?_pragma=secure_delete(1)"
+}
+
+func epochKey(sc Scope) string { return sc.Platform + "\x00" + sc.UserID }
+
+// Epoch is the user's delete generation; capture it when planning a write and
+// pass it to UpsertIf.
+func (s *Store) Epoch(sc Scope) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.epochs[epochKey(sc)]
+}
+
+// bumpLocked records a delete for the user (s.mu held).
+func (s *Store) bumpLocked(sc Scope) { s.epochs[epochKey(sc)]++ }
 
 // SetClock replaces the clock (tests).
 func (s *Store) SetClock(now func() time.Time) { s.now = now }
@@ -252,10 +285,6 @@ func migrate(db *sql.DB) error {
 	}
 	if v > schemaVersion {
 		return ErrSchema
-	}
-	// Hard deletes must really erase content from the file pages.
-	if _, err := db.Exec(`PRAGMA secure_delete = ON`); err != nil {
-		return fmt.Errorf("memory: migrate: %w", err)
 	}
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS memories (
@@ -344,6 +373,17 @@ func (s *Store) query(ctx context.Context, q string, args ...any) ([]Memory, err
 // is true only for a new row. When the user is at the cap, the non-core row with
 // the lowest importance×recency is evicted first.
 func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, created bool, err error) {
+	return s.upsert(ctx, sc, c, false, 0)
+}
+
+// UpsertIf is Upsert that only writes if the user's delete generation is still
+// epoch (from Epoch); otherwise it returns ErrStale and writes nothing. The
+// check and the write are atomic with respect to deletes (both hold s.mu).
+func (s *Store) UpsertIf(ctx context.Context, sc Scope, c Candidate, epoch uint64) (id int64, created bool, err error) {
+	return s.upsert(ctx, sc, c, true, epoch)
+}
+
+func (s *Store) upsert(ctx context.Context, sc Scope, c Candidate, checkEpoch bool, epoch uint64) (id int64, created bool, err error) {
 	if err := sc.check(); err != nil {
 		return 0, false, err
 	}
@@ -364,6 +404,9 @@ func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, cr
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if checkEpoch && s.epochs[epochKey(sc)] != epoch {
+		return 0, false, ErrStale
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, err
@@ -382,7 +425,7 @@ func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, cr
 					return 0, false, err
 				}
 			}
-			if keep.Text == text { // same value again: refresh like a dedupe hit
+			if normKey(keep.Kind, keep.Text) == key { // same value again (case/diacritics/punctuation folded): refresh like a dedupe hit
 				imp, conf = math.Max(imp, keep.Importance), math.Max(conf, keep.Confidence)
 				share := c.Shareable && keep.Shareable
 				_, err = tx.ExecContext(ctx, `UPDATE memories SET importance=?, confidence=?, shareable=?, last_seen=? WHERE id=?`, imp, conf, b2i(share), now, keep.ID)
@@ -392,6 +435,9 @@ func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, cr
 				log.Printf("memory: replaced id=%d kind=%s", keep.ID, c.Kind)
 			}
 			if err != nil {
+				return 0, false, err
+			}
+			if err := s.evictLocked(ctx, tx, sc, now, 0, keep.ID); err != nil { // cap lowered since: trim down to it
 				return 0, false, err
 			}
 			return keep.ID, false, tx.Commit()
@@ -405,6 +451,9 @@ func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, cr
 			if _, err := tx.ExecContext(ctx, `UPDATE memories SET importance=?, confidence=?, shareable=?, last_seen=? WHERE id=?`, imp, conf, b2i(share), now, ex.ID); err != nil {
 				return 0, false, err
 			}
+			if err := s.evictLocked(ctx, tx, sc, now, 0, ex.ID); err != nil {
+				return 0, false, err
+			}
 			return ex.ID, false, tx.Commit()
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -412,7 +461,7 @@ func (s *Store) Upsert(ctx context.Context, sc Scope, c Candidate) (id int64, cr
 		}
 	}
 
-	if err := s.evictLocked(ctx, tx, sc, now); err != nil {
+	if err := s.evictLocked(ctx, tx, sc, now, 1, 0); err != nil {
 		return 0, false, err
 	}
 	res, err := tx.ExecContext(ctx,
@@ -470,9 +519,11 @@ func recency(now, seen time.Time) float64 {
 	return 1 / (1 + age/30)
 }
 
-// evictLocked makes room for one insert: while the user is at the cap it removes
-// the non-core row with the lowest importance×recency (oldest on ties).
-func (s *Store) evictLocked(ctx context.Context, tx *sql.Tx, sc Scope, nowMs int64) error {
+// evictLocked trims the user to the cap, leaving room free slots (1 before an
+// insert, 0 after a refresh/replace): while the user holds more than limit-room
+// rows it removes the non-core row with the lowest importance×recency (oldest on
+// ties), never the protected row id. Core rows are never evicted.
+func (s *Store) evictLocked(ctx context.Context, tx *sql.Tx, sc Scope, nowMs int64, room int, protect int64) error {
 	limit := int(s.max.Load())
 	rows, err := scanRows(tx.QueryContext(ctx, `SELECT `+cols+` FROM memories WHERE platform=? AND user_id=?`, sc.Platform, sc.UserID))
 	if err != nil {
@@ -480,11 +531,11 @@ func (s *Store) evictLocked(ctx context.Context, tx *sql.Tx, sc Scope, nowMs int
 	}
 	now := time.UnixMilli(nowMs)
 	evicted := 0
-	for len(rows) >= limit {
+	for len(rows) > limit-room {
 		best := -1
 		bestScore := math.MaxFloat64
 		for i, m := range rows {
-			if coreKinds[m.Kind] {
+			if coreKinds[m.Kind] || m.ID == protect {
 				continue
 			}
 			v := m.Importance * recency(now, m.LastSeen)
@@ -536,6 +587,8 @@ func (s *Store) DeleteID(ctx context.Context, sc Scope, id int64) error {
 	if err := sc.check(); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM memories WHERE id=? AND platform=? AND user_id=?`, id, sc.Platform, sc.UserID)
 	if err != nil {
 		return err
@@ -543,6 +596,7 @@ func (s *Store) DeleteID(ctx context.Context, sc Scope, id int64) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
+	s.bumpLocked(sc)
 	log.Printf("memory: deleted id=%d", id)
 	return nil
 }
@@ -574,6 +628,7 @@ func (s *Store) DeleteMatching(ctx context.Context, sc Scope, query string) (int
 		}
 	}
 	if n > 0 {
+		s.bumpLocked(sc)
 		log.Printf("memory: deleted %d row(s) by query", n)
 	}
 	return n, nil
@@ -584,11 +639,14 @@ func (s *Store) DeleteAll(ctx context.Context, sc Scope) (int, error) {
 	if err := sc.check(); err != nil {
 		return 0, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM memories WHERE platform=? AND user_id=?`, sc.Platform, sc.UserID)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+	s.bumpLocked(sc) // even when 0 rows: a racing extraction must not repopulate after "forget all"
 	log.Printf("memory: deleted all %d row(s) of a user", n)
 	return int(n), nil
 }
@@ -701,7 +759,7 @@ func (s *Store) Retrieve(ctx context.Context, sc Scope, query string, o Opts) ([
 	var core []Memory
 	var rest []cand
 	for _, m := range all {
-		if o.Group && (!m.Shareable || groupForbidden[m.Kind]) {
+		if o.Group && !GroupVisible(m) {
 			continue
 		}
 		// Safety net: never surface a row that would not be accepted today.
