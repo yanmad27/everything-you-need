@@ -6,8 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -162,7 +162,8 @@ func TestFearGreedErrorWithoutCache(t *testing.T) {
 	if _, err := r.src.Get(context.Background()); err == nil {
 		t.Fatal("want error with nothing cached")
 	}
-	r.fail.Store(false) // failures are not cached
+	r.fail.Store(false) // failures are cached only for the short negative window
+	r.clock.Add(int64(fearGreedNegTTL/time.Second) + 1)
 	if f, err := r.src.Get(context.Background()); err != nil || f.Value != 25 {
 		t.Fatalf("%+v %v", f, err)
 	}
@@ -171,8 +172,8 @@ func TestFearGreedErrorWithoutCache(t *testing.T) {
 func TestFearGreedHonoursContext(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { <-release }))
-	defer srv.Close()
-	defer close(release)
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) }) // runs before srv.Close (LIFO): a failed assertion cannot hang it
 	s := newFearGreedSource(srv.URL, srv.Client())
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -282,29 +283,120 @@ func TestFearGreedWaitersHonourOwnContextAndShareOneFetch(t *testing.T) {
 }
 
 func TestFearGreedFailureSharedByQueuedCallers(t *testing.T) {
+	const callers = 5
 	var fetches atomic.Int32
-	release := make(chan struct{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	joined := make(chan struct{}, callers)
 	s := newFearGreedSource("x", nil)
+	s.onJoin = func() { joined <- struct{}{} }
 	s.fetchFn = func(context.Context) (FearGreed, error) {
-		fetches.Add(1)
+		if fetches.Add(1) == 1 {
+			close(entered)
+		}
 		<-release
 		return FearGreed{}, errors.New("down")
 	}
-	errs := make(chan error, 5)
-	for i := 0; i < 5; i++ {
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	errs := make(chan error, callers)
+	for i := 0; i < callers; i++ {
 		go func() { _, err := s.Get(context.Background()); errs <- err }()
 	}
-	for fetches.Load() == 0 { // fetch has started; the rest queue on it
-		runtime.Gosched()
+	<-entered
+	for i := 0; i < callers-1; i++ { // every other caller has attached to the flight
+		<-joined
 	}
-	close(release)
-	for i := 0; i < 5; i++ {
+	once.Do(func() { close(release) })
+	for i := 0; i < callers; i++ {
 		if err := <-errs; err == nil {
 			t.Fatal("want error")
 		}
 	}
 	if n := fetches.Load(); n != 1 {
 		t.Fatalf("fetches=%d, want 1 shared", n)
+	}
+}
+
+// item 3: the caller that started the fetch gives up; another waiter still gets the result.
+func TestFearGreedStarterCancelsOtherWaiterSucceeds(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	joined := make(chan struct{}, 1)
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	s := newFearGreedSource("x", nil)
+	s.onJoin = func() { joined <- struct{}{} }
+	var fetches atomic.Int32
+	s.fetchFn = func(context.Context) (FearGreed, error) {
+		fetches.Add(1)
+		close(entered)
+		<-release
+		return FearGreed{Value: 9, Classification: "Fear"}, nil
+	}
+	ctxA, cancelA := context.WithCancel(context.Background())
+	aErr := make(chan error, 1)
+	go func() { _, err := s.Get(ctxA); aErr <- err }()
+	<-entered
+	bRes := make(chan FearGreed, 1)
+	go func() { f, _ := s.Get(context.Background()); bRes <- f }()
+	<-joined
+	cancelA()
+	if err := <-aErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("A: %v", err)
+	}
+	once.Do(func() { close(release) })
+	if f := <-bRes; f.Value != 9 {
+		t.Fatalf("B got %+v", f)
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("fetches=%d", fetches.Load())
+	}
+}
+
+// item 4a
+func TestFearGreedNegativeCache(t *testing.T) {
+	var clock atomic.Int64
+	clock.Store(1_000_000)
+	var fetches atomic.Int32
+	s := newFearGreedSource("x", nil)
+	s.now = func() time.Time { return time.Unix(clock.Load(), 0) }
+	s.fetchFn = func(context.Context) (FearGreed, error) {
+		if fetches.Add(1) == 1 {
+			return FearGreed{}, errors.New("down")
+		}
+		return FearGreed{Value: 3}, nil
+	}
+	_, err1 := s.Get(context.Background())
+	clock.Add(30)
+	_, err2 := s.Get(context.Background())
+	if err1 == nil || err2 == nil || err1.Error() != err2.Error() || fetches.Load() != 1 {
+		t.Fatalf("inside the window: %v %v fetches=%d (want same error, 1 fetch)", err1, err2, fetches.Load())
+	}
+	clock.Add(31)
+	if f, err := s.Get(context.Background()); err != nil || f.Value != 3 || fetches.Load() != 2 {
+		t.Fatalf("after the window: %+v %v fetches=%d", f, err, fetches.Load())
+	}
+}
+
+// item 4b
+func TestFearGreedRefusesRedirectToHTTP(t *testing.T) {
+	var plainHits atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { plainHits.Add(1); _, _ = w.Write([]byte(fngJSON)) }))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ok" {
+			_, _ = w.Write([]byte(fngJSON))
+			return
+		}
+		http.Redirect(w, r, plain.URL, http.StatusFound)
+	}))
+	defer tls.Close()
+	c := httpsOnly(tls.Client()) // accepts the test certificate
+	s := newFearGreedSource(tls.URL+"/redir", c)
+	if _, err := s.Get(context.Background()); err == nil || plainHits.Load() != 0 {
+		t.Fatalf("redirect to http must be refused (err=%v, plain hits=%d)", err, plainHits.Load())
+	}
+	if f, err := newFearGreedSource(tls.URL+"/ok", c).Get(context.Background()); err != nil || f.Value != 25 {
+		t.Fatalf("https still works: %+v %v", f, err)
 	}
 }
 

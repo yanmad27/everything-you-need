@@ -26,6 +26,7 @@ const (
 	fearGreedMaxStale = 24 * time.Hour
 	fearGreedTimeout  = 10 * time.Second
 	fearGreedMaxBody  = 64 << 10
+	fearGreedNegTTL   = 60 * time.Second // failed refresh with nothing to serve: no upstream calls for this long
 )
 
 // FearGreed is the index for the latest day, with the previous day when known.
@@ -164,10 +165,32 @@ type FearGreedSource struct {
 	at       time.Time
 	valid    bool
 	inflight *fgFlight
+	negUntil time.Time // failed refresh with nothing to serve: fail fast until then
+	negErr   error
+
+	onJoin func() // test hook: a caller attached to an already running fetch
 }
 
 func NewFearGreedSource() *FearGreedSource {
-	return newFearGreedSource(FearGreedURL, netguard.NewSafeClient(fearGreedTimeout))
+	return newFearGreedSource(FearGreedURL, httpsOnly(netguard.NewSafeClient(fearGreedTimeout)))
+}
+
+var errRedirectScheme = errors.New("fear&greed: redirect to non-https refused")
+
+// httpsOnly adds an https-only redirect rule on top of the client's own
+// CheckRedirect (netguard's), without touching netguard.
+func httpsOnly(c *http.Client) *http.Client {
+	prev := c.CheckRedirect
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return errRedirectScheme
+		}
+		if prev != nil {
+			return prev(req, via)
+		}
+		return nil
+	}
+	return c
 }
 
 func newFearGreedSource(url string, c *http.Client) *FearGreedSource {
@@ -186,13 +209,22 @@ func (s *FearGreedSource) Get(ctx context.Context) (FearGreed, error) {
 		s.mu.Unlock()
 		return v, nil
 	}
+	if s.negErr != nil && s.now().Before(s.negUntil) {
+		err := s.negErr
+		s.mu.Unlock()
+		return FearGreed{}, err
+	}
 	f := s.inflight
+	joined := f != nil
 	if f == nil {
 		f = &fgFlight{done: make(chan struct{})}
 		s.inflight = f
 		go s.run(f)
 	}
 	s.mu.Unlock()
+	if joined && s.onJoin != nil {
+		s.onJoin()
+	}
 
 	select {
 	case <-f.done:
@@ -220,12 +252,14 @@ func (s *FearGreedSource) run(f *fgFlight) {
 	switch {
 	case err == nil:
 		s.val, s.at, s.valid = v, now, true
+		s.negErr = nil
 		f.val = v
 	case s.valid && now.Sub(s.at) < fearGreedMaxStale:
 		log.Printf("fear&greed refresh failed, serving stale value: %v", err)
 		f.val = s.val
 	default:
 		f.err = err
+		s.negErr, s.negUntil = err, now.Add(fearGreedNegTTL)
 	}
 	s.inflight = nil
 	s.mu.Unlock()

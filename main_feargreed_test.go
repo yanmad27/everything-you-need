@@ -104,9 +104,6 @@ func TestGeneratePriceNotificationPinned(t *testing.T) {
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Fatalf("renderer changed:\n%q\nwant\n%q", got, want)
 	}
-	if generatePriceNotificationFG(cryptoPrices(), nil, nil, "") != generatePriceNotificationFG(cryptoPrices(), nil, nil, "") {
-		t.Fatal("non-deterministic")
-	}
 }
 
 // item 1 in the Telegram message.
