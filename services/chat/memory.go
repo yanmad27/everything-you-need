@@ -16,6 +16,7 @@ import (
 	"everything-you-need/m/services/llm"
 	"everything-you-need/m/services/memory"
 	"everything-you-need/m/services/note"
+	"golang.org/x/text/unicode/norm"
 )
 
 // MemoryStore is the consumer-side view of services/memory. Every call carries
@@ -78,20 +79,37 @@ var (
 		`chuyen\s+(?:do|nay|ay)|ve\s+(?:minh|toi|tui)|dieu\s+(?:do|nay)|cai\s+(?:do|nay)|chuyen\s+.{1,40}?\s+(?:di|nhe|nha))` + bR)
 )
 
-// forgetCommandWords are stripped from a forget query: they name the command, not
-// the thing to forget.
+// forgetCommandAccented are command words matched in their accented form; an
+// accented word that merely folds to a command word ("nhà" -> "nha") is kept.
+var forgetCommandAccented = map[string]bool{"quên": true, "chuyện": true, "đi": true, "nhé": true, "nha": true, "pink": true, "ơi": true,
+	"hết": true, "về": true, "mình": true, "tôi": true, "xoá": true, "xóa": true, "nhớ": true, "cái": true, "điều": true, "đó": true, "này": true}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// forgetCommandWords are the unaccented forms, stripped only from pure-ASCII
+// (unaccented typing) tokens: they name the command, not the thing to forget.
 var forgetCommandWords = map[string]bool{"quen": true, "chuyen": true, "di": true, "nhe": true, "nha": true, "pink": true, "oi": true,
 	"het": true, "ve": true, "minh": true, "toi": true, "xoa": true, "nho": true, "cai": true, "dieu": true, "do": true, "nay": true}
 
-// forgetKeyword folds the model's query and drops command words.
+// forgetKeyword drops command words from the model's query and folds the rest.
+// Words are judged before folding, so "nhà sách" keeps "nhà" (only the exact
+// accented command forms, or ASCII-typed ones, are removed).
 func forgetKeyword(q string) string {
 	var keep []string
-	for _, w := range strings.Fields(fold(q)) {
-		if !forgetCommandWords[w] {
-			keep = append(keep, w)
+	for _, w := range strings.Fields(strings.ToLower(norm.NFC.String(q))) {
+		if forgetCommandAccented[w] || (isASCII(w) && forgetCommandWords[w]) {
+			continue
 		}
+		keep = append(keep, w)
 	}
-	return strings.Join(keep, " ")
+	return fold(strings.Join(keep, " "))
 }
 
 func fold(s string) string { return strings.Join(strings.Fields(note.Fold(s)), " ") }

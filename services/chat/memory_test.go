@@ -833,7 +833,12 @@ func TestMemoryDisabledWhileWaitingOnWriteLockStoresNothing(t *testing.T) {
 	fc := &factClient{text: "thích mèo"}
 	r.svc.mem.upMu.Lock() // the job passes the earlier checks and then waits for the write lock
 	r.svc.queueMemory(memCtx(fc), "c", "u1", memSay)
+	deadline := time.Now().Add(5 * time.Second)
 	for calls.Load() < 2 {
+		if time.Now().After(deadline) {
+			r.svc.mem.upMu.Unlock()
+			t.Fatal("extraction never reached its second live check")
+		}
 		runtime.Gosched() // both earlier checks done: the job is now at (or heading to) upMu
 	}
 	r.svc.mem.upMu.Unlock()
@@ -862,5 +867,23 @@ func TestMemoryForgetQueryCommandWordsStripped(t *testing.T) {
 	r.askIn("PRIVATE", "u1", "quên chuyện cà phê đi")
 	if n, _ := st.Count(ctx, sc); n != 1 {
 		t.Errorf("keyword with command words: count=%d, want 1", n)
+	}
+}
+
+func TestMemoryForgetKeepsAccentedWordsThatFoldToCommandWords(t *testing.T) {
+	ctx := context.Background()
+	sc := memory.Scope{Platform: "zalo", UserID: "u1"}
+	r, st := newMemRig(t, nil, toolStep(call("1", "memory_forget", `{"query":"nhà sách"}`)), textStep("ok"))
+	putMem(t, st, "u1", memory.KindPreference, "thích nhà sách", true)
+	putMem(t, st, "u1", memory.KindPreference, "thích đọc sách", true)
+	r.askIn("PRIVATE", "u1", "quên chuyện nhà sách đi")
+	ms, _ := st.List(ctx, sc, 0)
+	if len(ms) != 1 || ms[0].Text != "thích đọc sách" {
+		t.Fatalf("want only 'thích đọc sách' left, got %+v", ms)
+	}
+	for in, want := range map[string]string{"nhà sách": "nha sach", "quên chuyện cà phê": "ca phe", "chuyen ca phe nha": "ca phe", "pink ơi quên hết": "", "chuyện đó": ""} {
+		if got := forgetKeyword(in); got != want {
+			t.Errorf("forgetKeyword(%q)=%q, want %q", in, got, want)
+		}
 	}
 }
