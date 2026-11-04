@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -100,7 +101,7 @@ func main() {
 	}
 
 	scheduler := jobscheduler.NewJobScheduler()
-	registerJobs(scheduler, priceService, teleService, reminderService, newsService, dueDateService, cfg)
+	registerJobs(scheduler, priceService, teleService, reminderService, newsService, dueDateService, cfg, sharedFearGreed())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -372,6 +373,13 @@ func buildAppHandler(cfg *config.Config, teleSvc *reminder.Service,
 				if msg == nil || msg.Text == "" {
 					return
 				}
+				if fearGreedCommand(msg.Text, teleBotUsername) {
+					chatID := strconv.FormatInt(msg.Chat.ID, 10)
+					replyFearGreed(ctx, sharedFearGreed(), func(t string) error {
+						return teleService.SendReply(ctx, chatID, msg.MessageID, t)
+					})
+					return
+				}
 				dispatchIncoming(ctx, teleSvc, teleChat, toIncomingMessage(msg), false)
 			}
 			mux.Handle(path, telebot.NewWebhookHandler(cfg.Telegram.WebhookSecret, dispatcher))
@@ -456,6 +464,57 @@ func startWebhookServer(cfg *config.Config, teleSvc *reminder.Service,
 // handles wake-word messages that aren't reminder commands. addressed means the
 // platform only delivers messages aimed at the bot (Zalo group @mention/reply),
 // so the chat assistant answers without requiring a wake word.
+// teleBotUsername is this bot's Telegram username, used to tell /cmd@us from
+// /cmd@other. Nothing in config or TeleBotService knows it yet, so it is empty
+// and only bare commands are answered.
+var teleBotUsername = ""
+
+var (
+	fearGreedOnce sync.Once
+	fearGreedSrc  *pricetracker.FearGreedSource
+)
+
+// sharedFearGreed is the single cached Fear & Greed reader shared by the price
+// notification, the Telegram command and the Pink tool.
+func sharedFearGreed() *pricetracker.FearGreedSource {
+	fearGreedOnce.Do(func() { fearGreedSrc = pricetracker.NewFearGreedSource() })
+	return fearGreedSrc
+}
+
+// fearGreedCommand reports whether text asks for the index directly: a bare
+// /feargreed or /fng, or one suffixed with this bot's own username
+// (case-insensitive). A suffix for another bot, or any suffix when the
+// username is unknown (""), is not ours.
+func fearGreedCommand(text, botUsername string) bool {
+	f := strings.Fields(strings.ToLower(text))
+	if len(f) == 0 {
+		return false
+	}
+	c, who, hasAt := strings.Cut(f[0], "@")
+	if c != "/feargreed" && c != "/fng" {
+		return false
+	}
+	return !hasAt || (botUsername != "" && who == strings.ToLower(strings.TrimPrefix(botUsername, "@")))
+}
+
+type fearGreedGetter interface {
+	Get(ctx context.Context) (pricetracker.FearGreed, error)
+}
+
+// replyFearGreed answers the direct command. A failed source yields a short
+// apology line; nothing from the upstream error is sent to the chat.
+func replyFearGreed(ctx context.Context, src fearGreedGetter, send func(string) error) {
+	msg := "Hiện chưa lấy được chỉ số Fear & Greed, thử lại sau nhé."
+	if f, err := src.Get(ctx); err != nil {
+		log.Printf("fear&greed command: %v", err)
+	} else {
+		msg = f.Line()
+	}
+	if err := send(msg); err != nil {
+		log.Printf("fear&greed command send error: %v", err)
+	}
+}
+
 func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.Service, incoming reminder.IncomingMessage, addressed bool) string {
 	if svc != nil && svc.Matches(incoming.Text) {
 		if err := svc.HandleIncoming(ctx, incoming); err != nil {

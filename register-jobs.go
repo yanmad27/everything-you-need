@@ -28,7 +28,7 @@ var currencyMap = map[string]string{
 // moved more than this percent since the last alert.
 const goldWatchChangeThreshold = 1.0
 
-func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, dueDateService *duedate.Service, cfg *config.Config) {
+func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetracker.PriceTrackerService, teleService *telebot.TeleBotService, reminderService *reminder.Service, newsService *news.Service, dueDateService *duedate.Service, cfg *config.Config, fearGreed *pricetracker.FearGreedSource) {
 	historyService := pricetracker.NewPriceHistoryService()
 	now := time.Now().In(time.FixedZone("UTC+7", 7*60*60))
 
@@ -70,7 +70,11 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 				changes = historyService.ComparePrices(allPrices, lastHistory.Prices)
 			}
 
-			message := generatePriceNotification(allPrices, changes, lastFetchErr)
+			var fgSrc fearGreedGetter // avoid a typed-nil interface
+			if fearGreed != nil {
+				fgSrc = fearGreed
+			}
+			message := generatePriceNotificationFG(allPrices, changes, lastFetchErr, fearGreedLine(fgSrc))
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -270,7 +274,29 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 	}
 }
 
-func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, _ error) string {
+// fearGreedLine returns the Telegram Fear & Greed line, or "" (after one log
+// line) when the source is unavailable, so the price message still renders.
+func fearGreedLine(src fearGreedGetter) string {
+	if src == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	f, err := src.Get(ctx)
+	if err != nil {
+		log.Printf("fear&greed unavailable for price update: %v", err)
+		return ""
+	}
+	return f.Line()
+}
+
+func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {
+	return generatePriceNotificationFG(allPrices, changes, err, "")
+}
+
+// generatePriceNotificationFG is generatePriceNotification plus an optional
+// Fear & Greed line, shown once after the crypto prices.
+func generatePriceNotificationFG(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, _ error, fgLine string) string {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		// Fallback to UTC+7 if timezone loading fails
@@ -398,6 +424,10 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 		}
 
 		message += "\n"
+	}
+
+	if fgLine != "" && len(cryptoSources) > 0 {
+		message += fgLine + "\n\n"
 	}
 
 	message += "🤖 _Automated update_"

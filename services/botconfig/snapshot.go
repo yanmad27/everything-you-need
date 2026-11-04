@@ -75,7 +75,7 @@ func ZaloDefaults(cfg *config.Config, pricesSpec string) Defaults {
 	return Defaults{
 		KeyEnabled: b(cfg.Zalo.Enabled), KeyLLMBaseURL: cfg.LLMOpenAI.BaseURL, KeyLLMModel: cfg.LLMOpenAI.Model, KeyLLMAPIKey: cfg.LLMOpenAI.APIKey,
 		KeyPrices: pricesSpec, KeySerperAPIKey: cfg.News.SerperAPIKey,
-		KeyToolPrices: "true", KeyToolLunar: "true", KeyToolNews: "true", KeyToolWebSearch: "true", KeyToolFetch: "true",
+		KeyToolPrices: "true", KeyToolLunar: "true", KeyToolFearGreed: "true", KeyToolNews: "true", KeyToolWebSearch: "true", KeyToolFetch: "true",
 		KeyToolReminders: "true", KeyToolNotes: "true", KeyToolDueDates: "true", KeyToolImages: "true",
 		KeyToolMemory: "true", KeyMemoryMaxPerUser: "200", KeyMemoryRetentionDays: "365",
 		KeyFetchAllow: cfg.Chat.FetchAllowDomains, KeyPrivateChats: cfg.Zalo.PrivateToolChats,
@@ -118,7 +118,7 @@ func (s *Snapshot) Zalo() ZaloSettings {
 	return ZaloSettings{
 		Enabled: s.Bool(KeyEnabled), LLMBaseURL: s.Str(KeyLLMBaseURL), LLMModel: s.Str(KeyLLMModel), LLMAPIKey: s.Secret(KeyLLMAPIKey),
 		Prices: s.Prices(),
-		Tools: ToolFlags{Prices: s.Bool(KeyToolPrices), Lunar: s.Bool(KeyToolLunar), News: s.Bool(KeyToolNews), WebSearch: s.Bool(KeyToolWebSearch),
+		Tools: ToolFlags{Prices: s.Bool(KeyToolPrices), Lunar: s.Bool(KeyToolLunar), FearGreed: s.Bool(KeyToolFearGreed), News: s.Bool(KeyToolNews), WebSearch: s.Bool(KeyToolWebSearch),
 			Fetch: s.Bool(KeyToolFetch), Reminders: s.Bool(KeyToolReminders), Notes: s.Bool(KeyToolNotes), DueDates: s.Bool(KeyToolDueDates), Images: s.Bool(KeyToolImages)},
 		SerperAPIKey: s.Secret(KeySerperAPIKey), FetchAllowDomains: s.List(KeyFetchAllow), PrivateToolChats: s.List(KeyPrivateChats),
 		RateLimitPerMin: s.Int(KeyRatePerMin), RateLimitBurst: s.Int(KeyRateBurst), Persona: s.Str(KeyPersona), RetentionDays: s.Int(KeyRetentionDays),
@@ -133,7 +133,7 @@ type MemorySettings struct {
 	RetentionDays int  // memory.retention_days, 30..1095
 }
 
-type ToolFlags struct{ Prices, Lunar, News, WebSearch, Fetch, Reminders, Notes, DueDates, Images bool }
+type ToolFlags struct{ Prices, Lunar, FearGreed, News, WebSearch, Fetch, Reminders, Notes, DueDates, Images bool }
 
 // ZaloSettings is the typed effective zalo configuration. Secret fields print redacted.
 type ZaloSettings struct {

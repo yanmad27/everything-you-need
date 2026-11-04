@@ -30,6 +30,24 @@ type PriceReader interface {
 	Get(ctx context.Context, source string) ([]PriceQuote, time.Time, error)
 }
 
+// FearGreedInfo is the crypto Fear & Greed index (public data).
+type FearGreedInfo struct {
+	Value     int
+	Class     string // original label, e.g. "Fear"
+	ClassVN   string
+	Date      time.Time
+	HasChange bool
+	Change    int // today - yesterday
+}
+
+var fearGreedLabels = map[string]string{"Extreme Fear": "Sợ hãi tột độ", "Fear": "Sợ hãi", "Neutral": "Trung lập",
+	"Greed": "Tham lam", "Extreme Greed": "Tham lam tột độ"}
+
+// FearGreedReader serves the cached index.
+type FearGreedReader interface {
+	Get(ctx context.Context) (FearGreedInfo, error)
+}
+
 type WebHit struct{ Title, URL, Snippet, Source, Date string }
 
 type WebSearch interface {
@@ -65,6 +83,7 @@ type ReminderTools interface {
 type Tools struct {
 	Platform  string // reminder scope, e.g. "zalo"
 	Prices    PriceReader
+	FearGreed FearGreedReader // nil omits fear_greed_index
 	Search    WebSearch
 	News      NewsReader
 	Due       DueReader
@@ -217,6 +236,31 @@ func (s *Service) buildTools() []toolImpl {
 				},
 			})
 		}
+	}
+	if tl.FearGreed != nil {
+		// Public, read-only market data: neither tainting nor sensitive.
+		out = append(out, toolImpl{
+			def: llm.ToolDef{Name: "fear_greed_index", Description: "Chỉ số Fear & Greed của thị trường crypto hôm nay (0-100), nhãn, và thay đổi so với hôm qua.",
+				Parameters: schema(`{"type":"object","properties":{}}`)},
+			run: func(ctx context.Context, _ *turn, _ json.RawMessage) (string, error) {
+				f, err := tl.FearGreed.Get(ctx)
+				if err != nil {
+					return "", err
+				}
+				var b strings.Builder
+				label := "Không rõ" // upstream text never reaches the model: only the five known labels pass
+				if vn, ok := fearGreedLabels[f.Class]; ok {
+					label = vn + " (" + f.Class + ")"
+				}
+				fmt.Fprintf(&b, "Fear & Greed: %d/100\nNhãn: %s\nNgày: %s\n", f.Value, label, f.Date.UTC().Format("2006-01-02"))
+				if f.HasChange {
+					fmt.Fprintf(&b, "Thay đổi so với hôm qua: %+d\n", f.Change)
+				} else {
+					b.WriteString("Thay đổi so với hôm qua: không có dữ liệu\n")
+				}
+				return b.String(), nil
+			},
+		})
 	}
 	out = append(out, toolImpl{
 		def: llm.ToolDef{Name: "lunar_date", Description: "Đổi ngày dương sang âm lịch. Bỏ trống date = hôm nay (giờ Việt Nam).",

@@ -45,6 +45,7 @@ const (
 	KeyPrices        = "prices"
 	KeyToolPrices    = "tools.prices"
 	KeyToolLunar     = "tools.lunar"
+	KeyToolFearGreed = "tools.fear_greed"
 	KeyToolNews      = "tools.news"
 	KeyToolWebSearch = "tools.web_search"
 	KeyToolFetch     = "tools.fetch"
@@ -118,6 +119,7 @@ var zaloSpecs = []Spec{
 		return s, nil
 	}},
 	{Key: KeyToolPrices, Kind: KindBool, Label: "Tool: gold/crypto prices", validate: okAny},
+	{Key: KeyToolFearGreed, Kind: KindBool, Label: "Tool: crypto Fear & Greed index", validate: okAny},
 	{Key: KeyToolLunar, Kind: KindBool, Label: "Tool: lunar calendar", validate: okAny},
 	{Key: KeyToolNews, Kind: KindBool, Label: "Tool: news", validate: okAny},
 	{Key: KeyToolWebSearch, Kind: KindBool, Label: "Tool: web search", Sensitive: true, validate: okAny},

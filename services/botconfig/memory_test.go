@@ -68,3 +68,12 @@ func TestMemoryValidation(t *testing.T) {
 		t.Fatalf("after reset: %+v", m)
 	}
 }
+
+func TestFearGreedToolKey(t *testing.T) {
+	if !memProv(t).Snapshot(PlatformZalo).Zalo().Tools.FearGreed {
+		t.Fatal("tools.fear_greed must default to true like the other read-only data tools")
+	}
+	if _, ok := specFor(PlatformZalo, KeyToolFearGreed); !ok || KeyToolFearGreed != "tools.fear_greed" {
+		t.Fatal("spec missing")
+	}
+}
