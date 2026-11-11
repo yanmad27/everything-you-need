@@ -4,6 +4,12 @@ Package `services/botconfig` stores per-bot settings that the owner edits live i
 `/admin` (UI: `/admin/bots`, documented in `docs/admin.md`; Zalo reads one snapshot per inbound message).
 Telegram is listed in the registry (`botconfig.Bots()`) as **not managed**: no editable keys.
 
+Telegram has one static setting (config/env, not editable in `/admin`): `telegram.reactions`
+(bool, default `true`, env `TELEGRAM_REACTIONS`). When on, Pink sets one emoji reaction
+(`setMessageReaction`, allowed Telegram emoji only, never the pink heart) on each Telegram message
+it answers with a chat reply, chosen by a keyword/emoji heuristic on the user's text (no LLM call);
+it skips when nothing fits. Failures never delay or change the reply. Zalo has no reaction API.
+
 ## Precedence
 
 1. env/config value = **default** (`botconfig.ZaloDefaults(cfg, pricesSpec)`).

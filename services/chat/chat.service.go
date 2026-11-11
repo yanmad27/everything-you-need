@@ -68,6 +68,7 @@ type Service struct {
 	dueChats     map[string]bool
 	fetchAllow   []string // domains the model may fetch unprompted
 	liveSrc      LiveSource
+	reactions    bool          // Telegram: react to answered messages (needs a Reactor sender)
 	mem          *memExtractor // asynchronous memory extraction; nil without a memory store
 }
 
@@ -134,6 +135,8 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 		s.mu.Unlock()
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "🧹 Đã xoá ngữ cảnh. Mình bắt đầu lại từ đầu nhé!")
 	}
+
+	s.maybeReact(chatID, replyToMsgID, prompt)
 
 	if s.toolClient != nil {
 		return s.respondWithTools(ctx, chatID, userID, userName, replyToMsgID, prompt)

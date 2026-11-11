@@ -21,6 +21,9 @@ telegram:
   # Required for the reminder bot webhook. Generate with: openssl rand -hex 32
   webhook_secret: ""
   webhook_path: "/telegram-webhook"
+  # Pink sets one emoji reaction on Telegram messages it answers (skips when nothing fits).
+  # TELEGRAM_REACTIONS overrides. Zalo has no reaction API.
+  reactions: true
 
 # Zalo Bot Platform (optional): same chat assistant + reminders as Telegram.
 # See docs/zalo-service.md

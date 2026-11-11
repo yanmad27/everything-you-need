@@ -18,6 +18,7 @@ import (
 type TeleBotService struct {
 	botToken string
 	client   *http.Client
+	apiBase  string // empty = https://api.telegram.org (overridden in tests)
 }
 
 type SendMessageRequest struct {
@@ -118,4 +119,58 @@ func (t *TeleBotService) sendMessage(chatID, text, parseMode string, replyToMess
 	}
 
 	return nil
+}
+
+type reactionType struct {
+	Type  string `json:"type"`
+	Emoji string `json:"emoji"`
+}
+
+// SetReactionRequest is the body of Telegram's setMessageReaction.
+type SetReactionRequest struct {
+	ChatID    string         `json:"chat_id"`
+	MessageID int64          `json:"message_id"`
+	Reaction  []reactionType `json:"reaction"`
+}
+
+// reactionTimeout bounds one setMessageReaction call.
+const reactionTimeout = 5 * time.Second
+
+// SetReaction sets a single emoji reaction on a message. Errors are generic on
+// purpose: the request URL contains the bot token and must never leak.
+func (t *TeleBotService) SetReaction(ctx context.Context, chatID string, messageID int64, emoji string) error {
+	base := t.apiBase
+	if base == "" {
+		base = "https://api.telegram.org"
+	}
+	body, err := json.Marshal(SetReactionRequest{
+		ChatID:    chatID,
+		MessageID: messageID,
+		Reaction:  []reactionType{{Type: "emoji", Emoji: emoji}},
+	})
+	if err != nil {
+		return fmt.Errorf("telegram reaction: bad payload")
+	}
+	ctx, cancel := context.WithTimeout(ctx, reactionTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/bot"+t.botToken+"/setMessageReaction", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("telegram reaction: bad request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram reaction: request failed")
+	}
+	defer resp.Body.Close()
+	var tr TelegramResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&tr); err != nil || !tr.Ok {
+		return fmt.Errorf("telegram reaction: rejected (status %d)", resp.StatusCode)
+	}
+	return nil
+}
+
+// React satisfies chat.Reactor.
+func (t *TeleBotService) React(ctx context.Context, chatID string, msgID int64, emoji string) error {
+	return t.SetReaction(ctx, chatID, msgID, emoji)
 }

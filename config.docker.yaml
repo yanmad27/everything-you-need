@@ -33,6 +33,7 @@ telegram:
   channel_id: "-1002923319232"
   webhook_secret: "" # -> TELEGRAM_WEBHOOK_SECRET
   webhook_path: "/telegram-webhook"
+  reactions: true # -> TELEGRAM_REACTIONS
 
 # Zalo Bot Platform (optional; same reminder + chat features as Telegram)
 zalo:
