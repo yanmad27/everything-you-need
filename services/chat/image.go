@@ -91,7 +91,7 @@ func imageFetchReason(err error) string {
 // Neither the image URL nor the bytes are logged or stored.
 func (s *Service) HandleImage(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, caption string, fetch ImageFetcher) error {
 	if s.toolClient == nil {
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink chưa xem được ảnh ở đây, bạn mô tả bằng chữ giúp Pink nhé 🩷")
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Pink chưa xem được ảnh ở đây, bạn mô tả bằng chữ giúp Pink nhé.")
 	}
 	ctx = newTurn(ctx)
 	ctx, lv := s.CaptureLive(ctx)

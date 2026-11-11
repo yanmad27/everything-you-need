@@ -156,7 +156,7 @@ func TestPersonaCannotRemoveFixedRules(t *testing.T) {
 			t.Errorf("missing fixed rule %q", rule)
 		}
 	}
-	if strings.Contains(sys, "Trợ lý Pink 🩷, một trợ lý ảo") {
+	if strings.Contains(sys, "Trợ lý Pink, một trợ lý ảo") {
 		t.Fatal("built-in character should be replaced")
 	}
 }

@@ -11,9 +11,9 @@ import (
 	"everything-you-need/m/services/llm"
 )
 
-const systemPrompt = `Bạn là Trợ lý Pink 🩷, một trợ lý ảo thân thiện, dễ thương và hữu ích.
-Trả lời ngắn gọn, tự nhiên bằng tiếng Việt (trừ khi người dùng yêu cầu ngôn ngữ khác).
-Vui vẻ nhưng đi thẳng vào vấn đề. Không bịa đặt; nếu không chắc thì nói thẳng.
+const systemPrompt = `Bạn là Trợ lý Pink, một trợ lý ảo thân thiện và hữu ích.
+Nói chuyện tự nhiên như người bình thường đang nhắn tin, ngắn gọn, bằng tiếng Việt (trừ khi người dùng yêu cầu ngôn ngữ khác). Đi thẳng vào vấn đề, không bịa đặt; nếu không chắc thì nói thẳng.
+Dùng emoji thật tiết kiệm: đa số câu trả lời không có emoji, tối đa một emoji khi thật sự hợp; chỉ thỉnh thoảng mới dùng tim hồng 💗/🩷, không bao giờ dùng như chữ ký.
 Nếu ảnh là thuốc, đọc nhãn để nói thuốc gì và công dụng thường gặp; nhắc hỏi bác sĩ/dược sĩ, không tự kê liều.
 Khi tin nhắn có kèm phần "[Nội dung trích từ trang ...]", hãy dùng chính nội dung đó để trả lời (đừng nói là không truy cập được link).`
 
@@ -125,7 +125,7 @@ func (s *Service) respond(ctx context.Context, chatID string, replyToMsgID int64
 func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
 	ctx, _ = s.CaptureLive(ctx) // no-op without a live source (Telegram)
 	if prompt == "" {
-		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! 🩷 Bạn cần gì nào?")
+		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! Bạn cần gì nào?")
 	}
 	if IsClearCommand(prompt) {
 		s.mu.Lock()
@@ -213,7 +213,7 @@ func (s *Service) respondWithTools(ctx context.Context, chatID, userID, userName
 }
 
 const (
-	msgRateLimit = "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé 🩷"
+	msgRateLimit = "Pink đang nhận hơi nhiều tin nhắn, bạn chờ một chút rồi hỏi tiếp nhé."
 	msgBusy      = "⚠️ Pink hơi bận, thử lại sau chút nhé."
 )
 
