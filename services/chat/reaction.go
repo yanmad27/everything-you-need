@@ -19,6 +19,9 @@ type Reactor interface {
 // reactionGap is the minimum time between two reactions in one chat.
 const reactionGap = 3 * time.Second
 
+// reactionMaxChats hard-caps the rate-limit map.
+const reactionMaxChats = 512
+
 var reactionTimeout = 6 * time.Second
 
 // emojiMap maps user emoji onto an allowed equivalent.
@@ -55,8 +58,8 @@ var reactionRules = []reactionRule{
 	{[]string{"cam on", "thanks", "thank you", "thank", "tks", "thx"}, "🙏", false},
 	{[]string{"haha", "hahaha", "hihi", "hehe", "kkk", "kkkk", "lol", "ahihi"}, "🤣", false},
 	{[]string{"buồn cười"}, "🤣", true},
-	{[]string{"yêu", "thương quá"}, "❤", true},
-	{[]string{"giỏi quá", "tuyệt", "xuất sắc", "hay quá", "đỉnh quá"}, "👏", true},
+	{[]string{"yêu", "thương quá", "love you"}, "❤", true},
+	{[]string{"giỏi quá", "tuyệt", "xuất sắc", "hay quá", "đỉnh quá", "quá đỉnh"}, "👏", true},
 	{[]string{"buồn", "mệt", "chán quá", "thất vọng"}, "😢", true},
 	{[]string{"troi oi", "that a", "that ha", "wow", "omg"}, "😱", false},
 	{[]string{"khong the tin"}, "🤯", false},
@@ -158,17 +161,15 @@ func chooseFromClause(text string) string {
 // maybeReact fires a detached reaction for a Telegram turn that will be
 // answered. It never blocks or alters the reply path.
 func (s *Service) maybeReact(chatID string, msgID int64, prompt string) {
-	if !s.reactions || msgID == 0 || s.toolClient != nil {
+	reason := s.reactDecision(chatID, msgID, prompt)
+	if s.reactHook != nil {
+		s.reactHook(reason)
+	}
+	if reason != "admitted" {
 		return
 	}
-	r, ok := s.sender.(Reactor)
-	if !ok {
-		return
-	}
+	r := s.sender.(Reactor)
 	emoji := chooseReaction(prompt)
-	if emoji == "" || !s.reactAllowed(chatID) {
-		return
-	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), reactionTimeout)
 		defer cancel()
@@ -176,6 +177,29 @@ func (s *Service) maybeReact(chatID string, msgID int64, prompt string) {
 			log.Printf("chat: reaction failed")
 		}
 	}()
+}
+
+// reactDecision decides synchronously, before any goroutine starts, whether
+// this answered turn gets a reaction: "admitted" or "skipped:<reason>".
+func (s *Service) reactDecision(chatID string, msgID int64, prompt string) string {
+	switch {
+	case !s.reactions:
+		return "skipped:off"
+	case msgID == 0:
+		return "skipped:no-msg-id"
+	case s.toolClient != nil:
+		return "skipped:tool-client"
+	}
+	if _, ok := s.sender.(Reactor); !ok {
+		return "skipped:not-reactor"
+	}
+	if chooseReaction(prompt) == "" {
+		return "skipped:no-emoji"
+	}
+	if !s.reactAllowed(chatID) {
+		return "skipped:rate-limited"
+	}
+	return "admitted"
 }
 
 // WithReactions turns Telegram reactions on or off (off by default).
@@ -193,17 +217,21 @@ func (s *Service) reactAllowed(chatID string) bool {
 	}
 	s.reactMu.Lock()
 	defer s.reactMu.Unlock()
-	if last, ok := s.reactLast[chatID]; ok && now.Sub(last) < reactionGap {
-		return false
-	}
 	if s.reactLast == nil {
 		s.reactLast = make(map[string]time.Time)
 	}
-	if len(s.reactLast) >= 512 {
+	last, known := s.reactLast[chatID]
+	if known && now.Sub(last) < reactionGap {
+		return false
+	}
+	if !known && len(s.reactLast) >= reactionMaxChats {
 		for k, t := range s.reactLast {
 			if now.Sub(t) >= reactionGap {
 				delete(s.reactLast, k)
 			}
+		}
+		if len(s.reactLast) >= reactionMaxChats {
+			return false // hard cap: refuse new chats rather than grow
 		}
 	}
 	s.reactLast[chatID] = now

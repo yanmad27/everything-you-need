@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestChooseReaction(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"cảm ơn bạn nhiều", "🙏"}, {"cám ơn nha", "🙏"}, {"thanks!", "🙏"}, {"tks", "🙏"},
 		{"haha buồn cười quá", "🤣"}, {"hihi", "🤣"}, {"kkk", "🤣"}, {"😂", "🤣"}, {"🤣🤣", "🤣"},
-		{"yêu bạn", "❤"}, {"❤️", "❤"}, {"🩷", "❤"}, {"giỏi quá", "👏"}, {"tuyệt vời", "👏"},
+		{"yêu bạn", "❤"}, {"love you", "❤"}, {"quá đỉnh", "👏"}, {"❤️", "❤"}, {"🩷", "❤"}, {"giỏi quá", "👏"}, {"tuyệt vời", "👏"},
 		{"hôm nay buồn quá", "😢"}, {"mệt quá", "😢"}, {"😢", "😢"}, {"😭", "😭"},
 		{"trời ơi", "😱"}, {"thật á?", "😱"}, {"wow", "😱"}, {"không thể tin được", "🤯"},
 		{"chúc mừng sinh nhật", "🎉"}, {"sinh nhật vui vẻ", "🎉"},
@@ -159,41 +160,75 @@ func TestReactionDetachedContextTimesOut(t *testing.T) {
 	}
 }
 
-func TestNoReaction(t *testing.T) {
+// decisions records admission decisions synchronously.
+type decisions struct{ got []string }
+
+func (d *decisions) hook(r string) { d.got = append(d.got, r) }
+
+func TestAdmissionDecisions(t *testing.T) {
 	cases := []struct {
-		name    string
-		on      bool
-		id      int64
-		text    string
-		wake    bool // use Handle (needs wake word)
-		noReply bool // message is ignored entirely
+		name string
+		on   bool
+		id   int64
+		text string
+		tool bool
+		want string
 	}{
-		{"toggle off", false, 7, "cảm ơn", false, false},
-		{"nothing fits", true, 7, "giá vàng hôm nay?", false, false},
-		{"no reply id", true, 0, "cảm ơn", false, false},
-		{"ignored: no wake word", true, 7, "cảm ơn bạn", true, true},
-		{"empty prompt", true, 7, "pink", true, false},
-		{"clear command", true, 7, "xóa ngữ cảnh", false, false},
+		{"toggle off", false, 7, "cảm ơn", false, "skipped:off"},
+		{"nothing fits", true, 7, "giá vàng hôm nay?", false, "skipped:no-emoji"},
+		{"no reply id", true, 0, "cảm ơn", false, "skipped:no-msg-id"},
+		{"tool client", true, 7, "cảm ơn", true, "skipped:tool-client"},
+		{"admitted", true, 7, "cảm ơn", false, "admitted"},
 	}
 	for _, c := range cases {
 		s := newReactSender()
 		svc := NewServiceWithCompleter(&fakeCompleter{}, s).WithReactions(c.on)
-		var err error
-		if c.wake {
-			err = svc.Handle(context.Background(), "c", c.id, c.text)
-		} else {
-			err = svc.HandleAddressed(context.Background(), "c", c.id, c.text)
+		if c.tool {
+			svc.toolClient = toolStub{}
 		}
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
+		d := &decisions{}
+		svc.reactHook = d.hook
+		svc.maybeReact("c", c.id, c.text)
+		if len(d.got) != 1 || d.got[0] != c.want {
+			t.Errorf("%s: decision %v want %q", c.name, d.got, c.want)
 		}
-		if !c.noReply {
-			recv(t, s.replies, c.name+" reply") // any reaction goroutine would be spawned before this returns
-		}
-		if n := s.calls.Load(); n != 0 || len(s.started) != 0 {
-			t.Errorf("%s: unexpected reaction", c.name)
+		if c.want == "admitted" {
+			recv(t, s.started, "React start")
+			recv(t, s.done, "React join")
 		}
 	}
+}
+
+// Ignored (no wake word), clear and empty-prompt turns never reach the hook.
+func TestNoDecisionOnIgnoredClearEmptyAndFailedSend(t *testing.T) {
+	s := newReactSender()
+	svc := NewServiceWithCompleter(&fakeCompleter{}, s).WithReactions(true)
+	d := &decisions{}
+	svc.reactHook = d.hook
+	ctx := context.Background()
+	_ = svc.Handle(ctx, "c", 7, "cảm ơn bạn") // no wake word
+	_ = svc.Handle(ctx, "c", 7, "pink")       // empty prompt
+	_ = svc.HandleAddressed(ctx, "c", 7, "xóa ngữ cảnh")
+	if len(d.got) != 0 {
+		t.Errorf("decisions on non-answer turns: %v", d.got)
+	}
+	// failed send: the reply errors, so no decision (no admission) is made
+	fs := &failSender{}
+	svc2 := NewServiceWithCompleter(&fakeCompleter{}, fs).WithReactions(true)
+	d2 := &decisions{}
+	svc2.reactHook = d2.hook
+	if err := svc2.HandleAddressed(ctx, "c", 7, "cảm ơn"); err == nil {
+		t.Fatal("want send error")
+	}
+	if len(d2.got) != 0 {
+		t.Errorf("failed send produced decision %v", d2.got)
+	}
+}
+
+type failSender struct{ reactSender }
+
+func (f *failSender) SendReply(context.Context, string, int64, string) error {
+	return errors.New("send failed")
 }
 
 type plainSender struct{ replies chan string }
@@ -206,10 +241,15 @@ func (p *plainSender) SendReply(_ context.Context, _ string, _ int64, text strin
 func TestNoReactionWhenSenderIsNotReactor(t *testing.T) {
 	p := &plainSender{replies: make(chan string, 2)}
 	svc := NewServiceWithCompleter(&fakeCompleter{}, p).WithReactions(true)
+	d := &decisions{}
+	svc.reactHook = d.hook
 	if err := svc.HandleAddressed(context.Background(), "c", 7, "cảm ơn"); err != nil {
 		t.Fatal(err)
 	}
-	recv(t, p.replies, "reply") // and no panic
+	recv(t, p.replies, "reply")
+	if len(d.got) != 1 || d.got[0] != "skipped:not-reactor" {
+		t.Errorf("decision %v", d.got)
+	}
 }
 
 type failCompleter struct{}
@@ -221,28 +261,20 @@ func (failCompleter) Complete(context.Context, string, []llm.Message, int) (stri
 func TestNoReactionWhenCompletionFails(t *testing.T) {
 	s := newReactSender()
 	svc := NewServiceWithCompleter(failCompleter{}, s).WithReactions(true)
+	d := &decisions{}
+	svc.reactHook = d.hook
 	if err := svc.HandleAddressed(context.Background(), "c", 7, "cảm ơn"); err != nil {
 		t.Fatal(err)
 	}
 	if got := recv(t, s.replies, "busy reply"); got == "" {
 		t.Fatal("expected busy reply")
 	}
-	if s.calls.Load() != 0 || len(s.started) != 0 {
-		t.Error("reaction fired on an error/busy turn")
+	if len(d.got) != 0 {
+		t.Errorf("decision on an error/busy turn: %v", d.got)
 	}
 }
 
 type toolStub struct{ llm.ToolCompleter }
-
-func TestNoReactionWithToolClient(t *testing.T) {
-	s := newReactSender()
-	svc := NewServiceWithCompleter(&fakeCompleter{}, s).WithReactions(true)
-	svc.toolClient = toolStub{}
-	svc.maybeReact("c", 7, "cảm ơn")
-	if s.calls.Load() != 0 || len(s.started) != 0 {
-		t.Error("reaction fired on the tool (Zalo) path")
-	}
-}
 
 func TestReactionRateLimitedPerChat(t *testing.T) {
 	s := newReactSender()
@@ -274,16 +306,31 @@ func TestReactionRateLimitedPerChat(t *testing.T) {
 	recv(t, s.started, "reaction after gap")
 }
 
-func TestReactAllowedPrunes(t *testing.T) {
+func TestReactionMapHardCap(t *testing.T) {
 	svc := &Service{}
 	now := time.Unix(1000, 0)
 	svc.reactNow = func() time.Time { return now }
+	admitted := 0
 	for i := 0; i < 600; i++ {
-		svc.reactAllowed(string(rune('a'+i%26)) + string(rune(0x4e00+i)))
+		if svc.reactAllowed("chat-" + strconv.Itoa(i)) {
+			admitted++
+		}
 	}
-	now = now.Add(time.Minute)
-	svc.reactAllowed("fresh")
-	if len(svc.reactLast) > 2 {
-		t.Errorf("expired entries not pruned: %d", len(svc.reactLast))
+	if admitted > reactionMaxChats || len(svc.reactLast) > reactionMaxChats {
+		t.Fatalf("admitted=%d map=%d, cap %d", admitted, len(svc.reactLast), reactionMaxChats)
+	}
+	// a known chat keeps the normal gap rule even when full
+	if svc.reactAllowed("chat-0") {
+		t.Error("known chat within gap admitted")
+	}
+	if svc.reactAllowed("brand-new") {
+		t.Error("new chat admitted while full")
+	}
+	now = now.Add(reactionGap + time.Second)
+	if !svc.reactAllowed("brand-new") {
+		t.Error("new chat refused after the gap passed")
+	}
+	if len(svc.reactLast) > reactionMaxChats {
+		t.Errorf("map %d over cap after prune", len(svc.reactLast))
 	}
 }

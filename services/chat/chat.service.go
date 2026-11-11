@@ -70,9 +70,10 @@ type Service struct {
 	liveSrc      LiveSource
 	reactMu      sync.Mutex
 	reactLast    map[string]time.Time
-	reactNow     func() time.Time // test hook; nil = time.Now
-	reactions    bool             // Telegram: react to answered messages (needs a Reactor sender)
-	mem          *memExtractor    // asynchronous memory extraction; nil without a memory store
+	reactNow     func() time.Time      // test hook; nil = time.Now
+	reactHook    func(decision string) // test hook: called synchronously with the admission decision
+	reactions    bool                  // Telegram: react to answered messages (needs a Reactor sender)
+	mem          *memExtractor         // asynchronous memory extraction; nil without a memory store
 }
 
 func NewService(token, model string, sender Sender) *Service {
