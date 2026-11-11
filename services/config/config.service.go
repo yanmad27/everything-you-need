@@ -74,6 +74,7 @@ func setDefaults() {
 	viper.SetDefault("telegram.timeout_seconds", 30)
 	viper.SetDefault("telegram.webhook_secret", "")
 	viper.SetDefault("telegram.webhook_path", "/telegram-webhook")
+	viper.SetDefault("telegram.reactions", true)
 
 	viper.SetDefault("zalo.enabled", false)
 	viper.SetDefault("zalo.bot_token", "")

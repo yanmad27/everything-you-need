@@ -64,6 +64,9 @@ func main() {
 	var teleChat, zaloChat *chat.Service
 	if teleService != nil {
 		teleChat = buildChatService(cfg, teleService, nil, false)
+		if teleChat != nil {
+			teleChat.WithReactions(cfg.Telegram.Reactions)
+		}
 	}
 	if zaloService != nil {
 		convoStore = buildConvoStore(cfg)

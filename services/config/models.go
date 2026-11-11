@@ -40,6 +40,8 @@ type TelegramConfig struct {
 	ChannelID     string `mapstructure:"channel_id"`
 	WebhookSecret string `mapstructure:"webhook_secret"`
 	WebhookPath   string `mapstructure:"webhook_path"`
+	// Reactions: Pink sets an emoji reaction on messages it answers (default true).
+	Reactions bool `mapstructure:"reactions"`
 }
 
 type ZaloConfig struct {

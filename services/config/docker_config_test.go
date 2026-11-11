@@ -107,3 +107,14 @@ func TestDockerConfigNewEnvVarsEmpty(t *testing.T) {
 		t.Errorf("llm_openai: %+v", cfg.LLMOpenAI)
 	}
 }
+
+func TestTelegramReactionsDefaultAndEnv(t *testing.T) {
+	t.Chdir(t.TempDir()) // no config file: defaults only
+	if cfg := LoadConfig(); cfg == nil || !cfg.Telegram.Reactions {
+		t.Fatalf("telegram.reactions must default to true: %+v", cfg)
+	}
+	t.Setenv("TELEGRAM_REACTIONS", "false")
+	if cfg := LoadConfig(); cfg == nil || cfg.Telegram.Reactions {
+		t.Fatal("TELEGRAM_REACTIONS=false must override")
+	}
+}

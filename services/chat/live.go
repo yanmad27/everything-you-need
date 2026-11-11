@@ -113,4 +113,4 @@ func (lv Live) dueChat(static map[string]bool, chatID string) bool {
 	return false
 }
 
-const msgImagesOff = "Pink đang tắt xử lý ảnh 🩷"
+const msgImagesOff = "Pink đang tắt xử lý ảnh."
