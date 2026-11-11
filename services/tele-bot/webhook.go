@@ -36,7 +36,19 @@ type User struct {
 }
 
 type Chat struct {
-	ID int64 `json:"id"`
+	ID   int64  `json:"id"`
+	Type string `json:"type,omitempty"` // private | group | supergroup | channel
+}
+
+// AddressName is the name to greet a user by: first_name, else username.
+func (u *User) AddressName() string {
+	if u == nil {
+		return ""
+	}
+	if u.FirstName != "" {
+		return u.FirstName
+	}
+	return u.Username
 }
 
 // DisplayName returns a short display name for @-mentioning the user.

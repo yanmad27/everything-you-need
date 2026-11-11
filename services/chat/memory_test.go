@@ -287,14 +287,14 @@ func TestMemoryToolsSensitiveRedactedAndOffWhenDisabled(t *testing.T) {
 }
 
 func TestMemoryExtractGate(t *testing.T) {
-	skip := []string{"", "mình tên Na", "hôm nay thời tiết thế nào ở Hà Nội nhỉ", "giá vàng hôm nay bao nhiêu vậy bạn",
+	skip := []string{"", "hi", "ok", "Pink nhớ gì về mình tên", "hôm nay thời tiết thế nào ở Hà Nội nhỉ", "giá vàng hôm nay bao nhiêu vậy bạn",
 		"Pink nhớ gì về mình", "quên chuyện đó đi nhé bạn ơi", "mình thích cà phê, đừng nhớ cái này nhé", "minh thich ca phe dung nho nhe"}
 	for _, s := range skip {
 		if extractGate(s) {
 			t.Errorf("should skip: %q", s)
 		}
 	}
-	for _, s := range []string{"mình tên là Na và thích cà phê sữa", "tôi sống ở Đà Nẵng", "toi ten la Na, lam o ngan hang", "I work at a bank in Hanoi", "tớ thích mèo lắm đó nha"} {
+	for _, s := range []string{"mình tên là Na và thích cà phê sữa", "tôi sống ở Đà Nẵng", "toi ten la Na, lam o ngan hang", "I work at a bank in Hanoi", "mình tên Na", "gọi mình là Bin", "gọi tôi là Bin", "tôi là Lan", "tớ thích mèo lắm đó nha"} {
 		if !extractGate(s) {
 			t.Errorf("should pass: %q", s)
 		}

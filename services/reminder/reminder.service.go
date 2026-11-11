@@ -20,12 +20,15 @@ type Sender interface {
 
 // IncomingMessage is the normalized inbound message from a chat platform.
 type IncomingMessage struct {
-	Platform  string // PlatformTelegram (default when empty) or PlatformZalo
-	ChatID    string
-	UserID    string
-	UserName  string
-	MessageID int64
-	Text      string
+	Platform string // PlatformTelegram (default when empty) or PlatformZalo
+	ChatID   string
+	UserID   string
+	UserName string
+	// AddressName is the sender's display name for greeting them; set only for
+	// 1:1 chats (Telegram). Untrusted text: sanitize before prompting.
+	AddressName string
+	MessageID   int64
+	Text        string
 }
 
 // Service wires Store + Parser + Sender into the bot command handler.
