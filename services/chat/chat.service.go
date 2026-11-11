@@ -68,8 +68,11 @@ type Service struct {
 	dueChats     map[string]bool
 	fetchAllow   []string // domains the model may fetch unprompted
 	liveSrc      LiveSource
-	reactions    bool          // Telegram: react to answered messages (needs a Reactor sender)
-	mem          *memExtractor // asynchronous memory extraction; nil without a memory store
+	reactMu      sync.Mutex
+	reactLast    map[string]time.Time
+	reactNow     func() time.Time // test hook; nil = time.Now
+	reactions    bool             // Telegram: react to answered messages (needs a Reactor sender)
+	mem          *memExtractor    // asynchronous memory extraction; nil without a memory store
 }
 
 func NewService(token, model string, sender Sender) *Service {
@@ -136,8 +139,6 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "🧹 Đã xoá ngữ cảnh. Mình bắt đầu lại từ đầu nhé!")
 	}
 
-	s.maybeReact(chatID, replyToMsgID, prompt)
-
 	if s.toolClient != nil {
 		return s.respondWithTools(ctx, chatID, userID, userName, replyToMsgID, prompt)
 	}
@@ -151,6 +152,7 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 	if err := s.sender.SendReply(ctx, chatID, replyToMsgID, reply); err != nil {
 		return err
 	}
+	s.maybeReact(chatID, replyToMsgID, prompt) // only after a real answer was delivered
 	s.remember(chatID, prompt, reply)
 	return nil
 }

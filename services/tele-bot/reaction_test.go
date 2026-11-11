@@ -71,3 +71,19 @@ func TestSetReactionTimeout(t *testing.T) {
 		t.Error("want error on timeout")
 	}
 }
+
+func TestSetReactionRefusesUnlistedEmoji(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+	svc := &TeleBotService{botToken: "SECRET-TOKEN", client: srv.Client(), apiBase: srv.URL}
+	for _, e := range []string{"🩷", "💗", "❤\ufe0f", "", "abc", "👍👍"} {
+		err := svc.React(context.Background(), "1", 1, e)
+		if err == nil || strings.Contains(err.Error(), "SECRET-TOKEN") {
+			t.Errorf("emoji %q: err=%v", e, err)
+		}
+	}
+	if called {
+		t.Error("request sent for a refused emoji")
+	}
+}

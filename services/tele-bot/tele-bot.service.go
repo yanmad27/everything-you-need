@@ -136,9 +136,23 @@ type SetReactionRequest struct {
 // reactionTimeout bounds one setMessageReaction call.
 const reactionTimeout = 5 * time.Second
 
+// allowedReactions are the bare codepoints (no VS16) Telegram accepts that the
+// bot may send. The pink heart is deliberately absent.
+var allowedReactions = map[string]bool{
+	"❤": true, "👍": true, "🔥": true, "😁": true, "🤣": true, "😢": true, "😭": true,
+	"🙏": true, "👏": true, "🤔": true, "😱": true, "🎉": true, "🤩": true, "👌": true,
+	"😍": true, "💯": true, "🤗": true, "🫡": true, "👀": true, "✍": true, "🤝": true, "🤯": true,
+}
+
+// AllowedReaction reports whether emoji may be sent as a reaction.
+func AllowedReaction(emoji string) bool { return allowedReactions[emoji] }
+
 // SetReaction sets a single emoji reaction on a message. Errors are generic on
 // purpose: the request URL contains the bot token and must never leak.
 func (t *TeleBotService) SetReaction(ctx context.Context, chatID string, messageID int64, emoji string) error {
+	if !allowedReactions[emoji] {
+		return fmt.Errorf("telegram reaction: unsupported emoji")
+	}
 	base := t.apiBase
 	if base == "" {
 		base = "https://api.telegram.org"
