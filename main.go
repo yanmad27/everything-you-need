@@ -533,7 +533,7 @@ func dispatchIncoming(ctx context.Context, svc *reminder.Service, chatSvc *chat.
 	}
 	if chatSvc != nil {
 		if _, ok := chat.SplitWake(incoming.Text); ok {
-			if err := chatSvc.Handle(ctx, incoming.ChatID, incoming.MessageID, incoming.Text); err != nil {
+			if err := chatSvc.HandleNamed(ctx, incoming.ChatID, incoming.MessageID, incoming.Text, incoming.AddressName); err != nil {
 				log.Printf("chat dispatch error (%s): %v", incoming.Platform, err)
 			}
 			return "chat"
@@ -594,17 +594,22 @@ func toZaloIncomingMessage(msg zalobot.Message) reminder.IncomingMessage {
 func toIncomingMessage(msg *telebot.Message) reminder.IncomingMessage {
 	userName := ""
 	userID := ""
+	addr := ""
+	if msg.From != nil && msg.Chat.Type == "private" {
+		addr = msg.From.AddressName()
+	}
 	if msg.From != nil {
 		userName = msg.From.DisplayName()
 		userID = strconv.FormatInt(msg.From.ID, 10)
 	}
 	return reminder.IncomingMessage{
-		Platform:  reminder.PlatformTelegram,
-		ChatID:    strconv.FormatInt(msg.Chat.ID, 10),
-		UserID:    userID,
-		UserName:  userName,
-		MessageID: msg.MessageID,
-		Text:      msg.Text,
+		Platform:    reminder.PlatformTelegram,
+		ChatID:      strconv.FormatInt(msg.Chat.ID, 10),
+		UserID:      userID,
+		UserName:    userName,
+		AddressName: addr,
+		MessageID:   msg.MessageID,
+		Text:        msg.Text,
 	}
 }
 

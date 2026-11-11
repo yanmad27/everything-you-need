@@ -168,10 +168,10 @@ func (s *Service) applyMemoryCap(lv Live) {
 
 // memoryBlock retrieves the SPEAKER's memories for this turn and returns the
 // rendered data block ("" when none). A non-empty block makes the turn private.
-func (s *Service) memoryBlock(ctx context.Context, t *turn, lv Live, group bool) string {
+func (s *Service) memoryBlock(ctx context.Context, t *turn, lv Live, group bool) (string, bool) {
 	sc, ok := s.memScope(t.userID)
 	if !ok || !s.memoryOn(lv) {
-		return ""
+		return "", false
 	}
 	s.applyMemoryCap(lv)
 	o := memory.Opts{Group: group, Budget: memBudgetDM, K: memKDM}
@@ -183,7 +183,7 @@ func (s *Service) memoryBlock(ctx context.Context, t *turn, lv Live, group bool)
 	ms, err := s.tools.Memory.Retrieve(rc, sc, t.userText, o)
 	if err != nil {
 		log.Printf("chat memory: retrieve outcome=error chat=%s", maskChat(t.chatID))
-		return ""
+		return "", false
 	}
 	if group { // belt and braces on top of Opts.Group
 		kept := ms[:0]
@@ -196,13 +196,21 @@ func (s *Service) memoryBlock(ctx context.Context, t *turn, lv Live, group bool)
 	}
 	block := memory.Render(ms)
 	if block == "" {
-		return ""
+		return "", false
 	}
 	t.mu.Lock()
 	t.private = true // memories are private data: model-proposed fetch/search are refused
 	t.mu.Unlock()
 	log.Printf("chat memory: injected=%d group=%t chat=%s", len(ms), group, maskChat(t.chatID))
-	return block
+	hasName := false
+	for _, m := range ms {
+		if m.Kind == memory.KindName || m.Kind == memory.KindNickname {
+			if _, ok := memory.Sanitize(m.Text); ok {
+				hasName = true
+			}
+		}
+	}
+	return block, hasName
 }
 
 // ---- tools ----
@@ -397,10 +405,13 @@ func (m *memExtractor) refund(key string) {
 var markerRe = regexp.MustCompile(bL + `(?:minh|toi|em|anh|chi|con|chau|ten|nha\s+minh|i|my|me|i'm|im)` + bR)
 var markerAccented = regexp.MustCompile(`(?i)` + bL + `tớ` + bR)
 
+// nameMarkerRe lets short name statements ("mình tên Na") past the length gate.
+var nameMarkerRe = regexp.MustCompile(bL + `(?:ten|goi\s+(?:minh|toi|em)\s+la|(?:minh|toi)\s+la)` + bR)
+
 // extractGate is the cheap pre-gate; false skips the LLM entirely.
 func extractGate(text string) bool {
 	text = strings.TrimSpace(text)
-	if utf8.RuneCountInString(text) < memMinRunes {
+	if utf8.RuneCountInString(text) < memMinRunes && !nameMarkerRe.MatchString(fold(text)) {
 		return false
 	}
 	if memoryCommand(text) {

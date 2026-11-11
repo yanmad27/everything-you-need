@@ -387,11 +387,17 @@ func (s *Service) completeToolsMsg(ctx context.Context, chatID, userID, userName
 		t.taint() // image turn: untrusted content from the start
 	}
 	system := s.systemPromptWith(tl.Now(), lv.Persona)
+	hasStoredName := false
 	if s.memoryOn(lv) {
 		system += memoryRulePrompt
-		if block := s.memoryBlock(ctx, t, lv, isGroupChat(ctx)); block != "" {
+		if block, hn := s.memoryBlock(ctx, t, lv, isGroupChat(ctx)); block != "" {
 			system += "\n\n" + block
+			hasStoredName = hn
 		}
+	}
+	// The display name is not private data: it never marks the turn private.
+	if sb := speakerBlock(tl.Platform, userName, isGroupChat(ctx), hasStoredName); sb != "" {
+		system += "\n\n" + sb
 	}
 
 	var usage llm.Usage

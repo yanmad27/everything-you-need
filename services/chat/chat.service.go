@@ -123,11 +123,26 @@ func (s *Service) HandleAddressedAs(ctx context.Context, chatID, userID, userNam
 	return s.respondAs(ctx, chatID, userID, userName, replyToMsgID, prompt)
 }
 
+// HandleNamed is Handle plus the 1:1 speaker's display name (already known to be
+// a private chat; "" for none). The name only reaches the plain prompt as data.
+func (s *Service) HandleNamed(ctx context.Context, chatID string, replyToMsgID int64, text, displayName string) error {
+	prompt, ok := SplitWake(text)
+	if !ok {
+		return nil
+	}
+	return s.respondNamed(ctx, chatID, "", "", displayName, replyToMsgID, prompt)
+}
+
 func (s *Service) respond(ctx context.Context, chatID string, replyToMsgID int64, prompt string) error {
 	return s.respondAs(ctx, chatID, "", "", replyToMsgID, prompt)
 }
 
 func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string, replyToMsgID int64, prompt string) error {
+	return s.respondNamed(ctx, chatID, userID, userName, "", replyToMsgID, prompt)
+}
+
+// respondNamed: addr is the Telegram 1:1 display name for the plain path only.
+func (s *Service) respondNamed(ctx context.Context, chatID, userID, userName, addr string, replyToMsgID int64, prompt string) error {
 	ctx, _ = s.CaptureLive(ctx) // no-op without a live source (Telegram)
 	if prompt == "" {
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "Dạ, Pink đây! Bạn cần gì nào?")
@@ -144,7 +159,7 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 		return s.respondWithTools(ctx, chatID, userID, userName, replyToMsgID, prompt)
 	}
 
-	reply, err := s.complete(ctx, chatID, prompt)
+	reply, err := s.complete(ctx, chatID, prompt, addr)
 	if err != nil {
 		log.Printf("chat: completion error: %v", err)
 		return s.sender.SendReply(ctx, chatID, replyToMsgID, "⚠️ Pink hơi bận, thử lại sau chút nhé.")
@@ -158,12 +173,16 @@ func (s *Service) respondAs(ctx context.Context, chatID, userID, userName string
 	return nil
 }
 
-func (s *Service) complete(ctx context.Context, chatID, prompt string) (string, error) {
+func (s *Service) complete(ctx context.Context, chatID, prompt, addr string) (string, error) {
+	sys := systemPrompt
+	if sb := speakerBlock("telegram", addr, false, false); sb != "" {
+		sys += "\n\n" + sb
+	}
 	s.mu.Lock()
 	msgs := append([]llm.Message{}, s.history[chatID]...)
 	s.mu.Unlock()
 	msgs = append(msgs, llm.Message{Role: "user", Content: augmentWithURLs(ctx, prompt, s.safeFetch)})
-	return s.client.Complete(ctx, systemPrompt, msgs, 2048)
+	return s.client.Complete(ctx, sys, msgs, 2048)
 }
 
 func (s *Service) remember(chatID, prompt, reply string) {
