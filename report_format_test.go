@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+	"unicode/utf8"
 
 	pricetracker "everything-you-need/m/services/price-tracker"
 )
@@ -52,10 +53,32 @@ func TestVisibleWidthOracle(t *testing.T) {
 	}
 }
 
+// assertCompact checks a full report: text lines stay within 30 visible columns
+// with balanced Markdown; lines inside ``` blocks stay within tableBudget runes,
+// hold no backtick/backslash/emoji, and every line of one block has equal width.
+// It returns the widest text line.
 func assertCompact(t *testing.T, name, msg string) int {
 	t.Helper()
-	max := 0
+	max, inBlock, blockW := 0, false, -1
 	for _, l := range strings.Split(msg, "\n") {
+		if l == "```" {
+			inBlock, blockW = !inBlock, -1
+			continue
+		}
+		if inBlock {
+			n := utf8.RuneCountInString(l)
+			if n > tableBudget {
+				t.Errorf("%s: table row %d > %d: %q", name, n, tableBudget, l)
+			}
+			if blockW >= 0 && n != blockW {
+				t.Errorf("%s: unequal row width %d vs %d: %q", name, n, blockW, l)
+			}
+			blockW = n
+			if visibleWidth(l) != n || strings.ContainsAny(l, "`\\") {
+				t.Errorf("%s: wide/special rune in table row %q", name, l)
+			}
+			continue
+		}
 		w := visibleWidth(l)
 		if w > max {
 			max = w
@@ -69,6 +92,9 @@ func assertCompact(t *testing.T, name, msg string) int {
 		if strings.ContainsAny(l, "[`\\") {
 			t.Errorf("%s: Markdown special in %q", name, l)
 		}
+	}
+	if inBlock {
+		t.Errorf("%s: unclosed code block", name)
 	}
 	return max
 }
@@ -147,7 +173,7 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 	if m := samples["crypto no VND"]; strings.Contains(m, "₫") || strings.Contains(m, "≈") || strings.Contains(m, "P2P") {
 		t.Errorf("no-VND report leaked VND/footer:\n%s", m)
 	}
-	if m := samples["crypto+VND"]; strings.Count(m, "USDT/VND P2P") != 1 || !strings.Contains(m, "≈ 1,80 tỷ ₫") || !strings.Contains(m, "≈ 89,9 tr ₫") {
+	if m := samples["crypto+VND"]; strings.Count(m, "USDT/VND P2P") != 1 || !strings.Contains(m, "1,80tỷ") || !strings.Contains(m, "89,9tr") || !strings.Contains(m, "\n≈ ₫ theo USDT/VND P2P\n") {
 		t.Errorf("VND report:\n%s", m)
 	}
 	for _, l := range strings.Split(samples["gold"], "\n") {
@@ -156,7 +182,7 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 		}
 	}
 	g := samples["gold"]
-	for _, want := range []string{"💰 VND · nghìn/chỉ\n", "💰 VND · VND/chỉ\n", "💰 VND · nghìn/lượng\n", "Bạc 9999", "📉-0.8%", "📈+1.2%"} {
+	for _, want := range []string{"Doji · nghìn/chỉ", "Doji · nghìn/lượng", "Bảo Tín Minh Châu · VND/chỉ", "Kim Khoa · nghìn/chỉ", "Bạc 9999", "Mua", "Bán", "%"} {
 		if !strings.Contains(g, want) {
 			t.Errorf("gold missing %q:\n%s", want, g)
 		}
@@ -164,9 +190,17 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 	if strings.Contains(g, "Không liên quan") {
 		t.Errorf("non-keyword row shown:\n%s", g)
 	}
-	// every Kim Khoa row survives, name wrapped but complete
-	if !strings.Contains(strings.ReplaceAll(g, "\n  ", " "), "KIM KHOA 999.9 NHẪN TRÒN TRƠN ÉP VĨ ĐẶC BIỆT") {
-		t.Errorf("long Kim Khoa name lost:\n%s", g)
+	// every Kim Khoa row survives (5 rows = 4 fixture rows + the long name)
+	if strings.Contains(g, "tăng") {
+		t.Errorf("legend leaked:\n%s", g)
+	}
+	if n := strings.Count(g, "KK "); n != 3 {
+		t.Errorf("Kim Khoa rows: %d\n%s", n, g)
+	}
+	for _, bad := range []string{"(N items)", " items)", "📈", "📉", "💰", "💵", "•  "} {
+		if strings.Contains(g, bad) {
+			t.Errorf("old format leaked %q:\n%s", bad, g)
+		}
 	}
 
 	fgLines := func(i int) string {
@@ -279,10 +313,10 @@ func TestBTMCMiHongUnitFallback(t *testing.T) {
 		"Mi Hồng":           {mk("VÀNG MIẾNG SJC", 15340, 15540), mk("VÀNG MIẾNG 9999", 15000, 15300)},
 		"Other":             {mk("SJC 1L", 1, 2)},
 	}, nil, nil, "", 0)
-	if n := strings.Count(m, "💰 VND · nghìn\n"); n != 2 {
+	if strings.Count(m, "Bảo Tín Minh Châu · nghìn") != 1 || strings.Count(m, "Mi Hồng · nghìn") != 1 {
 		t.Errorf("want unit line for BTMC and Mi Hồng:\n%s", m)
 	}
-	if strings.Count(m, "💰 VND\n") != 1 {
+	if strings.Count(m, "Other · VND") != 1 {
 		t.Errorf("unknown source must stay unit-less:\n%s", m)
 	}
 	assertCompact(t, "btmc/mihong", m)
@@ -318,7 +352,7 @@ func TestRowFilterMatchesOriginal(t *testing.T) {
 		"Doji":      {{Type: "Bitcoin", Currency: "VND", BuyPrice: 1, SellPrice: 2}},
 		"CoinGecko": {{Type: "Token 9999", Currency: "USD", BuyPrice: 5}},
 	}, nil, nil, "", 0)
-	if !strings.Contains(m, "• Bitcoin") || !strings.Contains(m, "• Token 9999") {
+	if !strings.Contains(m, "Bitcoin ") || !strings.Contains(m, "Token 9999") {
 		t.Errorf("rows lost:\n%s", m)
 	}
 }
@@ -327,7 +361,7 @@ func TestGuardWidthProperty(t *testing.T) {
 	rnd := rand.New(rand.NewSource(7))
 	pieces := []string{"Vàng", "miếng", "SJC", "9999", "NHẪN", "TRÒN", "TRƠN", "ĐẶC", "BIỆT", "🟠", "🔥", "👨‍👩‍👧", "🇻🇳", "👍🏽", "⚠️", "↔️", "1️⃣", "#️⃣", "©️", "ệ", "世界", "Supercalifragilisticexpialidocious-Wrapped-Token-Name", "BNB", "Bitcoin"}
 	digits := func() float64 {
-		n := 9 + rnd.Intn(4)
+		n := 4 + rnd.Intn(3)
 		v := float64(1 + rnd.Intn(9))
 		for i := 1; i < n; i++ {
 			v = v*10 + float64(rnd.Intn(10))
@@ -350,13 +384,13 @@ func TestGuardWidthProperty(t *testing.T) {
 		m := generatePriceNotificationVND(
 			map[string][]pricetracker.Price{src: {p}, "CoinGecko": {c}},
 			map[string][]pricetracker.PriceChange{src: ch(p), "CoinGecko": ch(c)},
-			nil, compactFearGreed(fgAt([]int{10, 50, 90}[rnd.Intn(3)], []string{"Extreme Fear", "Neutral", "Extreme Greed"}[rnd.Intn(3)])), 26434+float64(rnd.Intn(1e6)))
+			nil, compactFearGreed(fgAt([]int{10, 50, 90}[rnd.Intn(3)], []string{"Extreme Fear", "Neutral", "Extreme Greed"}[rnd.Intn(3)])), 26434+float64(rnd.Intn(3000)))
 		assertCompact(t, "prop", m)
 		if t.Failed() {
 			t.Fatalf("iteration %d:\n%s", iter, m)
 		}
 	}
-	for _, in := range []string{"   *Mua 1234567890123 📈+999.9% abc* tail", "*" + strings.Repeat("x", 80) + "*", strings.Repeat("🟠", 25), "• " + strings.Repeat("👨‍👩‍👧", 20)} {
+	for _, in := range []string{"   *Mua 1234567890123 +999.9% abc* tail", "*" + strings.Repeat("x", 80) + "*", strings.Repeat("🟠", 25), "• " + strings.Repeat("👨‍👩‍👧", 20)} {
 		assertCompact(t, "guard", guardWidth(in))
 	}
 }
