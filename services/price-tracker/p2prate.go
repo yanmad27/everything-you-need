@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -26,15 +27,15 @@ import (
 //     user's proceeds). Each side's rate is the median of its valid adverts and
 //     the published rate is the midpoint of the two medians, so the value is
 //     neither the buy nor the sell price.
-//   - Valid advert: price parses as a positive number inside
-//     [p2pMinPrice, p2pMaxPrice] VND per USDT and tradableQuantity, when
-//     present, is positive. Invalid adverts are dropped, not repaired.
+//   - Only the first p2pRows adverts returned are examined. Valid advert: price
+//     parses inside [p2pMinPrice, p2pMaxPrice] VND per USDT and tradableQuantity
+//     is present and positive. Invalid adverts are dropped, not repaired.
 //   - A side needs at least p2pMinAds valid adverts, otherwise the whole rate
 //     is unavailable (never a one-sided or partial rate).
 //   - Median of an even count is the mean of the two middle values.
-//   - Freshness: a rate younger than p2pFreshTTL is served as is. An older one
-//     is refreshed; if the refresh fails the previous rate is kept only until
-//     p2pMaxStale, after which no VND is produced at all.
+//   - Freshness: a rate is usable only while younger than p2pFreshTTL (10 min).
+//     An older one is refreshed; if the refresh fails no VND is produced at
+//     all (USD only). There is no stale window.
 //   - A failed fetch starts a p2pFailBackoff (p2pRateLimitBackoff after HTTP
 //     429) during which no new request is made.
 const (
@@ -45,7 +46,6 @@ const (
 	p2pMinPrice         = 15000.0
 	p2pMaxPrice         = 40000.0
 	p2pFreshTTL         = 10 * time.Minute
-	p2pMaxStale         = 30 * time.Minute
 	p2pFailBackoff      = 2 * time.Minute
 	p2pRateLimitBackoff = 5 * time.Minute
 	p2pTimeout          = 8 * time.Second
@@ -76,7 +76,7 @@ func NewP2PRateReaderURL(url string) *P2PRateReader {
 }
 
 // Rate returns VND per USDT, or ok=false when no fresh-enough rate exists. It
-// never blocks past ctx and never returns a rate older than p2pMaxStale.
+// never blocks past ctx and never returns a rate older than p2pFreshTTL.
 func (r *P2PRateReader) Rate(ctx context.Context) (float64, bool) {
 	if r == nil || ctx.Err() != nil {
 		return 0, false
@@ -88,7 +88,7 @@ func (r *P2PRateReader) Rate(ctx context.Context) (float64, bool) {
 	}
 	f := r.inflight
 	if f == nil && r.now().Before(r.retryAt) {
-		v, ok := r.usableLocked(p2pMaxStale)
+		v, ok := r.usableLocked(p2pFreshTTL)
 		r.mu.Unlock()
 		return v, ok
 	}
@@ -106,7 +106,7 @@ func (r *P2PRateReader) Rate(ctx context.Context) (float64, bool) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.usableLocked(p2pMaxStale)
+	return r.usableLocked(p2pFreshTTL)
 }
 
 func (r *P2PRateReader) usableLocked(maxAge time.Duration) (float64, bool) {
@@ -119,6 +119,7 @@ func (r *P2PRateReader) usableLocked(maxAge time.Duration) (float64, bool) {
 // refresh runs detached from any caller's context so one caller giving up does
 // not fail the others; it is bounded by the HTTP timeout.
 func (r *P2PRateReader) refresh(f *p2pFetch) {
+	defer close(f.done)
 	ctx, cancel := context.WithTimeout(context.Background(), p2pTimeout)
 	defer cancel()
 	v, err := r.fetch(ctx)
@@ -134,7 +135,6 @@ func (r *P2PRateReader) refresh(f *p2pFetch) {
 	}
 	r.inflight = nil
 	r.mu.Unlock()
-	close(f.done)
 }
 
 func (r *P2PRateReader) fetch(ctx context.Context) (float64, error) {
@@ -158,6 +158,8 @@ func (r *P2PRateReader) side(ctx context.Context, tradeType string) (float64, er
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 	resp, err := r.client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("p2p rate request: %w", err)
@@ -196,18 +198,16 @@ func parseP2PSide(body []byte) (float64, error) {
 		return 0, errors.New("p2p rate: unexpected response code")
 	}
 	var prices []float64
-	for _, d := range r.Data {
-		if len(prices) == p2pRows {
+	for i, d := range r.Data {
+		if i == p2pRows {
 			break
 		}
 		p, err := strconv.ParseFloat(strings.TrimSpace(d.Adv.Price), 64)
 		if err != nil || !(p >= p2pMinPrice && p <= p2pMaxPrice) {
 			continue
 		}
-		if q := strings.TrimSpace(d.Adv.TradableQuantity); q != "" {
-			if qv, err := strconv.ParseFloat(q, 64); err != nil || !(qv > 0) {
-				continue
-			}
+		if qv, err := strconv.ParseFloat(strings.TrimSpace(d.Adv.TradableQuantity), 64); err != nil || !(qv > 0) {
+			continue
 		}
 		prices = append(prices, p)
 	}
@@ -231,8 +231,13 @@ const VNDLabel = "USDT/VND P2P"
 
 // FormatVND renders usd*rate as "≈ 2.508.000.000 ₫ (USDT/VND P2P)" with dot
 // thousands separators, rounded to whole dong.
+// It returns "" unless the product is finite and at least 0.5 dong.
 func FormatVND(usd, rate float64) string {
-	s := strconv.FormatFloat(usd*rate, 'f', 0, 64)
+	v := usd * rate
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0.5 {
+		return ""
+	}
+	s := strconv.FormatFloat(v, 'f', 0, 64)
 	var parts []string
 	for i := len(s); i > 0; i -= 3 {
 		start := i - 3

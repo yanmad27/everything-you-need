@@ -36,6 +36,10 @@ type USDVNDReader interface {
 	Rate(ctx context.Context) (float64, bool)
 }
 
+// vndRateWait bounds the rate lookup so a stalled source cannot delay the
+// price answer; on timeout the tool returns USD only.
+const vndRateWait = 3 * time.Second
+
 // VNDFormatter renders an approximate VND value for a USD amount at a rate.
 type VNDFormatter func(usd, rate float64) string
 
@@ -245,15 +249,23 @@ func (s *Service) buildTools() []toolImpl {
 						return "", err
 					}
 					rate, hasRate := 0.0, false
-					if tl.USDVND != nil && tl.FormatVND != nil {
-						rate, hasRate = tl.USDVND.Rate(ctx)
+					hasUSD := false
+					for _, q := range qs {
+						hasUSD = hasUSD || q.Currency == "USD"
+					}
+					if hasUSD && tl.USDVND != nil && tl.FormatVND != nil {
+						rctx, cancel := context.WithTimeout(ctx, vndRateWait)
+						rate, hasRate = tl.USDVND.Rate(rctx)
+						cancel()
 					}
 					var b strings.Builder
 					fmt.Fprintf(&b, "Nguồn %s, cập nhật %s\n", name, at.In(ictZone).Format("02/01 15:04"))
 					for _, q := range qs {
 						fmt.Fprintf(&b, "- %s: mua %.0f, bán %.0f %s/%s", q.Type, q.Buy, q.Sell, q.Currency, q.Unit)
-						if hasRate && rate > 0 && q.Currency == "USD" && q.Buy > 0 {
-							b.WriteString(" — " + tl.FormatVND(q.Buy, rate))
+						if hasRate && rate > 0 && q.Currency == "USD" {
+							if v := tl.FormatVND(q.Buy, rate); v != "" {
+								b.WriteString(" — " + v)
+							}
 						}
 						b.WriteString("\n")
 					}

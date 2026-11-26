@@ -59,3 +59,37 @@ func TestGetPricesVNDNeverOnVNDRows(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+type countingRate struct {
+	calls int
+	block bool
+}
+
+func (c *countingRate) Rate(ctx context.Context) (float64, bool) {
+	c.calls++
+	if c.block {
+		<-ctx.Done()
+		return 0, false
+	}
+	return 26434, true
+}
+
+func TestGoldOnlyLookupNeverCallsRate(t *testing.T) {
+	cr := &countingRate{}
+	r := newRig(t, func(tl *Tools) { tl.USDVND, tl.FormatVND = cr, fmtVND }, toolStep(call("1", "get_prices", `{"source":"doji"}`)), textStep("ok"))
+	r.ask("giá vàng")
+	if cr.calls != 0 {
+		t.Fatalf("rate called %d times for gold-only quotes", cr.calls)
+	}
+}
+
+func TestStalledRateStillReturnsUSDInTime(t *testing.T) {
+	cr := &countingRate{block: true}
+	r := newRig(t, withCrypto(cr), toolStep(call("1", "get_prices", `{"source":"coingecko"}`)), textStep("ok"))
+	start := time.Now()
+	r.ask("giá btc")
+	got := r.toolResult(1)
+	if time.Since(start) > vndRateWait+2*time.Second || cr.calls != 1 || strings.Contains(got, "₫") || !strings.Contains(got, "mua 68000, bán 68000 USD/BTC") {
+		t.Fatalf("elapsed=%v calls=%d %q", time.Since(start), cr.calls, got)
+	}
+}

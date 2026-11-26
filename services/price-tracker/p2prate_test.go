@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,10 +94,10 @@ func TestParseP2PSideFilteringAndMedian(t *testing.T) {
 	// invalid ads are dropped: zero, negative, out of range, junk, zero quantity
 	mixed := `{"code":"000000","data":[
 	 {"adv":{"price":"0","tradableQuantity":"1"}},{"adv":{"price":"-5","tradableQuantity":"1"}},
-	 {"adv":{"price":"1","tradableQuantity":"1"}},{"adv":{"price":"999999","tradableQuantity":"1"}},
-	 {"adv":{"price":"abc","tradableQuantity":"1"}},{"adv":{"price":"26000","tradableQuantity":"0"}},
+	 {"adv":{"price":"999999","tradableQuantity":"1"}},
+	 {"adv":{"price":"abc","tradableQuantity":"1"}},
 	 {"adv":{"price":"26000","tradableQuantity":"1"}},{"adv":{"price":"26100","tradableQuantity":"1"}},
-	 {"adv":{"price":"26200"}},{"adv":{"price":"26300","tradableQuantity":"1"}},{"adv":{"price":"26400","tradableQuantity":"1"}}]}`
+	 {"adv":{"price":"26200","tradableQuantity":"2"}},{"adv":{"price":"26300","tradableQuantity":"1"}},{"adv":{"price":"26400","tradableQuantity":"1"}}]}`
 	if v, err := parseP2PSide([]byte(mixed)); err != nil || v != 26200 {
 		t.Fatalf("mixed: %v %v", v, err)
 	}
@@ -159,14 +160,17 @@ func TestRateExpiryAndFailedRefresh(t *testing.T) {
 	}
 	fail.Store(true)
 
-	clk.add(p2pFreshTTL + time.Minute) // expired, refresh fails, still inside the hard cutoff: last good rate
+	clk.add(p2pFreshTTL - time.Second) // still younger than the TTL: served
 	if _, ok := r.Rate(context.Background()); !ok {
-		t.Fatal("rate inside the staleness cutoff should survive a failed refresh")
+		t.Fatal("rate younger than the TTL must be served")
 	}
-	clk.add(p2pFailBackoff + time.Second)
-	clk.add(p2pMaxStale) // past the hard cutoff: no VND at all
+	clk.add(time.Second) // exactly at the TTL, refresh fails: USD only
 	if v, ok := r.Rate(context.Background()); ok || v != 0 {
 		t.Fatalf("stale rate leaked: %v %v", v, ok)
+	}
+	clk.add(time.Minute) // inside the backoff, still no stale rate
+	if _, ok := r.Rate(context.Background()); ok {
+		t.Fatal("stale rate leaked during backoff")
 	}
 	fail.Store(false)
 	clk.add(p2pFailBackoff + time.Second)
@@ -300,5 +304,45 @@ func TestRateNilReader(t *testing.T) {
 	var r *P2PRateReader
 	if _, ok := r.Rate(context.Background()); ok {
 		t.Fatal("nil reader")
+	}
+}
+
+func TestParseP2PSideExaminesOnlyFirstTenAndRequiresQuantity(t *testing.T) {
+	// 10 invalid ads first, then 5 valid ones: the valid ones are beyond the cap.
+	bad := strings.Repeat(`{"adv":{"price":"1","tradableQuantity":"1"}},`, 10)
+	body := `{"code":"000000","data":[` + bad + `{"adv":{"price":"26000","tradableQuantity":"1"}},{"adv":{"price":"26100","tradableQuantity":"1"}},{"adv":{"price":"26200","tradableQuantity":"1"}},{"adv":{"price":"26300","tradableQuantity":"1"}},{"adv":{"price":"26400","tradableQuantity":"1"}}]}`
+	if _, err := parseP2PSide([]byte(body)); err == nil {
+		t.Fatal("ads beyond the first 10 must not be examined")
+	}
+	noQty := `{"code":"000000","data":[{"adv":{"price":"26000"}},{"adv":{"price":"26100"}},{"adv":{"price":"26200","tradableQuantity":"2"}},{"adv":{"price":"26300"}},{"adv":{"price":"26400"}}]}`
+	if _, err := parseP2PSide([]byte(noQty)); err == nil {
+		t.Fatal("missing tradableQuantity must invalidate the ad")
+	}
+}
+
+func TestFormatVNDGuards(t *testing.T) {
+	inf, nan := math.Inf(1), math.NaN()
+	for _, c := range [][2]float64{{inf, 26000}, {68000, inf}, {nan, 1}, {1, nan}, {-1, 26000}, {68000, -1}, {0, 26000}, {0.00001, 26000}, {1, 0.4}} {
+		if got := FormatVND(c[0], c[1]); got != "" {
+			t.Errorf("%v: %q", c, got)
+		}
+	}
+	if got := FormatVND(1, 0.5); got == "" {
+		t.Error("0.5 dong is the lower bound")
+	}
+}
+
+func TestRequestHeaders(t *testing.T) {
+	var ua, accept atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ua.Store(req.Header.Get("User-Agent"))
+		accept.Store(req.Header.Get("Accept"))
+		io.WriteString(w, adsBody("26000", "26100", "26200", "26300", "26400"))
+	}))
+	defer srv.Close()
+	r, _ := newTestReader(srv.URL)
+	r.Rate(context.Background())
+	if !strings.HasPrefix(ua.Load().(string), "Mozilla/5.0") || accept.Load() != "application/json" {
+		t.Fatalf("%v %v", ua.Load(), accept.Load())
 	}
 }

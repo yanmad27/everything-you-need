@@ -80,13 +80,13 @@ Rate semantics (fixed constants, no configuration):
 - **Sides**: both. `BUY` lists adverts a user buys USDT from (their cost), `SELL` lists adverts a
   user sells USDT to (their proceeds). Rate = midpoint of the two per-side medians (neither the buy
   nor the sell price).
-- **Top N**: the first 10 adverts of each side.
+- **Top N**: only the first 10 adverts returned per side are examined.
 - **Valid advert**: price is a positive number within 15,000 to 40,000 VND/USDT and
-  `tradableQuantity`, when present, is positive. Invalid adverts are dropped.
+  `tradableQuantity` is present and positive. Invalid adverts are dropped.
 - **Minimum sample**: 5 valid adverts per side, otherwise the rate is unavailable (never one-sided).
 - **Median**: odd count = middle value; even count = mean of the two middle values.
-- **Freshness**: served as is for 10 min; then refreshed. If the refresh fails the previous rate is
-  kept only until 30 min after it was fetched; after that **no VND is shown** (USD only).
+- **Freshness**: a rate is usable only while younger than 10 min. If a refresh past that fails,
+  **no VND is shown** (USD only); there is no stale window.
 - **Failures**: a failed fetch (timeout 8 s, non-200, 429, malformed or too few ads, body capped at
   1 MiB) starts a 2 min backoff (5 min after HTTP 429) with no new requests. Concurrent callers share
   one refresh. One reader (`sharedP2PRate`) serves both the scheduler and chat.

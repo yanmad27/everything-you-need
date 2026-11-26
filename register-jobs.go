@@ -74,7 +74,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 			if fearGreed != nil {
 				fgSrc = fearGreed
 			}
-			message := generatePriceNotificationVND(allPrices, changes, lastFetchErr, fearGreedLine(fgSrc), usdVNDRate(sharedP2PRate()))
+			message := generatePriceNotificationVND(allPrices, changes, lastFetchErr, fearGreedLine(fgSrc), usdVNDRate(allPrices, sharedP2PRate()))
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -302,10 +302,19 @@ func generatePriceNotificationFG(allPrices map[string][]pricetracker.Price, chan
 
 // usdVNDRate returns the shared USDT/VND P2P rate, or 0 when unavailable or
 // stale (callers then show USD only).
-func usdVNDRate(r interface {
+func usdVNDRate(allPrices map[string][]pricetracker.Price, r interface {
 	Rate(context.Context) (float64, bool)
 }) float64 {
 	if r == nil {
+		return 0
+	}
+	hasUSD := false
+	for _, ps := range allPrices {
+		for _, p := range ps {
+			hasUSD = hasUSD || p.Currency == "USD"
+		}
+	}
+	if !hasUSD {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -440,8 +449,10 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 					priceText += fmt.Sprintf("%s", buyText)
 
 					message += fmt.Sprintf("%s - %s", priceText, formatType(price.Type))
-					if vndRate > 0 && price.Currency == "USD" && price.BuyPrice > 0 {
-						message += " — " + pricetracker.FormatVND(price.BuyPrice, vndRate)
+					if vndRate > 0 && price.Currency == "USD" {
+						if v := pricetracker.FormatVND(price.BuyPrice, vndRate); v != "" {
+							message += " — " + v
+						}
 					}
 					message += "\n"
 					break
