@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	pricetracker "everything-you-need/m/services/price-tracker"
 )
@@ -19,21 +18,37 @@ const (
 	vndFooter    = "≈ ₫ theo " + pricetracker.VNDLabel
 )
 
-// displayWidth is the on-screen width of s: Markdown markers are ignored, emoji,
-// flags and East Asian wide runes count 2, combining marks 0, everything else 1.
+func isJoiner(r rune) bool { return r == 0x200D }
+
+func isRegional(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
+
+// isCombining is zero-width and glues to the previous rune: VS16, skin-tone
+// modifiers and combining marks.
+func isCombining(r rune) bool {
+	return r == 0xFE0F || (r >= 0x1F3FB && r <= 0x1F3FF) || unicode.Is(unicode.Mn, r)
+}
+
+// displayWidth is the on-screen width of s: Markdown markers are ignored, emoji
+// (including ZWJ sequences and flags) and East Asian wide runes count 2, VS16,
+// ZWJ and combining marks 0, everything else 1.
 func displayWidth(s string) int {
 	rs := []rune(s)
 	w := 0
+	joined := false
 	for i := 0; i < len(rs); i++ {
 		r := rs[i]
 		switch {
-		case r == '*' || r == '_' || r == 0xFE0F || unicode.Is(unicode.Mn, r):
-		case r >= 0x1F1E6 && r <= 0x1F1FF:
+		case r == '*' || r == '_' || isCombining(r):
+		case isJoiner(r):
+			joined = true
+		case joined:
+			joined = false
+		case isRegional(r):
 			w += 2
-			if i+1 < len(rs) && rs[i+1] >= 0x1F1E6 && rs[i+1] <= 0x1F1FF {
+			if i+1 < len(rs) && isRegional(rs[i+1]) {
 				i++
 			}
-		case i+1 < len(rs) && rs[i+1] == 0xFE0F, isWide(r):
+		case isWide(r):
 			w += 2
 		default:
 			w++
@@ -42,15 +57,90 @@ func displayWidth(s string) int {
 	return w
 }
 
+// clusters splits s into display units that must not be broken apart: a base
+// rune with its combining runes, ZWJ-joined sequences and flag pairs.
+func clusters(s string) []string {
+	var out []string
+	joined, prevRegional := false, false
+	for _, r := range s {
+		if len(out) > 0 && (isCombining(r) || isJoiner(r) || joined || (isRegional(r) && prevRegional)) {
+			out[len(out)-1] += string(r)
+			joined = isJoiner(r)
+			prevRegional = false
+			continue
+		}
+		out = append(out, string(r))
+		joined = false
+		prevRegional = isRegional(r)
+	}
+	return out
+}
+
 func isWide(r rune) bool {
 	switch {
 	case r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF, r >= 0xAC00 && r <= 0xD7A3,
 		r >= 0xF900 && r <= 0xFAFF, r >= 0xFE30 && r <= 0xFE6F, r >= 0xFF00 && r <= 0xFF60,
-		r >= 0xFFE0 && r <= 0xFFE6, r >= 0x1F300 && r <= 0x1F64F, r >= 0x1F680 && r <= 0x1F6FF,
-		r >= 0x1F900 && r <= 0x1F9FF, r >= 0x1FA70 && r <= 0x1FAFF, r >= 0x20000 && r <= 0x3FFFD:
+		r >= 0xFFE0 && r <= 0xFFE6, r >= 0x1F000 && r <= 0x1FAFF, r >= 0x2600 && r <= 0x27BF,
+		r >= 0x2B00 && r <= 0x2BFF, r >= 0x20000 && r <= 0x3FFFD:
 		return true
 	}
 	return false
+}
+
+// guardWidth is the final guarantee: any line still wider than maxReportWidth is
+// broken at spaces (or between display clusters for one huge token), keeps its
+// indent, and closes/reopens bold across the break so every line stays valid.
+func guardWidth(msg string) string {
+	var out []string
+	for _, line := range strings.Split(msg, "\n") {
+		if displayWidth(line) <= maxReportWidth {
+			out = append(out, line)
+			continue
+		}
+		indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
+		if strings.HasPrefix(line, "• ") {
+			indent = nameIndent
+		}
+		bold := false
+		cur, lastSpace, spaceW, w := "", -1, 0, 0
+		boldAtSpace := false
+		flush := func(upTo int, rest string, open bool) {
+			head := cur[:upTo]
+			if open {
+				head += "*"
+			}
+			out = append(out, strings.TrimRight(head, " "))
+			cur = indent
+			if open {
+				cur += "*"
+			}
+			cur += strings.TrimLeft(rest, " ")
+			lastSpace = -1
+			w = displayWidth(cur)
+		}
+		for _, c := range clusters(line) {
+			if c == "*" {
+				bold = !bold
+				cur += c
+				continue
+			}
+			cw := displayWidth(c)
+			if w+cw > maxReportWidth {
+				if lastSpace >= 0 && spaceW > displayWidth(indent) {
+					flush(lastSpace, cur[lastSpace:], boldAtSpace)
+				} else {
+					flush(len(cur), "", bold)
+				}
+			}
+			if c == " " {
+				lastSpace, spaceW, boldAtSpace = len(cur), w, bold
+			}
+			cur += c
+			w += cw
+		}
+		out = append(out, cur)
+	}
+	return strings.Join(out, "\n")
 }
 
 // wrapWords greedily wraps s into lines of at most width; an over-long word is split by rune.
@@ -67,14 +157,14 @@ func wrapWords(s string, width int) []string {
 		for displayWidth(word) > width {
 			flush()
 			cut := 0
-			for i, r := range word {
-				if displayWidth(word[:i+utf8.RuneLen(r)]) > width {
+			for _, c := range clusters(word) {
+				if displayWidth(word[:cut+len(c)]) > width {
 					break
 				}
-				cut = i + utf8.RuneLen(r)
+				cut += len(c)
 			}
 			if cut == 0 {
-				break
+				cut = len(clusters(word)[0])
 			}
 			lines = append(lines, word[:cut])
 			word = word[cut:]
@@ -239,7 +329,7 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 		if !showGold(source, p) {
 			continue
 		}
-		if u := unitLine(p.Currency, p.Unit); u != prev {
+		if u := unitLine(p.Currency, goldUnit(source, p)); u != prev {
 			b.WriteString(u + "\n")
 			prev = u
 		}
@@ -248,12 +338,12 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 	b.WriteString("\n")
 }
 
-func showGold(source string, p pricetracker.Price) bool {
-	if source == pricetracker.KimKhoaSourceName {
-		return true
-	}
+var reportKeywords = []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"}
+
+// matchesKeyword is the original shared row filter for gold and crypto sections.
+func matchesKeyword(p pricetracker.Price) bool {
 	t := strings.ToLower(p.Type)
-	for _, k := range []string{"9999", "tròn trơn", "sjc"} {
+	for _, k := range reportKeywords {
 		if strings.Contains(t, k) {
 			return true
 		}
@@ -261,14 +351,21 @@ func showGold(source string, p pricetracker.Price) bool {
 	return false
 }
 
-func showCrypto(p pricetracker.Price) bool {
-	t := strings.ToLower(p.Type)
-	for _, k := range []string{"bitcoin", "ethereum", "bnb"} {
-		if strings.Contains(t, k) {
-			return true
-		}
+// showGold: Kim Khoa rows are already filtered by purity at the source.
+func showGold(source string, p pricetracker.Price) bool {
+	return source == pricetracker.KimKhoaSourceName || matchesKeyword(p)
+}
+
+func showCrypto(p pricetracker.Price) bool { return matchesKeyword(p) }
+
+// goldUnit is the row's unit. BTMC and Mi Hồng leave Unit empty but divide the
+// upstream prices by 1000 ("thousands VND", btmc.source.go:86, mihong.source.go:151);
+// the code does not state a weight unit for them, so only "nghìn" is certain.
+func goldUnit(source string, p pricetracker.Price) string {
+	if p.Unit == "" && p.Currency == "VND" && (source == "Bảo Tín Minh Châu" || source == "Mi Hồng") {
+		return "nghìn"
 	}
-	return false
+	return p.Unit
 }
 
 func cryptoSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange, vndRate float64) {

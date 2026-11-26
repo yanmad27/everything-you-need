@@ -359,7 +359,7 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 	for _, source := range sortedKeys(cryptoSources) {
 		cryptoSection(&sb, source, cryptoSources[source], changes, vndRate)
 	}
-	message += sb.String()
+	message += guardWidth(strings.TrimRight(sb.String(), "\n")) + "\n\n"
 
 	if fgLine != "" && len(cryptoSources) > 0 {
 		message += fgLine + "\n\n"

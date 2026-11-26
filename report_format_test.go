@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 	"unicode"
@@ -11,33 +12,34 @@ import (
 // visibleWidth is the test oracle for the 30-column target: Markdown markers are
 // ignored, emoji / flags / East Asian wide runes count 2, accents count 1.
 func visibleWidth(line string) int {
-	rs := []rune(strings.NewReplacer("*", "", "_", "").Replace(line))
 	w := 0
-	for i := 0; i < len(rs); i++ {
-		r := rs[i]
+	joined, prevRI := false, false
+	for _, r := range strings.NewReplacer("*", "", "_", "").Replace(line) {
+		ri := r >= 0x1F1E6 && r <= 0x1F1FF
 		switch {
-		case r == 0xFE0F || unicode.Is(unicode.Mn, r):
-		case r >= 0x1F1E6 && r <= 0x1F1FF:
-			w += 2
-			if i+1 < len(rs) && rs[i+1] >= 0x1F1E6 && rs[i+1] <= 0x1F1FF {
-				i++
-			}
-		case i+1 < len(rs) && rs[i+1] == 0xFE0F:
-			w += 2
-		case r >= 0x1F300 && r <= 0x1FAFF, r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF,
-			r >= 0xAC00 && r <= 0xD7A3, r >= 0xF900 && r <= 0xFAFF, r >= 0xFE30 && r <= 0xFE6F,
-			r >= 0xFF00 && r <= 0xFF60, r >= 0xFFE0 && r <= 0xFFE6, r >= 0x20000 && r <= 0x3FFFD:
+		case r == 0xFE0F || r == 0x200D || unicode.Is(unicode.Mn, r) || (r >= 0x1F3FB && r <= 0x1F3FF):
+			joined = r == 0x200D
+		case joined:
+			joined = false
+		case ri && prevRI:
+			prevRI = false
+			continue
+		case r >= 0x1F000 && r <= 0x1FAFF, r >= 0x2600 && r <= 0x27BF, r >= 0x2B00 && r <= 0x2BFF,
+			r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF, r >= 0xAC00 && r <= 0xD7A3,
+			r >= 0xF900 && r <= 0xFAFF, r >= 0xFE30 && r <= 0xFE6F, r >= 0xFF00 && r <= 0xFF60,
+			r >= 0xFFE0 && r <= 0xFFE6, r >= 0x20000 && r <= 0x3FFFD:
 			w += 2
 		default:
 			w++
 		}
+		prevRI = ri
 	}
 	return w
 }
 
 func TestVisibleWidthOracle(t *testing.T) {
 	for in, want := range map[string]int{
-		"abc": 3, "*abc* _x_": 5, "Vàng nhẫn Tròn Trơn": 19, "📈+1.2%": 7, "⚠️ *😱 F&G*": 9, "💰 VND": 6, "🇻🇳": 2, "": 0,
+		"abc": 3, "*abc* _x_": 5, "Vàng nhẫn Tròn Trơn": 19, "📈+1.2%": 7, "⚠️ *😱 F&G*": 9, "💰 VND": 6, "🇻🇳": 2, "🟠": 2, "👨‍👩‍👧": 2, "👍🏽": 2, "a👨‍👩‍👧b": 4, "✨⬛": 4, "": 0,
 	} {
 		if got := visibleWidth(in); got != want {
 			t.Errorf("%q: %d want %d", in, got, want)
@@ -237,6 +239,9 @@ func TestSharedChatHelpersUnchanged(t *testing.T) {
 	if got, want := f.Line(), "⚠️ 😱 Fear & Greed: 20 — Sợ hãi tột độ (Extreme Fear) · ▲2 so với hôm qua"; got != want {
 		t.Errorf("Line %q", got)
 	}
+	if got, want := f.Text(), "Chỉ số Fear & Greed (crypto): 20/100 — Sợ hãi tột độ (Extreme Fear), ngày 2026-11-26; thay đổi so với hôm qua: +2"; got != want {
+		t.Errorf("Text %q", got)
+	}
 	if got, want := f.TelegramMarkdownLine(), "⚠️ *😱 Fear & Greed: 20 — Sợ hãi tột độ (Extreme Fear) · ▲2 so với hôm qua*"; got != want {
 		t.Errorf("TelegramMarkdownLine %q", got)
 	}
@@ -246,11 +251,107 @@ func TestSampleReports(t *testing.T) {
 	all := mergePrices(goldFixtures(), cryptoPrices())
 	ch := goldChanges()
 	ch["CoinGecko"] = cryptoChanges()["CoinGecko"]
+	mh := func(n string, b, sl float64) pricetracker.Price {
+		return pricetracker.Price{Type: n, BuyPrice: b, SellPrice: sl, Currency: "VND"}
+	}
+	all["Bảo Tín Minh Châu"] = []pricetracker.Price{mh("VÀNG MIẾNG SJC (Vàng SJC)", 15350, 15550)}
+	all["Mi Hồng"] = []pricetracker.Price{mh("VÀNG MIẾNG 9999", 15000, 15300)}
 	fg := fgAt(20, "Extreme Fear")
 	for name, m := range map[string]string{
 		"WITH VND":    generatePriceNotificationVND(all, ch, nil, fearGreedLine(stubFG{f: fg}), 26434),
 		"WITHOUT VND": generatePriceNotificationVND(all, ch, nil, fearGreedLine(stubFG{f: fg}), 0),
 	} {
 		t.Logf("=== AFTER %s (max width %d) ===\n%s", name, assertCompact(t, name, m), stripTime(m))
+	}
+}
+
+func TestBTMCMiHongUnitFallback(t *testing.T) {
+	mk := func(name string, b, sl float64) pricetracker.Price {
+		return pricetracker.Price{Type: name, BuyPrice: b, SellPrice: sl, Currency: "VND"} // Unit empty, as the sources emit
+	}
+	m := generatePriceNotificationVND(map[string][]pricetracker.Price{
+		"Bảo Tín Minh Châu": {mk("VÀNG MIẾNG SJC (Vàng SJC)", 15350, 15550), mk("NHẪN TRÒN TRƠN 9999", 15100, 15400)},
+		"Mi Hồng":           {mk("VÀNG MIẾNG SJC", 15340, 15540), mk("VÀNG MIẾNG 9999", 15000, 15300)},
+		"Other":             {mk("SJC 1L", 1, 2)},
+	}, nil, nil, "", 0)
+	if n := strings.Count(m, "💰 VND · nghìn\n"); n != 2 {
+		t.Errorf("want unit line for BTMC and Mi Hồng:\n%s", m)
+	}
+	if strings.Count(m, "💰 VND\n") != 1 {
+		t.Errorf("unknown source must stay unit-less:\n%s", m)
+	}
+	assertCompact(t, "btmc/mihong", m)
+	t.Logf("%s", stripTime(m))
+}
+
+func TestRowFilterMatchesOriginal(t *testing.T) {
+	old := func(source string, p pricetracker.Price) bool { // original predicate, verbatim
+		if source == pricetracker.KimKhoaSourceName {
+			return true
+		}
+		for _, k := range []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"} {
+			if strings.Contains(strings.ToLower(p.Type), k) {
+				return true
+			}
+		}
+		return false
+	}
+	names := []string{"Bitcoin", "BNB", "Ethereum", "ETHEREUM CLASSIC", "Vàng 9999", "NHẪN TRÒN TRƠN", "SJC 1L", "Solana", "Nhẫn 999", "Cardano 9999", "", "bitcoin cash"}
+	for _, src := range []string{"CoinGecko", "Doji", pricetracker.KimKhoaSourceName} {
+		for _, n := range names {
+			p := pricetracker.Price{Type: n, Currency: "VND", BuyPrice: 1, SellPrice: 2}
+			if got := showGold(src, p); got != old(src, p) {
+				t.Errorf("gold %s/%q: %v", src, n, got)
+			}
+			if src == "CoinGecko" && showCrypto(p) != old("CoinGecko", p) {
+				t.Errorf("crypto %q", n)
+			}
+		}
+	}
+	// rendered: Bitcoin row in a gold source and a 9999 row in CoinGecko both appear
+	m := generatePriceNotificationVND(map[string][]pricetracker.Price{
+		"Doji":      {{Type: "Bitcoin", Currency: "VND", BuyPrice: 1, SellPrice: 2}},
+		"CoinGecko": {{Type: "Token 9999", Currency: "USD", BuyPrice: 5}},
+	}, nil, nil, "", 0)
+	if !strings.Contains(m, "• Bitcoin") || !strings.Contains(m, "• Token 9999") {
+		t.Errorf("rows lost:\n%s", m)
+	}
+}
+
+func TestGuardWidthProperty(t *testing.T) {
+	rnd := rand.New(rand.NewSource(7))
+	pieces := []string{"Vàng", "miếng", "SJC", "9999", "NHẪN", "TRÒN", "TRƠN", "ĐẶC", "BIỆT", "🟠", "🔥", "👨‍👩‍👧", "🇻🇳", "👍🏽", "⚠️", "世界", "Supercalifragilisticexpialidocious-Wrapped-Token-Name", "BNB", "Bitcoin"}
+	digits := func() float64 {
+		n := 9 + rnd.Intn(4)
+		v := float64(1 + rnd.Intn(9))
+		for i := 1; i < n; i++ {
+			v = v*10 + float64(rnd.Intn(10))
+		}
+		return v
+	}
+	for iter := 0; iter < 300; iter++ {
+		name := ""
+		for k := 1 + rnd.Intn(7); k > 0; k-- {
+			name += pieces[rnd.Intn(len(pieces))] + " "
+		}
+		name += "9999 bitcoin sjc"
+		chg := float64(rnd.Intn(19999)-9999) / 10
+		p := pricetracker.Price{Type: name, Currency: "VND", Unit: []string{"", "nghìn/chỉ", "nghìn/lượng"}[rnd.Intn(3)], BuyPrice: digits(), SellPrice: digits()}
+		c := pricetracker.Price{Type: name, Currency: "USD", BuyPrice: digits()}
+		ch := func(pp pricetracker.Price) []pricetracker.PriceChange {
+			return []pricetracker.PriceChange{{Price: pp, BuyChange: chg, SellChange: -chg}}
+		}
+		src := []string{"Doji", "Bảo Tín Minh Châu", "Mi Hồng", "Nguồn có tên rất dài để thử việc xuống dòng"}[rnd.Intn(4)]
+		m := generatePriceNotificationVND(
+			map[string][]pricetracker.Price{src: {p}, "CoinGecko": {c}},
+			map[string][]pricetracker.PriceChange{src: ch(p), "CoinGecko": ch(c)},
+			nil, compactFearGreed(fgAt([]int{10, 50, 90}[rnd.Intn(3)], []string{"Extreme Fear", "Neutral", "Extreme Greed"}[rnd.Intn(3)])), 26434+float64(rnd.Intn(1e6)))
+		assertCompact(t, "prop", m)
+		if t.Failed() {
+			t.Fatalf("iteration %d:\n%s", iter, m)
+		}
+	}
+	for _, in := range []string{"   *Mua 1234567890123 📈+999.9% abc* tail", "*" + strings.Repeat("x", 80) + "*", strings.Repeat("🟠", 25), "• " + strings.Repeat("👨‍👩‍👧", 20)} {
+		assertCompact(t, "guard", guardWidth(in))
 	}
 }
