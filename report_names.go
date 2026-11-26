@@ -72,6 +72,9 @@ func sentenceCase(s string) string {
 }
 
 func truncRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
 	if r := []rune(s); len(r) > n {
 		return strings.TrimSpace(string(r[:n]))
 	}
@@ -99,16 +102,32 @@ func abbreviate(raw string, max int) string {
 // uniqueNames abbreviates every raw name to at most max runes and makes the
 // results unique by suffixing 2, 3, … (cutting the base to make room).
 func uniqueNames(raws []string, max int) []string {
-	if max < 3 {
-		max = 3
+	maxes := make([]int, len(raws))
+	for i := range maxes {
+		maxes[i] = max
 	}
+	return uniqueNamesEach(raws, maxes)
+}
+
+// uniqueNamesEach is uniqueNames with a per-name width, so one set of names can
+// span several tables (one source section) yet stay distinct. A suffix that is
+// wider than the width keeps only its last digits; labels stay distinct while
+// fewer than 10^width names collide.
+func uniqueNamesEach(raws []string, maxes []int) []string {
 	out := make([]string, len(raws))
 	used := map[string]bool{}
 	for i, raw := range raws {
+		max := maxes[i]
+		if max < 1 {
+			max = 1
+		}
 		base := abbreviate(raw, max)
 		name := base
-		for k := 2; used[name]; k++ {
+		for k := 2; used[name] && k < 1<<20; k++ {
 			suf := strconv.Itoa(k)
+			if len(suf) > max {
+				suf = suf[len(suf)-max:]
+			}
 			name = truncRunes(base, max-len(suf)) + suf
 		}
 		used[name] = true

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"unicode"
@@ -80,13 +81,19 @@ func isWide(r rune) bool {
 	return false
 }
 
-// guardWidth is the final guarantee: any line still wider than maxReportWidth is
+// guardWidth is the final guarantee: any line outside a ``` block still wider than maxReportWidth is
 // broken at spaces (or between display clusters for one huge token), keeps its
 // indent, and closes/reopens bold across the break so every line stays valid.
 func guardWidth(msg string) string {
 	var out []string
+	inBlock := false
 	for _, line := range strings.Split(msg, "\n") {
-		if displayWidth(line) <= maxReportWidth {
+		if line == "```" {
+			inBlock = !inBlock
+			out = append(out, line)
+			continue
+		}
+		if inBlock || displayWidth(line) <= maxReportWidth {
 			out = append(out, line)
 			continue
 		}
@@ -191,8 +198,7 @@ func compactFearGreed(f pricetracker.FearGreed) string {
 // tableSourceAlias shortens source names that would crowd out the unit in a title.
 var tableSourceAlias = map[string]string{pricetracker.KimKhoaSourceName: "Kim Khoa"}
 
-// tableTitle is "Source · unit"; it always holds a space so Telegram never reads
-// the first pre line as a code-language tag.
+// tableTitle is "Source · unit" (the currency when the unit is unknown), cut to the budget.
 func tableTitle(source, unit, currency string) string {
 	if unit == "" {
 		unit = currency
@@ -215,7 +221,7 @@ func changeMark(v float64) string {
 }
 
 // goldSection renders each (unit, currency) run of shown rows as one table; it
-// reports whether any change mark was printed.
+// reports whether any change mark was printed. Names are unique across the section.
 func goldSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange) bool {
 	if len(prices) == 0 {
 		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
@@ -223,22 +229,31 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 	}
 	idx := changeIndex(changes, source)
 	marks := false
+	var tables []pendingTable
 	flush := func(title string, group []pricetracker.Price) {
 		if len(group) == 0 {
 			return
 		}
-		buy, sell := tableCol{header: "Mua"}, tableCol{header: "Bán"}
 		raws := make([]string, len(group))
 		for i, p := range group {
-			c := idx[p.Type]
-			bm, sm := changeMark(c.BuyChange), changeMark(c.SellChange)
-			marks = marks || bm != " " || sm != " "
 			raws[i] = p.Type
-			buy.cells = append(buy.cells, formatPrice(p.BuyPrice)+bm)
-			sell.cells = append(sell.cells, formatPrice(p.SellPrice)+sm)
+			c := idx[p.Type]
+			marks = marks || changeMark(c.BuyChange) != " " || changeMark(c.SellChange) != " "
 		}
-		cols := []tableCol{buy, sell}
-		b.WriteString(renderTable(title, uniqueNames(raws, nameBudget(cols)), cols) + "\n")
+		build := func(level int) []tableCol {
+			num := formatPrice
+			if level > 0 {
+				num = compactNumber
+			}
+			buy, sell := tableCol{header: "Mua"}, tableCol{header: "Bán"}
+			for _, p := range group {
+				c := idx[p.Type]
+				buy.cells = append(buy.cells, num(p.BuyPrice)+changeMark(c.BuyChange))
+				sell.cells = append(sell.cells, num(p.SellPrice)+changeMark(c.SellChange))
+			}
+			return []tableCol{buy, sell}
+		}
+		tables = append(tables, fitTable(title, raws, 2, build, func(int) string { return "" }))
 	}
 	var group []pricetracker.Price
 	prev := ""
@@ -254,6 +269,9 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 		group = append(group, p)
 	}
 	flush(prev, group)
+	for _, t := range renderPending(tables, "\n") {
+		b.WriteString(t)
+	}
 	return marks
 }
 
@@ -287,7 +305,16 @@ func goldUnit(source string, p pricetracker.Price) string {
 	return p.Unit
 }
 
+// signedPercent is the change text, capped at ">999%" / "<-999%".
 func signedPercent(v float64) string {
+	switch {
+	case math.IsNaN(v):
+		return ""
+	case v >= 999.95:
+		return ">999%"
+	case v <= -999.95:
+		return "<-999%"
+	}
 	s := fmt.Sprintf("%+.1f%%", v)
 	if s == "+0.0%" || s == "-0.0%" {
 		return "0.0%"
@@ -310,6 +337,10 @@ func cryptoTicker(p pricetracker.Price) string {
 	return p.Type
 }
 
+const vndDroppedNote = "(bỏ cột VND: quá rộng)"
+
+// cryptoSection renders one table per currency run. Degradation order when a
+// row would exceed the budget: compact numbers, then drop the VND column.
 func cryptoSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange, vndRate float64) {
 	if len(prices) == 0 {
 		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
@@ -317,34 +348,55 @@ func cryptoSection(b *strings.Builder, source string, prices []pricetracker.Pric
 	}
 	idx := changeIndex(changes, source)
 	vndShown := false
+	var tables []pendingTable
+	var withVND []bool
 	flush := func(cur string, group []pricetracker.Price) {
 		if len(group) == 0 {
 			return
 		}
-		price, chg, vnd := tableCol{header: "price"}, tableCol{header: "change"}, tableCol{header: "VND"}
 		raws := make([]string, len(group))
-		any := false
 		for i, p := range group {
 			raws[i] = cryptoTicker(p)
-			price.cells = append(price.cells, formatPrice(p.BuyPrice))
-			c := ""
-			if v := idx[p.Type].BuyChange; v != 0 {
-				c = signedPercent(v)
-			}
-			chg.cells = append(chg.cells, c)
-			v := ""
-			if vndRate > 0 && cur == "USD" {
-				v = compactVND(p.BuyPrice, vndRate)
-			}
-			any = any || v != ""
-			vnd.cells = append(vnd.cells, v)
 		}
-		cols := []tableCol{price, chg}
-		if any {
-			cols = append(cols, vnd)
-			vndShown = true
+		wantVND := vndRate > 0 && cur == "USD"
+		build := func(level int) []tableCol {
+			num := formatPrice
+			if level > 0 {
+				num = compactNumber
+			}
+			price, chg, vnd := tableCol{header: "price"}, tableCol{header: "change"}, tableCol{header: "VND"}
+			any := false
+			for _, p := range group {
+				price.cells = append(price.cells, num(p.BuyPrice))
+				c := ""
+				if v := idx[p.Type].BuyChange; v != 0 {
+					c = signedPercent(v)
+				}
+				chg.cells = append(chg.cells, c)
+				v := ""
+				if wantVND {
+					if level == 0 {
+						v = compactVND(p.BuyPrice, vndRate)
+					} else if x := p.BuyPrice * vndRate; x >= 1 && !math.IsInf(x, 0) && !math.IsNaN(x) {
+						v = compactNumber(x)
+					}
+				}
+				any = any || v != ""
+				vnd.cells = append(vnd.cells, v)
+			}
+			if any && level < 2 {
+				return []tableCol{price, chg, vnd}
+			}
+			return []tableCol{price, chg}
 		}
-		b.WriteString(renderTable(tableTitle(source, "", cur), uniqueNames(raws, nameBudget(cols)), cols))
+		t := fitTable(tableTitle(source, "", cur), raws, 3, build, func(level int) string {
+			if level >= 2 && wantVND {
+				return vndDroppedNote
+			}
+			return ""
+		})
+		tables = append(tables, t)
+		withVND = append(withVND, len(t.cols) == 3)
 	}
 	var group []pricetracker.Price
 	cur := ""
@@ -359,6 +411,12 @@ func cryptoSection(b *strings.Builder, source string, prices []pricetracker.Pric
 		group = append(group, p)
 	}
 	flush(cur, group)
+	for _, v := range withVND {
+		vndShown = vndShown || v
+	}
+	for _, t := range renderPending(tables, "") {
+		b.WriteString(t)
+	}
 	if vndShown {
 		b.WriteString(vndFooter + "\n")
 	}
