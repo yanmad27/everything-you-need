@@ -56,7 +56,8 @@ type PriceService struct {
 
 ## 📊 Available Sources
 
-### Kim Khoa Cam Ranh Source
+### Kim Khoa Cam Ranh Source (disabled)
+- **Status**: disabled (`price_sources.kimkhoa.enabled: false` in `config.docker.yaml` and the built-in default) until a reliable upstream exists. The parser and tests are kept; to re-enable set `enabled: true` (and `url`) or env `PRICE_SOURCES_KIMKHOA_ENABLED=true`.
 - **Description**: Gold prices of Kim Khoa (Cam Ranh), scraped from the HTML price table
 - **Page**: `https://tuanquangdong.com/gia-vang/kim-khoa-cam-ranh/`
 - **Filter**: only gold products with purity ≥ 97% (999.9, 9999, 999, 98, 97); lower purities and silver are dropped; a sell price of 0 on the page means not quoted and is reported as 0

@@ -118,3 +118,28 @@ func TestTelegramReactionsDefaultAndEnv(t *testing.T) {
 		t.Fatal("TELEGRAM_REACTIONS=false must override")
 	}
 }
+
+// Kim Khoa is off both in the baked docker config and when the key is absent.
+func TestKimKhoaDisabled(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "config.docker.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if cfg := LoadConfig(); cfg == nil || cfg.PriceSources.KimKhoa.Enabled {
+		t.Fatalf("docker config must leave kimkhoa disabled, got %+v", cfg)
+	}
+
+	empty := t.TempDir()
+	if err := os.WriteFile(filepath.Join(empty, "config.yaml"), []byte("app:\n  name: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(empty)
+	if cfg := LoadConfig(); cfg == nil || cfg.PriceSources.KimKhoa.Enabled {
+		t.Fatalf("missing kimkhoa key must mean disabled, got %+v", cfg)
+	}
+}
