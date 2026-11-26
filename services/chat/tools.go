@@ -30,6 +30,15 @@ type PriceReader interface {
 	Get(ctx context.Context, source string) ([]PriceQuote, time.Time, error)
 }
 
+// USDVNDReader serves the shared USDT/VND P2P rate; ok=false means unavailable
+// or stale, in which case no VND is shown.
+type USDVNDReader interface {
+	Rate(ctx context.Context) (float64, bool)
+}
+
+// VNDFormatter renders an approximate VND value for a USD amount at a rate.
+type VNDFormatter func(usd, rate float64) string
+
 // FearGreedInfo is the crypto Fear & Greed index (public data).
 type FearGreedInfo struct {
 	Value     int
@@ -84,6 +93,8 @@ type Tools struct {
 	Platform  string // reminder scope, e.g. "zalo"
 	Prices    PriceReader
 	FearGreed FearGreedReader // nil omits fear_greed_index
+	USDVND    USDVNDReader    // nil or unavailable: USD prices only
+	FormatVND VNDFormatter    // required with USDVND
 	Search    WebSearch
 	News      NewsReader
 	Due       DueReader
@@ -227,10 +238,18 @@ func (s *Service) buildTools() []toolImpl {
 					if err != nil {
 						return "", err
 					}
+					rate, hasRate := 0.0, false
+					if tl.USDVND != nil && tl.FormatVND != nil {
+						rate, hasRate = tl.USDVND.Rate(ctx)
+					}
 					var b strings.Builder
 					fmt.Fprintf(&b, "Nguồn %s, cập nhật %s\n", name, at.In(ictZone).Format("02/01 15:04"))
 					for _, q := range qs {
-						fmt.Fprintf(&b, "- %s: mua %.0f, bán %.0f %s/%s\n", q.Type, q.Buy, q.Sell, q.Currency, q.Unit)
+						fmt.Fprintf(&b, "- %s: mua %.0f, bán %.0f %s/%s", q.Type, q.Buy, q.Sell, q.Currency, q.Unit)
+						if hasRate && rate > 0 && q.Currency == "USD" && q.Buy > 0 {
+							b.WriteString(" — " + tl.FormatVND(q.Buy, rate))
+						}
+						b.WriteString("\n")
 					}
 					return b.String(), nil
 				},

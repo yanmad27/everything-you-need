@@ -74,7 +74,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 			if fearGreed != nil {
 				fgSrc = fearGreed
 			}
-			message := generatePriceNotificationFG(allPrices, changes, lastFetchErr, fearGreedLine(fgSrc))
+			message := generatePriceNotificationVND(allPrices, changes, lastFetchErr, fearGreedLine(fgSrc), usdVNDRate(sharedP2PRate()))
 
 			err = teleService.SendToChannelWithMarkdown(cfg.Telegram.ChannelID, message)
 			if err != nil {
@@ -296,7 +296,29 @@ func generatePriceNotification(allPrices map[string][]pricetracker.Price, change
 
 // generatePriceNotificationFG is generatePriceNotification plus an optional
 // Fear & Greed line, shown once after the crypto prices.
-func generatePriceNotificationFG(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, _ error, fgLine string) string {
+func generatePriceNotificationFG(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error, fgLine string) string {
+	return generatePriceNotificationVND(allPrices, changes, err, fgLine, 0)
+}
+
+// usdVNDRate returns the shared USDT/VND P2P rate, or 0 when unavailable or
+// stale (callers then show USD only).
+func usdVNDRate(r interface {
+	Rate(context.Context) (float64, bool)
+}) float64 {
+	if r == nil {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if v, ok := r.Rate(ctx); ok && v > 0 {
+		return v
+	}
+	return 0
+}
+
+// generatePriceNotificationVND is generatePriceNotificationFG plus an
+// approximate VND value after each USD (crypto) price when vndRate > 0.
+func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, _ error, fgLine string, vndRate float64) string {
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		// Fallback to UTC+7 if timezone loading fails
@@ -417,7 +439,11 @@ func generatePriceNotificationFG(allPrices map[string][]pricetracker.Price, chan
 					}
 					priceText += fmt.Sprintf("%s", buyText)
 
-					message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
+					message += fmt.Sprintf("%s - %s", priceText, formatType(price.Type))
+					if vndRate > 0 && price.Currency == "USD" && price.BuyPrice > 0 {
+						message += " — " + pricetracker.FormatVND(price.BuyPrice, vndRate)
+					}
+					message += "\n"
 					break
 				}
 			}

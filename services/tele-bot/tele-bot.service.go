@@ -52,6 +52,12 @@ func NewTeleBotService(config *config.Config) *TeleBotService {
 	}
 }
 
+// NewTeleBotServiceWithClient builds a sender over a caller-supplied HTTP
+// client (tests inject a RoundTripper to capture the exact API payload).
+func NewTeleBotServiceWithClient(botToken string, client *http.Client) *TeleBotService {
+	return &TeleBotService{botToken: botToken, client: client}
+}
+
 var TeleBotServiceMod = submodule.Make[*TeleBotService](NewTeleBotService, config.ConfigMod)
 
 func (t *TeleBotService) SendToChannel(channelID, message string) error {
