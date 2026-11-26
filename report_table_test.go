@@ -17,11 +17,11 @@ func TestAbbreviateCuratedAndFallback(t *testing.T) {
 		"NHẪN TRÒN 9999 HƯNG THỊNH VƯỢNG":    "Nhẫn 9999",
 		"VÀNG MIẾNG SJC":                     "SJC miếng",
 		"Vàng miếng SJC (Vàng SJC)":          "SJC miếng",
-		"KIM TT/AVPL":                        "Kim TT/AVPL",
-		"VÀNG NGUYÊN LIỆU 9999":              "Vàng NL 9999",
-		"NỮ TRANG 9999":                      "Trang 9999",
-		"VÀNG MIẾNG 985":                     "Miếng 985",
-		"KIM KHOA 999.9 ÉP VĨ":               "KK 999.9 vĩ",
+		"KIM TT/AVPL":                        "TT/AVPL",
+		"VÀNG NGUYÊN LIỆU 9999":              "NL 9999",
+		"NỮ TRANG 9999":                      "NT 9999",
+		"VÀNG MIẾNG 985":                     "VM 985",
+		"KIM KHOA 999.9 ÉP VĨ":               "KK ép vĩ",
 		"NHẪN 97%":                           "Nhẫn 97%",
 		"BẠC 999 (MIẾNG - THANH - THỎI)":     "Bạc 999",
 		"Supercalifragilisticexpialidocious": "Supercalifra",
@@ -120,7 +120,7 @@ func TestProductionTables(t *testing.T) {
 		for _, l := range b[2:] {
 			n := strings.TrimSpace(l[:utf8.RuneCountInString(l)-utf8.RuneCountInString(strings.TrimLeft(l[strings.IndexByte(l, ' '):], " "))])
 			if i < 3 {
-				n = strings.TrimSpace(l[:12])
+				n = strings.TrimSpace(string([]rune(l)[:9]))
 			}
 			if names[n] {
 				t.Errorf("duplicate name %q in table %d", n, i)
@@ -136,7 +136,7 @@ func TestProductionTables(t *testing.T) {
 		t.Error("P2P footer once with VND, never without")
 	}
 	for _, b := range bw[:3] {
-		if !strings.Contains(b[1], "Mua") || !strings.Contains(b[1], "Bán") {
+		if !strings.Contains(b[1], "Mua") || !strings.Contains(b[1], "Bán") || !strings.HasSuffix(strings.TrimRight(b[1], " "), "%") {
 			t.Errorf("gold header %q", b[1])
 		}
 	}
@@ -302,6 +302,39 @@ func TestFenceFollowedByNewline(t *testing.T) {
 				t.Errorf("fence at %d not followed by newline: %q", i+j, m[i+j:min(len(m), end+10)])
 			}
 			i = end
+		}
+	}
+}
+
+func TestGoldChangeColumn(t *testing.T) {
+	row := func(n string, b, sl float64) pricetracker.Price {
+		return pricetracker.Price{Type: n, Currency: "VND", Unit: "nghìn/chỉ", BuyPrice: b, SellPrice: sl}
+	}
+	prices := map[string][]pricetracker.Price{"Doji": {row("SJC 1L", 12950, 13450), row("SJC 2L", 12850, 13350), row("SJC 3L", 1, 2), row("SJC 4L", 3, 4), row("SJC 5L", 5, 6), row("SJC 6L", 7, 8)}}
+	ch := func(n string, b, sl float64) pricetracker.PriceChange {
+		return pricetracker.PriceChange{Price: pricetracker.Price{Type: n}, BuyChange: b, SellChange: sl}
+	}
+	changes := map[string][]pricetracker.PriceChange{"Doji": {ch("SJC 1L", 0.4, -3.2), ch("SJC 2L", 0, 5), ch("SJC 3L", -1.26, -1.26), ch("SJC 4L", 5000, 1), ch("SJC 5L", -5000, 1)}}
+	m := generatePriceNotificationVND(prices, changes, nil, "", 0)
+	assertCompact(t, "change", m)
+	lines := map[string]bool{}
+	for _, l := range strings.Split(m, "\n") {
+		lines[strings.Join(strings.Fields(l), " ")] = true
+	}
+	for _, want := range []string{"SJC 1L 12.950 13.450 +0.4", "SJC 2L 12.850 13.350", "SJC 3L 1 2 -1.3", "SJC 4L 3 4 >999", "SJC 5L 5 6 <-999", "SJC 6L 7 8", "Mua Bán %"} {
+		if !lines[want] {
+			t.Errorf("missing row %q in\n%s", want, m)
+		}
+	}
+	if !strings.Contains(m, "SJC 2L 12.850 13.350      \n") && !strings.Contains(m, "SJC 2L 12.850 13.350       \n") {
+		t.Errorf("blank change cell must stay padded:\n%s", m)
+	}
+	if strings.Contains(m, "-3.2") || strings.Contains(m, "tăng") || strings.Contains(m, "%\n") && strings.Contains(m, "%%") {
+		t.Errorf("sell change or legend leaked:\n%s", m)
+	}
+	for _, v := range []float64{0, math.NaN(), 0.04, -0.04, 999.94, 999.95, -999.95, math.Inf(1), math.Inf(-1)} {
+		if runeLen(changeCell(v)) > 6 {
+			t.Errorf("%v: %q", v, changeCell(v))
 		}
 	}
 }

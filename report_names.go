@@ -13,19 +13,19 @@ import (
 var reportNameAbbrev = map[string]string{
 	"VÀNG MIẾNG SJC":                               "SJC miếng",
 	"VÀNG MIẾNG SJC 999.9":                         "SJC 999.9",
-	"KIM TT/AVPL":                                  "Kim TT/AVPL",
+	"KIM TT/AVPL":                                  "TT/AVPL",
 	"NHẪN TRÒN 9999 HƯNG THỊNH VƯỢNG":              "Nhẫn 9999",
 	"NHẪN TRÒN TRƠN BTMC 24K 9999 RỒNG THĂNG LONG": "BTMC 9999",
-	"KIM KHOA 999.9 ÉP VĨ":                         "KK 999.9 vĩ",
+	"KIM KHOA 999.9 ÉP VĨ":                         "KK ép vĩ",
 	"KIM KHOA 999.9":                               "KK 999.9",
 }
 
 // reportNamePrefixes shorten the common product-family prefixes; the rest of the
 // name is kept.
 var reportNamePrefixes = [][2]string{
-	{"VÀNG MIẾNG ", "Miếng "},
-	{"VÀNG NGUYÊN LIỆU ", "Vàng NL "},
-	{"NỮ TRANG ", "Trang "},
+	{"VÀNG MIẾNG ", "VM "},
+	{"VÀNG NGUYÊN LIỆU ", "NL "},
+	{"NỮ TRANG ", "NT "},
 	{"KIM KHOA ", "KK "},
 	{"NHẪN ", "Nhẫn "},
 }

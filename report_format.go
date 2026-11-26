@@ -210,25 +210,33 @@ func tableTitle(source, unit, currency string) string {
 	return truncRunes(cleanName(source), tableBudget-runeLen(suffix)) + suffix
 }
 
-func changeMark(v float64) string {
+// changeCell is the gold change column: signed buy-price change, one decimal, no
+// % sign, blank when unchanged or unknown, capped at ">999" / "<-999".
+func changeCell(v float64) string {
 	switch {
-	case v > 0:
-		return "+"
-	case v < 0:
-		return "-"
+	case v == 0 || math.IsNaN(v):
+		return ""
+	case v >= 999.95:
+		return ">999"
+	case v <= -999.95:
+		return "<-999"
 	}
-	return " "
+	if s := fmt.Sprintf("%+.1f", v); s != "+0.0" && s != "-0.0" {
+		return s
+	}
+	return "0.0"
 }
 
-// goldSection renders each (unit, currency) run of shown rows as one table; it
-// reports whether any change mark was printed. Names are unique across the section.
-func goldSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange) bool {
+// goldSection renders each (unit, currency) run of shown rows as one table with
+// columns Mua, Bán and %. The single % column is the BUY-price change; the sell
+// change is intentionally not shown even when it differs (accepted trade-off to
+// fit 28 columns). Names are unique across the section.
+func goldSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange) {
 	if len(prices) == 0 {
 		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
-		return false
+		return
 	}
 	idx := changeIndex(changes, source)
-	marks := false
 	var tables []pendingTable
 	flush := func(title string, group []pricetracker.Price) {
 		if len(group) == 0 {
@@ -237,21 +245,19 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 		raws := make([]string, len(group))
 		for i, p := range group {
 			raws[i] = p.Type
-			c := idx[p.Type]
-			marks = marks || changeMark(c.BuyChange) != " " || changeMark(c.SellChange) != " "
 		}
 		build := func(level int) []tableCol {
 			num := formatPrice
 			if level > 0 {
 				num = compactNumber
 			}
-			buy, sell := tableCol{header: "Mua"}, tableCol{header: "Bán"}
+			buy, sell, chg := tableCol{header: "Mua"}, tableCol{header: "Bán"}, tableCol{header: "%"}
 			for _, p := range group {
-				c := idx[p.Type]
-				buy.cells = append(buy.cells, num(p.BuyPrice)+changeMark(c.BuyChange))
-				sell.cells = append(sell.cells, num(p.SellPrice)+changeMark(c.SellChange))
+				buy.cells = append(buy.cells, num(p.BuyPrice))
+				sell.cells = append(sell.cells, num(p.SellPrice))
+				chg.cells = append(chg.cells, changeCell(idx[p.Type].BuyChange))
 			}
-			return []tableCol{buy, sell}
+			return []tableCol{buy, sell, chg}
 		}
 		tables = append(tables, fitTable(title, raws, 2, build, func(int) string { return "" }))
 	}
@@ -272,7 +278,6 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 	for _, t := range renderPending(tables, "\n") {
 		b.WriteString(t)
 	}
-	return marks
 }
 
 var reportKeywords = []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"}

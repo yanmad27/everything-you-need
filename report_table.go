@@ -12,8 +12,6 @@ import (
 // (~29-31 columns; 28 keeps a safety margin).
 const tableBudget = 28
 
-const changeLegend = "+ tăng, - giảm so với trước"
-
 type tableCol struct {
 	header string
 	cells  []string

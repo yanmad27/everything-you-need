@@ -182,7 +182,7 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 		}
 	}
 	g := samples["gold"]
-	for _, want := range []string{"Doji · nghìn/chỉ", "Doji · nghìn/lượng", "Bảo Tín Minh Châu · VND/chỉ", "Kim Khoa · nghìn/chỉ", "Bạc 9999", "Mua", "Bán", "+ tăng, - giảm so với trước"} {
+	for _, want := range []string{"Doji · nghìn/chỉ", "Doji · nghìn/lượng", "Bảo Tín Minh Châu · VND/chỉ", "Kim Khoa · nghìn/chỉ", "Bạc 9999", "Mua", "Bán", "%"} {
 		if !strings.Contains(g, want) {
 			t.Errorf("gold missing %q:\n%s", want, g)
 		}
@@ -191,7 +191,10 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 		t.Errorf("non-keyword row shown:\n%s", g)
 	}
 	// every Kim Khoa row survives (5 rows = 4 fixture rows + the long name)
-	if n := strings.Count(g, "KK 999.9"); n != 3 {
+	if strings.Contains(g, "tăng") {
+		t.Errorf("legend leaked:\n%s", g)
+	}
+	if n := strings.Count(g, "KK "); n != 3 {
 		t.Errorf("Kim Khoa rows: %d\n%s", n, g)
 	}
 	for _, bad := range []string{"(N items)", " items)", "📈", "📉", "💰", "💵", "•  "} {

@@ -92,12 +92,12 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 			"Doji":                         other,
 		}, nil, nil)
 
-		for _, want := range []string{"Kim Khoa · nghìn/chỉ", "KK 999.9 vĩ 11.670  11.800", "Trang 98%   11.400  11.700", "Nhẫn 97%    11.250  11.400"} {
+		for _, want := range []string{"Kim Khoa · nghìn/chỉ", "KK ép vĩ 11.670 11.800", "NT 98%   11.400 11.700", "Nhẫn 97% 11.250 11.400"} {
 			if !strings.Contains(message, want) {
 				t.Errorf("Kim Khoa table missing %q\n%s", want, message)
 			}
 		}
-		if n := strings.Count(message, "KK 999.9"); n != 2 {
+		if n := strings.Count(message, "KK "); n != 2 {
 			t.Errorf("Kim Khoa rows: %d\n%s", n, message)
 		}
 		if strings.Contains(message, "Vàng nhẫn 999.9") {

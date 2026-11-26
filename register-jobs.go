@@ -353,12 +353,8 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 	}
 
 	var sb strings.Builder
-	marks := false
 	for _, source := range sortedKeys(goldSources) {
-		marks = goldSection(&sb, source, goldSources[source], changes) || marks
-	}
-	if marks {
-		sb.WriteString(changeLegend + "\n\n")
+		goldSection(&sb, source, goldSources[source], changes)
 	}
 	for _, source := range sortedKeys(cryptoSources) {
 		cryptoSection(&sb, source, cryptoSources[source], changes, vndRate)
