@@ -275,6 +275,10 @@ func goldSection(b *strings.Builder, source string, prices []pricetracker.Price,
 		group = append(group, p)
 	}
 	flush(prev, group)
+	if len(tables) == 0 {
+		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
+		return
+	}
 	for _, t := range renderPending(tables, "\n") {
 		b.WriteString(t)
 	}
@@ -293,10 +297,9 @@ func matchesKeyword(p pricetracker.Price) bool {
 	return false
 }
 
-// showGold: Kim Khoa rows are already filtered by purity at the source.
-func showGold(source string, p pricetracker.Price) bool {
-	return source == pricetracker.KimKhoaSourceName || matchesKeyword(p)
-}
+// showGold applies the Telegram-only gold row filter (report_filter.go) to
+// every source; matchesKeyword stays the shared filter for crypto and others.
+func showGold(_ string, p pricetracker.Price) bool { return goldRowWanted(p.Type) }
 
 func showCrypto(p pricetracker.Price) bool { return matchesKeyword(p) }
 

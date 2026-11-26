@@ -111,7 +111,7 @@ func TestProductionTables(t *testing.T) {
 	if len(bw) != 4 || len(wb) != 4 {
 		t.Fatalf("tables with=%d without=%d", len(bw), len(wb))
 	}
-	wantRows := []int{4, 4, 2, 3} // Doji, Kim Khoa, Mi Hồng, CoinGecko
+	wantRows := []int{2, 3, 4, 3} // Doji, Kim Khoa, Mi Hồng, CoinGecko
 	for i, b := range bw {
 		if len(b)-2 != wantRows[i] {
 			t.Errorf("table %d rows %d want %d", i, len(b)-2, wantRows[i])
