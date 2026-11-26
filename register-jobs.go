@@ -287,7 +287,7 @@ func fearGreedLine(src fearGreedGetter) string {
 		log.Printf("fear&greed unavailable for price update: %v", err)
 		return ""
 	}
-	return f.TelegramMarkdownLine()
+	return compactFearGreed(f)
 }
 
 func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {
@@ -342,11 +342,8 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 		return message
 	}
 
-	keywords := []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"}
-
 	goldSources := make(map[string][]pricetracker.Price)
 	cryptoSources := make(map[string][]pricetracker.Price)
-
 	for source, prices := range allPrices {
 		if source == "CoinGecko" {
 			cryptoSources[source] = prices
@@ -355,113 +352,14 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 		}
 	}
 
-	for source, prices := range goldSources {
-		if len(prices) == 0 {
-			message += fmt.Sprintf("*%s*\n• N/A\n\n", source)
-			continue
-		}
-
-		message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
-
-		sourceChanges := make(map[string]pricetracker.PriceChange)
-		if changes != nil {
-			if sourceChangesList, exists := changes[source]; exists {
-				for _, change := range sourceChangesList {
-					sourceChanges[change.Price.Type] = change
-				}
-			}
-		}
-
-		count := len(prices)
-		for i := 0; i < count; i++ {
-			price := prices[i]
-			for _, keyword := range keywords {
-				// Kim Khoa rows are already filtered by purity at the source.
-				if source == pricetracker.KimKhoaSourceName || strings.Contains(strings.ToLower(price.Type), keyword) {
-					change, hasChange := sourceChanges[price.Type]
-
-					priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
-					buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
-					sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
-
-					if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
-						if change.BuyChange > 0 {
-							buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
-						} else if change.BuyChange < 0 {
-							buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
-						}
-
-						if change.SellChange != 0 && change.SellChange != change.BuyChange {
-							if change.SellChange > 0 {
-								sellText += fmt.Sprintf("/📈+%.1f%% ", change.SellChange)
-							} else {
-								sellText += fmt.Sprintf("/📉%.1f%% ", change.SellChange)
-							}
-						}
-
-					}
-					priceText += fmt.Sprintf("%s - %s", buyText, sellText)
-
-					message += fmt.Sprintf("%s - %s\n", priceText, formatType(price.Type))
-					break
-				}
-			}
-		}
-
-		message += "\n"
+	var sb strings.Builder
+	for _, source := range sortedKeys(goldSources) {
+		goldSection(&sb, source, goldSources[source], changes)
 	}
-
-	for source, prices := range cryptoSources {
-		if len(prices) == 0 {
-			message += fmt.Sprintf("*%s*\n• N/A\n\n", source)
-			continue
-		}
-
-		message += fmt.Sprintf("*%s* (%d items)\n", source, len(prices))
-
-		sourceChanges := make(map[string]pricetracker.PriceChange)
-		if changes != nil {
-			if sourceChangesList, exists := changes[source]; exists {
-				for _, change := range sourceChangesList {
-					sourceChanges[change.Price.Type] = change
-				}
-			}
-		}
-
-		count := len(prices)
-		for i := 0; i < count; i++ {
-			price := prices[i]
-			for _, keyword := range keywords {
-				if strings.Contains(strings.ToLower(price.Type), keyword) {
-					change, hasChange := sourceChanges[price.Type]
-
-					priceText := fmt.Sprintf("• %s %s: ", currencyMap[price.Currency], price.Currency)
-					buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
-
-					if hasChange && (change.BuyChange != 0 || change.SellChange != 0) || !hasChange {
-						if change.BuyChange > 0 {
-							buyText += fmt.Sprintf(" 📈+%.1f%% ", change.BuyChange)
-						} else if change.BuyChange < 0 {
-							buyText += fmt.Sprintf(" 📉%.1f%% ", change.BuyChange)
-						}
-
-					}
-					priceText += fmt.Sprintf("%s", buyText)
-
-					message += fmt.Sprintf("%s - %s", priceText, formatType(price.Type))
-					if vndRate > 0 && price.Currency == "USD" {
-						if v := pricetracker.FormatVND(price.BuyPrice, vndRate); v != "" {
-							message += " — " + v
-						}
-					}
-					message += "\n"
-					break
-				}
-			}
-		}
-
-		message += "\n"
+	for _, source := range sortedKeys(cryptoSources) {
+		cryptoSection(&sb, source, cryptoSources[source], changes, vndRate)
 	}
+	message += guardWidth(strings.TrimRight(sb.String(), "\n")) + "\n\n"
 
 	if fgLine != "" && len(cryptoSources) > 0 {
 		message += fgLine + "\n\n"

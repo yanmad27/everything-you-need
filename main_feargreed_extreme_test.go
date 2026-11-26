@@ -27,7 +27,7 @@ func TestFearGreedNotificationTelegramPayload(t *testing.T) {
 		text := cap.bodies[0]["text"].(string)
 		fgLine := ""
 		for _, l := range strings.Split(text, "\n") {
-			if strings.Contains(l, "Fear & Greed") {
+			if strings.Contains(l, "F&G:") {
 				fgLine = l
 			}
 		}

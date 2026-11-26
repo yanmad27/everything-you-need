@@ -250,3 +250,49 @@ func FormatVND(usd, rate float64) string {
 	}
 	return fmt.Sprintf("≈ %s ₫ (%s)", strings.Join(parts, "."), VNDLabel)
 }
+
+// FormatVNDCompact renders usd*rate for narrow screens as "≈ 1,77 tỷ ₫" /
+// "≈ 91,3 tr ₫": Vietnamese decimal comma, 3 significant digits, units
+// nghìn (>=1e3), tr (>=1e6), tỷ (>=1e9); below 1000 it is whole dong. A value
+// that rounds up to the next unit is promoted (999,5 tr → "1,00 tỷ"). Above
+// 999 tỷ it stays in tỷ with whole numbers. It returns "" unless the product
+// is finite and at least 1 dong.
+func FormatVNDCompact(usd, rate float64) string {
+	v := usd * rate
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 1 {
+		return ""
+	}
+	units := []struct {
+		div  float64
+		name string
+	}{{1, ""}, {1e3, " nghìn"}, {1e6, " tr"}, {1e9, " tỷ"}}
+	i := 0
+	for i < len(units)-1 && v >= units[i+1].div {
+		i++
+	}
+	for {
+		x := v / units[i].div
+		d := 2
+		switch {
+		case i == 0, x >= 100:
+			d = 0
+		case x >= 10:
+			d = 1
+		}
+		r := math.Round(x*math.Pow10(d)) / math.Pow10(d)
+		if r >= 1000 && i < len(units)-1 {
+			i++
+			continue
+		}
+		if r >= 100 && d > 0 {
+			d = 0
+		} else if r >= 10 && d == 2 {
+			d = 1
+		}
+		s := strconv.FormatFloat(r, 'f', d, 64)
+		if d == 0 && r < 1000 || i == 0 {
+			s = strconv.FormatFloat(math.Round(r), 'f', 0, 64)
+		}
+		return "≈ " + strings.ReplaceAll(s, ".", ",") + units[i].name + " ₫"
+	}
+}
