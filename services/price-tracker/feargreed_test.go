@@ -27,7 +27,7 @@ func TestParseFearGreed(t *testing.T) {
 	if f.Value != 25 || f.Classification != "Fear" || !f.HasPrev || f.Change != -3 || f.Date.UTC().Format("2006-01-02") != "2025-11-03" {
 		t.Fatalf("%+v", f)
 	}
-	if got, want := f.Line(), "😨 Fear & Greed: 25 — Sợ hãi (Fear) · ▼3 so với hôm qua"; got != want {
+	if got, want := f.Line(), "⚠️ 😨 Fear & Greed: 25 — Sợ hãi (Fear) · ▼3 so với hôm qua"; got != want {
 		t.Fatalf("line %q want %q", got, want)
 	}
 	t.Logf("sample line: %s", f.Line())
@@ -68,7 +68,7 @@ func TestFearGreedMissingYesterday(t *testing.T) {
 	if err != nil || f.HasPrev {
 		t.Fatalf("%+v %v", f, err)
 	}
-	if got := f.Line(); strings.Contains(got, "hôm qua") || got != "😨 Fear & Greed: 25 — Sợ hãi (Fear)" {
+	if got := f.Line(); strings.Contains(got, "hôm qua") || got != "⚠️ 😨 Fear & Greed: 25 — Sợ hãi (Fear)" {
 		t.Errorf("line %q", got)
 	}
 	// an unparsable yesterday is treated as missing
@@ -410,7 +410,7 @@ func TestFearGreedStaleCeilingMeasuredAfterFetch(t *testing.T) {
 	s.fetchFn = func(context.Context) (FearGreed, error) {
 		calls++
 		if calls == 1 {
-			return FearGreed{Value: 25, Classification: "Fear"}, nil
+			return FearGreed{Value: 30, Classification: "Fear"}, nil
 		}
 		clock.Add(int64(fearGreedMaxStale/time.Second) - 100) // before the fetch it is still eligible...
 		clock.Add(200)                                        // ...but the failing fetch ends past 24h

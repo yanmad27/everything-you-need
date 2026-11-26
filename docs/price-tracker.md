@@ -67,6 +67,45 @@ type PriceService struct {
   kimKhoaSource := pricetracker.NewKimKhoaSource("") // empty → DefaultKimKhoaURL
   ```
 
+### CoinGecko Source and VND value (USDT/VND P2P)
+
+Crypto prices stay in USD (and percentage changes are computed on USD). Wherever
+they are shown (scheduled price report, chat `get_prices`), an approximate VND
+value is appended: `≈ 1.797.512.000 ₫ (USDT/VND P2P)`. Code:
+`services/price-tracker/p2prate.go`; fixtures: `testdata/p2p/`.
+
+Rate semantics (fixed constants, no configuration):
+
+- **Source**: Binance P2P public advert search, `POST /bapi/c2c/v2/friendly/c2c/adv/search`
+  with `{"fiat":"VND","asset":"USDT","tradeType":"BUY"|"SELL","page":1,"rows":10}`; no auth.
+- **Sides**: both. `BUY` lists adverts a user buys USDT from (their cost), `SELL` lists adverts a
+  user sells USDT to (their proceeds). Rate = midpoint of the two per-side medians (neither the buy
+  nor the sell price).
+- **Top N**: only the first 10 adverts returned per side are examined.
+- **Valid advert**: price is a positive number within 15,000 to 40,000 VND/USDT and
+  `tradableQuantity` is present and positive. Invalid adverts are dropped.
+- **Minimum sample**: 5 valid adverts per side, otherwise the rate is unavailable (never one-sided).
+- **Median**: odd count = middle value; even count = mean of the two middle values.
+- **Freshness**: a rate is usable only while younger than 10 min. If a refresh past that fails,
+  **no VND is shown** (USD only); there is no stale window.
+- **Failures**: a failed fetch (timeout 8 s, non-200, 429, malformed or too few ads, body capped at
+  1 MiB) starts a 2 min backoff (5 min after HTTP 429) with no new requests. Concurrent callers share
+  one refresh. One reader (`sharedP2PRate`) serves both the scheduler and chat.
+- When the rate is unavailable the message is sent with USD only; it never fails and never shows a
+  zero or wrong VND value.
+
+### Fear & Greed emphasis
+
+The crypto Fear & Greed index is emphasized only when it is Extreme Fear (<= 25) or Extreme
+Greed (>= 75); 26-74 render exactly as before. Presentation is per channel:
+
+- Scheduled price report (Telegram legacy `Markdown`): `⚠️ *😱 Fear & Greed: 20 — ...*` (bold + emoji).
+- `/fng` and `/feargreed` direct reply (Telegram, plain `SendReply`): `⚠️ ` prefix only, no markup.
+- Chat `fear_greed_index` tool (Zalo, `SendMarkdown`): the tool output is model input, so for
+  extreme values it appends an explicit instruction note (leading `⚠️`) asking the model to state the
+  index in a bold `**...**` sentence starting with `⚠️`. Emphasis there depends on the model following
+  the note; the note is absent at 26-74.
+
 ### Doji Source
 - **Description**: Vietnamese gold and silver price provider
 - **API**: `https://banggia.doji.vn/api/TablePrice/GetTablePrice` (backs https://banggia.doji.vn/gold-price)

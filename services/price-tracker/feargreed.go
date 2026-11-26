@@ -76,13 +76,38 @@ func (f FearGreed) label() string {
 	return UnknownLabel
 }
 
-// Line is the one-line Telegram rendering.
-func (f FearGreed) Line() string {
+// Extreme reports Extreme Fear (<=25) or Extreme Greed (>=75). Only these
+// values are emphasized; 26-74 render exactly as the plain line.
+func (f FearGreed) Extreme() bool { return f.Value <= 25 || f.Value >= 75 }
+
+// WarnEmoji prefixes an emphasized (extreme) reading.
+const WarnEmoji = "⚠️"
+
+func (f FearGreed) baseLine() string {
 	e := fearGreedEmoji[f.Classification]
 	if e == "" {
 		e = "📉"
 	}
 	return fmt.Sprintf("%s Fear & Greed: %d — %s%s", e, f.Value, f.label(), f.changeText())
+}
+
+// Line is the one-line plain-text rendering (direct /fng reply). An extreme
+// value gets the warning emoji only: plain text has no bold.
+func (f FearGreed) Line() string {
+	if f.Extreme() {
+		return WarnEmoji + " " + f.baseLine()
+	}
+	return f.baseLine()
+}
+
+// TelegramMarkdownLine is the line for Telegram's legacy "Markdown" parse
+// mode: an extreme value is bold (*...*) with the warning emoji. The text is
+// built only from fixed strings and integers, so it contains no stray _ * [ `.
+func (f FearGreed) TelegramMarkdownLine() string {
+	if f.Extreme() {
+		return WarnEmoji + " *" + f.baseLine() + "*"
+	}
+	return f.baseLine()
 }
 
 // Text is the multi-field rendering used by the chat tool.

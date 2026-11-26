@@ -30,6 +30,34 @@ type PriceReader interface {
 	Get(ctx context.Context, source string) ([]PriceQuote, time.Time, error)
 }
 
+// USDVNDReader serves the shared USDT/VND P2P rate; ok=false means unavailable
+// or stale, in which case no VND is shown.
+type USDVNDReader interface {
+	Rate(ctx context.Context) (float64, bool)
+}
+
+// vndRateWait bounds the rate lookup so a stalled source cannot delay the
+// price answer; on timeout the tool returns USD only.
+const vndRateWait = 3 * time.Second
+
+// vndWait is min(vndRateWait, time left on ctx minus vndRateMargin); <= 0
+// means skip the conversion so the USD quotes are returned before the tool
+// deadline.
+func vndWait(ctx context.Context) time.Duration {
+	wait := vndRateWait
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl) - vndRateMargin; left < wait {
+			wait = left
+		}
+	}
+	return wait
+}
+
+const vndRateMargin = time.Second
+
+// VNDFormatter renders an approximate VND value for a USD amount at a rate.
+type VNDFormatter func(usd, rate float64) string
+
 // FearGreedInfo is the crypto Fear & Greed index (public data).
 type FearGreedInfo struct {
 	Value     int
@@ -39,6 +67,12 @@ type FearGreedInfo struct {
 	HasChange bool
 	Change    int // today - yesterday
 }
+
+// fearGreedExtremeNote is appended to the tool result only for Extreme Fear
+// (<=25) or Extreme Greed (>=75). The tool output is model input, so emphasis
+// is requested explicitly. Tools exist only on the Zalo path, which renders
+// markdown (**bold**); the emoji alone survives any plain-text fallback.
+const fearGreedExtremeNote = "⚠️ MỨC CỰC ĐOAN: khi trả lời, nhắc tới chỉ số này bằng một câu in đậm (**...**) mở đầu bằng ⚠️. Chỉ số ở mức khác thì không nhấn mạnh.\n"
 
 var fearGreedLabels = map[string]string{"Extreme Fear": "Sợ hãi tột độ", "Fear": "Sợ hãi", "Neutral": "Trung lập",
 	"Greed": "Tham lam", "Extreme Greed": "Tham lam tột độ"}
@@ -84,6 +118,8 @@ type Tools struct {
 	Platform  string // reminder scope, e.g. "zalo"
 	Prices    PriceReader
 	FearGreed FearGreedReader // nil omits fear_greed_index
+	USDVND    USDVNDReader    // nil or unavailable: USD prices only
+	FormatVND VNDFormatter    // required with USDVND
 	Search    WebSearch
 	News      NewsReader
 	Due       DueReader
@@ -227,10 +263,28 @@ func (s *Service) buildTools() []toolImpl {
 					if err != nil {
 						return "", err
 					}
+					rate, hasRate := 0.0, false
+					hasUSD := false
+					for _, q := range qs {
+						hasUSD = hasUSD || q.Currency == "USD"
+					}
+					if hasUSD && tl.USDVND != nil && tl.FormatVND != nil {
+						if wait := vndWait(ctx); wait > 0 {
+							rctx, cancel := context.WithTimeout(ctx, wait)
+							rate, hasRate = tl.USDVND.Rate(rctx)
+							cancel()
+						}
+					}
 					var b strings.Builder
 					fmt.Fprintf(&b, "Nguồn %s, cập nhật %s\n", name, at.In(ictZone).Format("02/01 15:04"))
 					for _, q := range qs {
-						fmt.Fprintf(&b, "- %s: mua %.0f, bán %.0f %s/%s\n", q.Type, q.Buy, q.Sell, q.Currency, q.Unit)
+						fmt.Fprintf(&b, "- %s: mua %.0f, bán %.0f %s/%s", q.Type, q.Buy, q.Sell, q.Currency, q.Unit)
+						if hasRate && rate > 0 && q.Currency == "USD" {
+							if v := tl.FormatVND(q.Buy, rate); v != "" {
+								b.WriteString(" — " + v)
+							}
+						}
+						b.WriteString("\n")
 					}
 					return b.String(), nil
 				},
@@ -253,6 +307,9 @@ func (s *Service) buildTools() []toolImpl {
 					label = vn + " (" + f.Class + ")"
 				}
 				fmt.Fprintf(&b, "Fear & Greed: %d/100\nNhãn: %s\nNgày: %s\n", f.Value, label, f.Date.UTC().Format("2006-01-02"))
+				if f.Value <= 25 || f.Value >= 75 {
+					b.WriteString(fearGreedExtremeNote)
+				}
 				if f.HasChange {
 					fmt.Fprintf(&b, "Thay đổi so với hôm qua: %+d\n", f.Change)
 				} else {

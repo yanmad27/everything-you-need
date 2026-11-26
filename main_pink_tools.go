@@ -108,6 +108,7 @@ func buildZaloTools(cfg *config.Config, prices *pricetracker.PriceTrackerService
 		tl.Prices = priceAdapter{pricetracker.NewCachedPriceReader(prices, 2*time.Minute)}
 	}
 	tl.FearGreed = fearGreedAdapter{sharedFearGreed()}
+	tl.USDVND, tl.FormatVND = sharedP2PRate(), pricetracker.FormatVND
 	if cfg.News.SerperAPIKey != "" { // independent of the news digest being enabled
 		tl.Search = searchAdapter{news.NewWebSearcher(cfg.News.SerperAPIKey)}
 	}

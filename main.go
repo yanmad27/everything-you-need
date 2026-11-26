@@ -477,6 +477,17 @@ var (
 	fearGreedSrc  *pricetracker.FearGreedSource
 )
 
+var (
+	p2pRateOnce sync.Once
+	p2pRateRd   *pricetracker.P2PRateReader
+)
+
+// sharedP2PRate is the single USDT/VND rate reader shared by the scheduler and chat.
+func sharedP2PRate() *pricetracker.P2PRateReader {
+	p2pRateOnce.Do(func() { p2pRateRd = pricetracker.NewP2PRateReader() })
+	return p2pRateRd
+}
+
 // sharedFearGreed is the single cached Fear & Greed reader shared by the price
 // notification, the Telegram command and the Pink tool.
 func sharedFearGreed() *pricetracker.FearGreedSource {
