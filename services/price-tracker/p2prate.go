@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"sort"
@@ -212,6 +213,7 @@ func parseP2PSide(body []byte) (float64, error) {
 		prices = append(prices, p)
 	}
 	if len(prices) < p2pMinAds {
+		log.Printf("p2p rate: only %d of %d adverts valid (min %d); schema or market change?", len(prices), len(r.Data), p2pMinAds)
 		return 0, fmt.Errorf("p2p rate: only %d valid adverts", len(prices))
 	}
 	return median(prices), nil
@@ -231,10 +233,10 @@ const VNDLabel = "USDT/VND P2P"
 
 // FormatVND renders usd*rate as "≈ 2.508.000.000 ₫ (USDT/VND P2P)" with dot
 // thousands separators, rounded to whole dong.
-// It returns "" unless the product is finite and at least 0.5 dong.
+// It returns "" unless the product is finite and at least 1 dong.
 func FormatVND(usd, rate float64) string {
 	v := usd * rate
-	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0.5 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 1 {
 		return ""
 	}
 	s := strconv.FormatFloat(v, 'f', 0, 64)

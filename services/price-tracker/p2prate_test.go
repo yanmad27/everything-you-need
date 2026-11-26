@@ -322,13 +322,13 @@ func TestParseP2PSideExaminesOnlyFirstTenAndRequiresQuantity(t *testing.T) {
 
 func TestFormatVNDGuards(t *testing.T) {
 	inf, nan := math.Inf(1), math.NaN()
-	for _, c := range [][2]float64{{inf, 26000}, {68000, inf}, {nan, 1}, {1, nan}, {-1, 26000}, {68000, -1}, {0, 26000}, {0.00001, 26000}, {1, 0.4}} {
+	for _, c := range [][2]float64{{inf, 26000}, {68000, inf}, {nan, 1}, {1, nan}, {-1, 26000}, {68000, -1}, {0, 26000}, {0.00001, 26000}, {1, 0.4}, {1, 0.5}} {
 		if got := FormatVND(c[0], c[1]); got != "" {
 			t.Errorf("%v: %q", c, got)
 		}
 	}
-	if got := FormatVND(1, 0.5); got == "" {
-		t.Error("0.5 dong is the lower bound")
+	if got := FormatVND(1, 1); got == "" {
+		t.Error("1 dong is the lower bound")
 	}
 }
 

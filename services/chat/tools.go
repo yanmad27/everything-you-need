@@ -40,6 +40,21 @@ type USDVNDReader interface {
 // price answer; on timeout the tool returns USD only.
 const vndRateWait = 3 * time.Second
 
+// vndWait is min(vndRateWait, time left on ctx minus vndRateMargin); <= 0
+// means skip the conversion so the USD quotes are returned before the tool
+// deadline.
+func vndWait(ctx context.Context) time.Duration {
+	wait := vndRateWait
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl) - vndRateMargin; left < wait {
+			wait = left
+		}
+	}
+	return wait
+}
+
+const vndRateMargin = time.Second
+
 // VNDFormatter renders an approximate VND value for a USD amount at a rate.
 type VNDFormatter func(usd, rate float64) string
 
@@ -254,9 +269,11 @@ func (s *Service) buildTools() []toolImpl {
 						hasUSD = hasUSD || q.Currency == "USD"
 					}
 					if hasUSD && tl.USDVND != nil && tl.FormatVND != nil {
-						rctx, cancel := context.WithTimeout(ctx, vndRateWait)
-						rate, hasRate = tl.USDVND.Rate(rctx)
-						cancel()
+						if wait := vndWait(ctx); wait > 0 {
+							rctx, cancel := context.WithTimeout(ctx, wait)
+							rate, hasRate = tl.USDVND.Rate(rctx)
+							cancel()
+						}
 					}
 					var b strings.Builder
 					fmt.Fprintf(&b, "Nguồn %s, cập nhật %s\n", name, at.In(ictZone).Format("02/01 15:04"))

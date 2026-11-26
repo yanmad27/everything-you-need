@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -91,5 +92,47 @@ func TestStalledRateStillReturnsUSDInTime(t *testing.T) {
 	got := r.toolResult(1)
 	if time.Since(start) > vndRateWait+2*time.Second || cr.calls != 1 || strings.Contains(got, "₫") || !strings.Contains(got, "mua 68000, bán 68000 USD/BTC") {
 		t.Fatalf("elapsed=%v calls=%d %q", time.Since(start), cr.calls, got)
+	}
+}
+
+// Price retrieval eats most of the tool deadline and the rate source stalls:
+// the tool must still return the USD quotes, not a timeout.
+type slowPrices struct{ cryptoPrices }
+
+func (slowPrices) Get(ctx context.Context, s string) ([]PriceQuote, time.Time, error) {
+	time.Sleep(300 * time.Millisecond)
+	return cryptoPrices{}.Get(ctx, s)
+}
+
+func TestVNDWaitReservesTimeBeforeDeadline(t *testing.T) {
+	if got := vndWait(context.Background()); got != vndRateWait {
+		t.Fatalf("no deadline: %v", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	if got := vndWait(ctx); got <= 0 || got > 500*time.Millisecond {
+		t.Fatalf("1.5s left: %v", got)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel2()
+	if got := vndWait(ctx2); got > 0 {
+		t.Fatalf("less than the margin left must skip: %v", got)
+	}
+}
+
+func TestStalledRateNearDeadlineStillReturnsUSD(t *testing.T) {
+	cr := &countingRate{block: true}
+	tl := Tools{Prices: slowPrices{}, USDVND: cr, FormatVND: fmtVND}
+	var run func(context.Context, *turn, json.RawMessage) (string, error)
+	for _, ti := range (&Service{tools: tl}).buildTools() {
+		if ti.def.Name == "get_prices" {
+			run = ti.run
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond) // ~900ms left after the 300ms fetch: below the margin
+	defer cancel()
+	got, err := run(ctx, nil, json.RawMessage(`{"source":"coingecko"}`))
+	if err != nil || strings.Contains(got, "₫") || !strings.Contains(got, "mua 68000, bán 68000 USD/BTC") || cr.calls != 0 {
+		t.Fatalf("err=%v calls=%d %q", err, cr.calls, got)
 	}
 }
