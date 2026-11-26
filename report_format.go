@@ -136,91 +136,6 @@ func guardWidth(msg string) string {
 	return strings.Join(out, "\n")
 }
 
-// wrapWords greedily wraps s into lines of at most width; an over-long word is split by rune.
-func wrapWords(s string, width int) []string {
-	var lines []string
-	cur := ""
-	flush := func() {
-		if cur != "" {
-			lines = append(lines, cur)
-			cur = ""
-		}
-	}
-	for _, word := range strings.Fields(s) {
-		for displayWidth(word) > width {
-			flush()
-			cut := 0
-			for _, c := range clusters(word) {
-				if displayWidth(word[:cut+len(c)]) > width {
-					break
-				}
-				cut += len(c)
-			}
-			if cut == 0 {
-				cut = len(clusters(word)[0])
-			}
-			lines = append(lines, word[:cut])
-			word = word[cut:]
-		}
-		switch {
-		case cur == "":
-			cur = word
-		case displayWidth(cur)+1+displayWidth(word) <= width:
-			cur += " " + word
-		default:
-			flush()
-			cur = word
-		}
-	}
-	flush()
-	return lines
-}
-
-// bullet renders name as "• name", wrapping long names under the text.
-func bullet(name string) []string {
-	ls := wrapWords(name, maxReportWidth-2)
-	if len(ls) == 0 {
-		ls = []string{"-"}
-	}
-	out := make([]string, len(ls))
-	for i, l := range ls {
-		if i == 0 {
-			out[i] = "• " + l
-		} else {
-			out[i] = nameIndent + l
-		}
-	}
-	return out
-}
-
-func sectionHeader(name string, n int) []string {
-	count := fmt.Sprintf("(%d items)", n)
-	ls := wrapWords(name, maxReportWidth)
-	if len(ls) == 0 {
-		ls = []string{"-"}
-	}
-	last := len(ls) - 1
-	out := make([]string, 0, len(ls)+1)
-	for i, l := range ls {
-		if i == last && displayWidth(l)+1+displayWidth(count) <= maxReportWidth {
-			out = append(out, "*"+l+"* "+count)
-			return out
-		}
-		out = append(out, "*"+l+"*")
-	}
-	return append(out, count)
-}
-
-func changeText(v float64) string {
-	switch {
-	case v > 0:
-		return fmt.Sprintf(" 📈+%.1f%%", v)
-	case v < 0:
-		return fmt.Sprintf(" 📉%.1f%%", v)
-	}
-	return ""
-}
-
 func sortedKeys(m map[string][]pricetracker.Price) []string {
 	ks := make([]string, 0, len(m))
 	for k := range m {
@@ -240,43 +155,6 @@ func changeIndex(changes map[string][]pricetracker.PriceChange, source string) m
 
 func reportName(typeStr string) string {
 	return strings.Join(strings.Fields(formatType(typeStr)), " ")
-}
-
-func unitLine(currency, unit string) string {
-	s := currency
-	if f := currencyMap[currency]; f != "" {
-		s = f + " " + currency
-	}
-	if unit != "" {
-		s += " · " + unit
-	}
-	return s
-}
-
-func goldRowLines(p pricetracker.Price, c pricetracker.PriceChange) []string {
-	lines := bullet(reportName(p.Type))
-	buy := "*" + formatPrice(p.BuyPrice) + "*"
-	sell := "*" + formatPrice(p.SellPrice) + "*"
-	sellChg := ""
-	if c.SellChange != 0 && c.SellChange != c.BuyChange {
-		sellChg = changeText(c.SellChange)
-	}
-	single := detailIndent + "Mua " + buy + changeText(c.BuyChange) + " / Bán " + sell + sellChg
-	if displayWidth(single) <= maxReportWidth {
-		return append(lines, single)
-	}
-	return append(lines,
-		detailIndent+"Mua "+buy+changeText(c.BuyChange),
-		detailIndent+"Bán "+sell+changeText(c.SellChange))
-}
-
-func cryptoRowLines(p pricetracker.Price, c pricetracker.PriceChange, curSuffix string) []string {
-	price := "*" + formatPrice(p.BuyPrice) + "*" + curSuffix + changeText(c.BuyChange)
-	name := reportName(p.Type)
-	if single := "• " + name + " " + price; !strings.Contains(name, "  ") && displayWidth(single) <= maxReportWidth {
-		return []string{single}
-	}
-	return append(bullet(name), detailIndent+price)
 }
 
 // compactFearGreed is the Telegram (legacy Markdown) Fear & Greed block. Line 1
@@ -310,25 +188,73 @@ func compactFearGreed(f pricetracker.FearGreed) string {
 	return strings.Join(lines, "\n")
 }
 
-func goldSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange) {
+// tableSourceAlias shortens source names that would crowd out the unit in a title.
+var tableSourceAlias = map[string]string{pricetracker.KimKhoaSourceName: "Kim Khoa"}
+
+// tableTitle is "Source · unit"; it always holds a space so Telegram never reads
+// the first pre line as a code-language tag.
+func tableTitle(source, unit, currency string) string {
+	if unit == "" {
+		unit = currency
+	}
+	suffix := " · " + cleanName(unit)
+	if a, ok := tableSourceAlias[source]; ok {
+		source = a
+	}
+	return truncRunes(cleanName(source), tableBudget-runeLen(suffix)) + suffix
+}
+
+func changeMark(v float64) string {
+	switch {
+	case v > 0:
+		return "+"
+	case v < 0:
+		return "-"
+	}
+	return " "
+}
+
+// goldSection renders each (unit, currency) run of shown rows as one table; it
+// reports whether any change mark was printed.
+func goldSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange) bool {
 	if len(prices) == 0 {
 		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
-		return
+		return false
 	}
-	b.WriteString(strings.Join(sectionHeader(source, len(prices)), "\n") + "\n")
 	idx := changeIndex(changes, source)
+	marks := false
+	flush := func(title string, group []pricetracker.Price) {
+		if len(group) == 0 {
+			return
+		}
+		buy, sell := tableCol{header: "Mua"}, tableCol{header: "Bán"}
+		raws := make([]string, len(group))
+		for i, p := range group {
+			c := idx[p.Type]
+			bm, sm := changeMark(c.BuyChange), changeMark(c.SellChange)
+			marks = marks || bm != " " || sm != " "
+			raws[i] = p.Type
+			buy.cells = append(buy.cells, formatPrice(p.BuyPrice)+bm)
+			sell.cells = append(sell.cells, formatPrice(p.SellPrice)+sm)
+		}
+		cols := []tableCol{buy, sell}
+		b.WriteString(renderTable(title, uniqueNames(raws, nameBudget(cols)), cols) + "\n")
+	}
+	var group []pricetracker.Price
 	prev := ""
 	for _, p := range prices {
 		if !showGold(source, p) {
 			continue
 		}
-		if u := unitLine(p.Currency, goldUnit(source, p)); u != prev {
-			b.WriteString(u + "\n")
-			prev = u
+		t := tableTitle(source, goldUnit(source, p), p.Currency)
+		if t != prev {
+			flush(prev, group)
+			group, prev = nil, t
 		}
-		b.WriteString(strings.Join(goldRowLines(p, idx[p.Type]), "\n") + "\n")
+		group = append(group, p)
 	}
-	b.WriteString("\n")
+	flush(prev, group)
+	return marks
 }
 
 var reportKeywords = []string{"9999", "tròn trơn", "sjc", "bitcoin", "ethereum", "bnb"}
@@ -361,40 +287,78 @@ func goldUnit(source string, p pricetracker.Price) string {
 	return p.Unit
 }
 
+func signedPercent(v float64) string {
+	s := fmt.Sprintf("%+.1f%%", v)
+	if s == "+0.0%" || s == "-0.0%" {
+		return "0.0%"
+	}
+	return s
+}
+
+// compactVND is "≈ 1,77 tỷ ₫" without the symbols and spaces: "1,77tỷ".
+func compactVND(usd, rate float64) string {
+	v := pricetracker.FormatVNDCompact(usd, rate)
+	v = strings.TrimSuffix(strings.TrimPrefix(v, "≈ "), " ₫")
+	return strings.ReplaceAll(v, " ", "")
+}
+
+func cryptoTicker(p pricetracker.Price) string {
+	u := cleanName(p.Unit)
+	if u != "" && !strings.Contains(u, " ") && runeLen(u) <= 6 {
+		return strings.ToUpper(u)
+	}
+	return p.Type
+}
+
 func cryptoSection(b *strings.Builder, source string, prices []pricetracker.Price, changes map[string][]pricetracker.PriceChange, vndRate float64) {
 	if len(prices) == 0 {
 		fmt.Fprintf(b, "*%s*\n• N/A\n\n", source)
 		return
 	}
-	hdr := sectionHeader(source, len(prices))
-	common := prices[0].Currency
-	for _, p := range prices {
-		if p.Currency != common {
-			common = ""
-		}
-	}
-	if common != "" {
-		hdr = append(hdr, unitLine(common, ""))
-	}
-	b.WriteString(strings.Join(hdr, "\n") + "\n")
 	idx := changeIndex(changes, source)
 	vndShown := false
+	flush := func(cur string, group []pricetracker.Price) {
+		if len(group) == 0 {
+			return
+		}
+		price, chg, vnd := tableCol{header: "price"}, tableCol{header: "change"}, tableCol{header: "VND"}
+		raws := make([]string, len(group))
+		any := false
+		for i, p := range group {
+			raws[i] = cryptoTicker(p)
+			price.cells = append(price.cells, formatPrice(p.BuyPrice))
+			c := ""
+			if v := idx[p.Type].BuyChange; v != 0 {
+				c = signedPercent(v)
+			}
+			chg.cells = append(chg.cells, c)
+			v := ""
+			if vndRate > 0 && cur == "USD" {
+				v = compactVND(p.BuyPrice, vndRate)
+			}
+			any = any || v != ""
+			vnd.cells = append(vnd.cells, v)
+		}
+		cols := []tableCol{price, chg}
+		if any {
+			cols = append(cols, vnd)
+			vndShown = true
+		}
+		b.WriteString(renderTable(tableTitle(source, "", cur), uniqueNames(raws, nameBudget(cols)), cols))
+	}
+	var group []pricetracker.Price
+	cur := ""
 	for _, p := range prices {
 		if !showCrypto(p) {
 			continue
 		}
-		suffix := ""
-		if common == "" {
-			suffix = " " + p.Currency
+		if p.Currency != cur {
+			flush(cur, group)
+			group, cur = nil, p.Currency
 		}
-		b.WriteString(strings.Join(cryptoRowLines(p, idx[p.Type], suffix), "\n") + "\n")
-		if vndRate > 0 && p.Currency == "USD" {
-			if v := pricetracker.FormatVNDCompact(p.BuyPrice, vndRate); v != "" {
-				b.WriteString(detailIndent + v + "\n")
-				vndShown = true
-			}
-		}
+		group = append(group, p)
 	}
+	flush(cur, group)
 	if vndShown {
 		b.WriteString(vndFooter + "\n")
 	}

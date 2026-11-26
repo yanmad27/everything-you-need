@@ -92,22 +92,18 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 			"Doji":                         other,
 		}, nil, nil)
 
-		for _, p := range kimKhoa {
-			line := "• " + p.Type + "\n"
-			if n := strings.Count(message, line); n != 1 {
-				t.Errorf("%q appears %d times, want 1\n%s", p.Type, n, message)
+		for _, want := range []string{"Kim Khoa · nghìn/chỉ", "KK 999.9 vĩ 11.670  11.800", "Trang 98%   11.400  11.700", "Nhẫn 97%    11.250  11.400"} {
+			if !strings.Contains(message, want) {
+				t.Errorf("Kim Khoa table missing %q\n%s", want, message)
 			}
 		}
-		if !strings.Contains(message, "• KIM KHOA 999.9 ÉP VĨ\n   Mua *11.670* / Bán *11.800*\n") || !strings.Contains(message, "💰 VND · nghìn/chỉ\n") {
-			t.Errorf("Kim Khoa row not rendered as expected\n%s", message)
-		}
-		if strings.Contains(message, "*0*") {
-			t.Errorf("no Kim Khoa row may render a 0 sell price\n%s", message)
+		if n := strings.Count(message, "KK 999.9"); n != 2 {
+			t.Errorf("Kim Khoa rows: %d\n%s", n, message)
 		}
 		if strings.Contains(message, "Vàng nhẫn 999.9") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
-		if !strings.Contains(message, "• SJC 1L\n") {
+		if !strings.Contains(message, "SJC 1L") {
 			t.Errorf("keyword row from another source must stay visible\n%s", message)
 		}
 	})

@@ -42,7 +42,7 @@ func TestPriceNotificationFearGreedLineAndFallback(t *testing.T) {
 	if n := strings.Count(with, line); n != 1 {
 		t.Fatalf("F&G line appears %d times:\n%s", n, with)
 	}
-	if strings.Index(with, line) < strings.Index(with, "Bitcoin") || !strings.Contains(with, "Automated update") {
+	if strings.Index(with, line) < strings.Index(with, "BTC") || !strings.Contains(with, "Automated update") {
 		t.Fatalf("F&G line must follow the crypto prices:\n%s", with)
 	}
 
@@ -52,7 +52,7 @@ func TestPriceNotificationFearGreedLineAndFallback(t *testing.T) {
 	defer oldOut()
 	got := fearGreedLine(stubFG{err: errors.New("upstream detail")})
 	without := generatePriceNotificationFG(cryptoPrices(), nil, nil, got)
-	if got != "" || strings.Contains(without, "Fear & Greed") || !strings.Contains(without, "Bitcoin") {
+	if got != "" || strings.Contains(without, "Fear & Greed") || !strings.Contains(without, "BTC") {
 		t.Fatalf("fallback wrong (line=%q):\n%s", got, without)
 	}
 	if n := strings.Count(strings.TrimSpace(logged.String()), "\n") + 1; n != 1 || !strings.Contains(logged.String(), "fear&greed unavailable") {
@@ -100,7 +100,7 @@ func TestGeneratePriceNotificationPinned(t *testing.T) {
 	m := generatePriceNotification(cryptoPrices(), nil, nil)
 	lines := strings.Split(m, "\n")
 	lines[1] = "<time>"
-	want := "📊 *Price Update*\n<time>\n\n*CoinGecko* (2 items)\n💵 USD\n• Bitcoin *68.000*\n• Ethereum *3.400*\n\n🤖 _Automated update_"
+	want := "📊 *Price Update*\n<time>\n\n```\nCoinGecko · USD  \n     price change\nBTC 68.000       \nETH  3.400       \n```\n\n🤖 _Automated update_"
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Fatalf("renderer changed:\n%q\nwant\n%q", got, want)
 	}
@@ -111,7 +111,7 @@ func TestPriceNotificationUnknownLabelFallback(t *testing.T) {
 	f := sampleFG()
 	f.Classification = ""
 	m := generatePriceNotificationFG(cryptoPrices(), nil, nil, f.Line())
-	if !strings.Contains(m, "📉 Fear & Greed: 30 — Không rõ · ▼3 so với hôm qua") || !strings.Contains(m, "Bitcoin") {
+	if !strings.Contains(m, "📉 Fear & Greed: 30 — Không rõ · ▼3 so với hôm qua") || !strings.Contains(m, "BTC") {
 		t.Fatalf("%s", m)
 	}
 }
