@@ -12,34 +12,39 @@ import (
 // visibleWidth is the test oracle for the 30-column target: Markdown markers are
 // ignored, emoji / flags / East Asian wide runes count 2, accents count 1.
 func visibleWidth(line string) int {
-	w := 0
+	total, cur := 0, 0 // cur: width of the unit being built
 	joined, prevRI := false, false
 	for _, r := range strings.NewReplacer("*", "", "_", "").Replace(line) {
 		ri := r >= 0x1F1E6 && r <= 0x1F1FF
 		switch {
-		case r == 0xFE0F || r == 0x200D || unicode.Is(unicode.Mn, r) || (r >= 0x1F3FB && r <= 0x1F3FF):
-			joined = r == 0x200D
-		case joined:
+		case r == 0xFE0F || r == 0x20E3:
+			total += 2 - cur
+			cur = 2
+		case r == 0x200D:
+			joined = true
+		case unicode.Is(unicode.Mn, r) || (r >= 0x1F3FB && r <= 0x1F3FF) || joined:
 			joined = false
 		case ri && prevRI:
 			prevRI = false
 			continue
-		case r >= 0x1F000 && r <= 0x1FAFF, r >= 0x2600 && r <= 0x27BF, r >= 0x2B00 && r <= 0x2BFF,
-			r >= 0x1100 && r <= 0x115F, r >= 0x2E80 && r <= 0xA4CF, r >= 0xAC00 && r <= 0xD7A3,
-			r >= 0xF900 && r <= 0xFAFF, r >= 0xFE30 && r <= 0xFE6F, r >= 0xFF00 && r <= 0xFF60,
-			r >= 0xFFE0 && r <= 0xFFE6, r >= 0x20000 && r <= 0x3FFFD:
-			w += 2
 		default:
-			w++
+			cur = 1
+			if ri || r >= 0x1F000 && r <= 0x1FAFF || r >= 0x2600 && r <= 0x27BF || r >= 0x2B00 && r <= 0x2BFF ||
+				r >= 0x1100 && r <= 0x115F || r >= 0x2E80 && r <= 0xA4CF || r >= 0xAC00 && r <= 0xD7A3 ||
+				r >= 0xF900 && r <= 0xFAFF || r >= 0xFE30 && r <= 0xFE6F || r >= 0xFF00 && r <= 0xFF60 ||
+				r >= 0xFFE0 && r <= 0xFFE6 || r >= 0x20000 && r <= 0x3FFFD {
+				cur = 2
+			}
+			total += cur
 		}
 		prevRI = ri
 	}
-	return w
+	return total
 }
 
 func TestVisibleWidthOracle(t *testing.T) {
 	for in, want := range map[string]int{
-		"abc": 3, "*abc* _x_": 5, "Vàng nhẫn Tròn Trơn": 19, "📈+1.2%": 7, "⚠️ *😱 F&G*": 9, "💰 VND": 6, "🇻🇳": 2, "🟠": 2, "👨‍👩‍👧": 2, "👍🏽": 2, "a👨‍👩‍👧b": 4, "✨⬛": 4, "": 0,
+		"abc": 3, "*abc* _x_": 5, "Vàng nhẫn Tròn Trơn": 19, "📈+1.2%": 7, "⚠️ *😱 F&G*": 9, "💰 VND": 6, "🇻🇳": 2, "↔️": 2, "↔": 1, "1️⃣": 2, "#️⃣": 2, "©️": 2, "©": 1, "ệ": 1, "e\u0323\u0302": 1, "20x" + strings.Repeat("↔️", 20): 43, "🟠": 2, "👨‍👩‍👧": 2, "👍🏽": 2, "a👨‍👩‍👧b": 4, "✨⬛": 4, "": 0,
 	} {
 		if got := visibleWidth(in); got != want {
 			t.Errorf("%q: %d want %d", in, got, want)
@@ -320,7 +325,7 @@ func TestRowFilterMatchesOriginal(t *testing.T) {
 
 func TestGuardWidthProperty(t *testing.T) {
 	rnd := rand.New(rand.NewSource(7))
-	pieces := []string{"Vàng", "miếng", "SJC", "9999", "NHẪN", "TRÒN", "TRƠN", "ĐẶC", "BIỆT", "🟠", "🔥", "👨‍👩‍👧", "🇻🇳", "👍🏽", "⚠️", "世界", "Supercalifragilisticexpialidocious-Wrapped-Token-Name", "BNB", "Bitcoin"}
+	pieces := []string{"Vàng", "miếng", "SJC", "9999", "NHẪN", "TRÒN", "TRƠN", "ĐẶC", "BIỆT", "🟠", "🔥", "👨‍👩‍👧", "🇻🇳", "👍🏽", "⚠️", "↔️", "1️⃣", "#️⃣", "©️", "ệ", "世界", "Supercalifragilisticexpialidocious-Wrapped-Token-Name", "BNB", "Bitcoin"}
 	digits := func() float64 {
 		n := 9 + rnd.Intn(4)
 		v := float64(1 + rnd.Intn(9))
@@ -354,4 +359,20 @@ func TestGuardWidthProperty(t *testing.T) {
 	for _, in := range []string{"   *Mua 1234567890123 📈+999.9% abc* tail", "*" + strings.Repeat("x", 80) + "*", strings.Repeat("🟠", 25), "• " + strings.Repeat("👨‍👩‍👧", 20)} {
 		assertCompact(t, "guard", guardWidth(in))
 	}
+}
+
+func TestDisplayWidthTable(t *testing.T) {
+	for in, want := range map[string]int{
+		"↔️": 2, "↔": 1, "1️⃣": 2, "#️⃣": 2, "©️": 2, "©": 1, "🇻🇳": 2, "👨‍👩‍👧": 2, "ệ": 1, "ệ": 1,
+		"*x*": 1, strings.Repeat("↔️", 20): 40, "a👍🏽b": 4,
+	} {
+		if got := displayWidth(in); got != want {
+			t.Errorf("displayWidth(%q)=%d want %d", in, got, want)
+		}
+		if got := visibleWidth(in); got != want {
+			t.Errorf("visibleWidth(%q)=%d want %d", in, got, want)
+		}
+	}
+	kk := map[string][]pricetracker.Price{pricetracker.KimKhoaSourceName: {{Type: strings.Repeat("↔️", 20) + " 1️⃣ #️⃣ ©️", Currency: "VND", Unit: "nghìn/chỉ", BuyPrice: 1, SellPrice: 2}}}
+	assertCompact(t, "keycap", generatePriceNotificationVND(kk, nil, nil, "", 0))
 }

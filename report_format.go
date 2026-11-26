@@ -22,39 +22,32 @@ func isJoiner(r rune) bool { return r == 0x200D }
 
 func isRegional(r rune) bool { return r >= 0x1F1E6 && r <= 0x1F1FF }
 
-// isCombining is zero-width and glues to the previous rune: VS16, skin-tone
-// modifiers and combining marks.
+// isCombining is zero-width and glues to the previous rune: VS16, keycap,
+// skin-tone modifiers and combining marks.
 func isCombining(r rune) bool {
-	return r == 0xFE0F || (r >= 0x1F3FB && r <= 0x1F3FF) || unicode.Is(unicode.Mn, r)
+	return r == 0xFE0F || r == 0x20E3 || (r >= 0x1F3FB && r <= 0x1F3FF) || unicode.Is(unicode.Mn, r)
 }
 
-// displayWidth is the on-screen width of s: Markdown markers are ignored, emoji
-// (including ZWJ sequences and flags) and East Asian wide runes count 2, VS16,
-// ZWJ and combining marks 0, everything else 1.
+// displayWidth is the on-screen width of s: Markdown markers are ignored; a display
+// unit (see clusters) counts 2 when it holds VS16 or a keycap, is a flag, or its
+// base is an emoji / East Asian wide rune, otherwise 1.
 func displayWidth(s string) int {
-	rs := []rune(s)
 	w := 0
-	joined := false
-	for i := 0; i < len(rs); i++ {
-		r := rs[i]
-		switch {
-		case r == '*' || r == '_' || isCombining(r):
-		case isJoiner(r):
-			joined = true
-		case joined:
-			joined = false
-		case isRegional(r):
-			w += 2
-			if i+1 < len(rs) && isRegional(rs[i+1]) {
-				i++
-			}
-		case isWide(r):
-			w += 2
-		default:
-			w++
-		}
+	for _, c := range clusters(strings.NewReplacer("*", "", "_", "").Replace(s)) {
+		w += clusterWidth(c)
 	}
 	return w
+}
+
+func clusterWidth(c string) int {
+	if strings.ContainsRune(c, 0xFE0F) || strings.ContainsRune(c, 0x20E3) {
+		return 2
+	}
+	r := []rune(c)[0]
+	if isRegional(r) || isWide(r) {
+		return 2
+	}
+	return 1
 }
 
 // clusters splits s into display units that must not be broken apart: a base
@@ -124,7 +117,7 @@ func guardWidth(msg string) string {
 				cur += c
 				continue
 			}
-			cw := displayWidth(c)
+			cw := clusterWidth(c)
 			if w+cw > maxReportWidth {
 				if lastSpace >= 0 && spaceW > displayWidth(indent) {
 					flush(lastSpace, cur[lastSpace:], boldAtSpace)
