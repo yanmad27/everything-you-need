@@ -1,6 +1,7 @@
 package pricetracker
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -13,8 +14,8 @@ import (
 	"unicode/utf8"
 )
 
-// DefaultKimKhoaURL is the Kim Khoa Cam Ranh price page on tuanquangdong.com.
-const DefaultKimKhoaURL = "https://tuanquangdong.com/gia-vang/kim-khoa-cam-ranh/"
+// DefaultKimKhoaURL is the JSON endpoint the kimkhoalegend.vn price page itself polls.
+const DefaultKimKhoaURL = "https://kimkhoalegend.vn/gold-price"
 
 // KimKhoaSourceName is the name this source reports; other packages use it to
 // recognise Kim Khoa rows.
@@ -23,17 +24,29 @@ const KimKhoaSourceName = "Kim Khoa Cam Ranh"
 // kimKhoaMinPurity is the lowest gold purity (percent) the source reports.
 const kimKhoaMinPurity = 97.0
 
+// kimKhoaMaxBody bounds the response body read from the upstream.
+const kimKhoaMaxBody = 1 << 20
+
+// Sane bounds (nghìn VND per chỉ) for a quoted price; full-đồng values such as
+// "11,670,000" are rejected, never converted.
+const (
+	kimKhoaMinAmount = 1000
+	kimKhoaMaxAmount = 100000
+)
+
+// kimKhoaMaxNameRunes caps the product name length.
+const kimKhoaMaxNameRunes = 100
+
 // kimKhoaCell matches cell content without crossing a closing tag.
 const kimKhoaCell = `((?:[^<]|<[^/])*)`
 
 var (
-	kimKhoaRowRe = regexp.MustCompile(`(?s)<tr[^>]*>\s*<td[^>]*class="[^"]*goldbox-product-name[^"]*"[^>]*>` + kimKhoaCell +
-		`</td>\s*<td[^>]*class="[^"]*goldbox-buy[^"]*"[^>]*>` + kimKhoaCell +
-		`</td>\s*<td[^>]*class="[^"]*goldbox-sell[^"]*"[^>]*>` + kimKhoaCell +
-		`</td>(?:\s*<td[^>]*>(?:[^<]|<[^/])*</td>)*\s*</tr>`)
+	kimKhoaRowRe = regexp.MustCompile(`(?s)<tr[^>]*>\s*<td[^>]*>` + kimKhoaCell +
+		`</td>\s*<td[^>]*>` + kimKhoaCell +
+		`</td>\s*<td[^>]*>` + kimKhoaCell + `</td>\s*</tr>`)
 	kimKhoaTagRe    = regexp.MustCompile(`<[^>]*>`)
 	kimKhoaNumberRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
-	kimKhoaAmountRe = regexp.MustCompile(`^\d{1,3}(\.\d{3})*\s*đ?$`)
+	kimKhoaAmountRe = regexp.MustCompile(`^\d{1,3}(,\d{3})?$`)
 )
 
 type KimKhoaSource struct {
@@ -62,23 +75,25 @@ func (k *KimKhoaSource) GetPrices() ([]Price, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 
 	resp, err := k.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch data from Kim Khoa Cam Ranh: %w", err)
+		return nil, fmt.Errorf("failed to fetch data from Kim Khoa Legend: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("page returned status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("Kim Khoa Legend returned status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, kimKhoaMaxBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	prices, err := parseKimKhoaPrices(string(body))
+	prices, err := parseKimKhoaPrices(body)
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +107,22 @@ func (k *KimKhoaSource) GetPrices() ([]Price, error) {
 	return prices, nil
 }
 
-// parseKimKhoaPrices extracts the price table rows and keeps gold products
-// with purity >= kimKhoaMinPurity.
-func parseKimKhoaPrices(page string) ([]Price, error) {
-	rows := kimKhoaRowRe.FindAllStringSubmatch(page, -1)
+// parseKimKhoaPrices decodes the /gold-price JSON payload, extracts the price
+// table rows from data.view and keeps gold products with purity >=
+// kimKhoaMinPurity that carry a valid buy and sell price (sell >= buy > 0).
+func parseKimKhoaPrices(payload []byte) ([]Price, error) {
+	var doc struct {
+		Data struct {
+			View string `json:"view"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return nil, fmt.Errorf("invalid Kim Khoa payload: %w", err)
+	}
+
+	rows := kimKhoaRowRe.FindAllStringSubmatch(doc.Data.View, -1)
 	if len(rows) == 0 {
-		return nil, fmt.Errorf("no price rows found on page")
+		return nil, fmt.Errorf("no price rows found in Kim Khoa payload")
 	}
 
 	var prices []Price
@@ -107,26 +132,23 @@ func parseKimKhoaPrices(page string) ([]Price, error) {
 			continue
 		}
 
-		buy := parseKimKhoaVND(row[2])
-		sell := parseKimKhoaVND(row[3])
-		if buy == 0 && sell == 0 {
+		buy, sell := parseKimKhoaAmount(row[2]), parseKimKhoaAmount(row[3])
+		if buy < kimKhoaMinAmount || buy > kimKhoaMaxAmount || sell < kimKhoaMinAmount || sell > kimKhoaMaxAmount || sell < buy {
 			continue
 		}
 
-		// Page prices are VND per chỉ; divide by 1000 to match the other
-		// sources (thousands of VND). A sell price of 0 means "not quoted"
-		// and is passed through as 0.
+		// Values are already thousands of VND per chỉ.
 		prices = append(prices, Price{
-			Type:      strings.ToUpper(name),
-			BuyPrice:  buy / 1000,
-			SellPrice: sell / 1000,
+			Type:      strings.ToUpper(sanitizeKimKhoaName(name)),
+			BuyPrice:  buy,
+			SellPrice: sell,
 			Unit:      "nghìn/chỉ",
 			Currency:  "VND",
 		})
 	}
 
 	if len(prices) == 0 {
-		return nil, fmt.Errorf("no gold products with purity >= %.0f%% found on page", kimKhoaMinPurity)
+		return nil, fmt.Errorf("no valid gold prices with purity >= %.0f%% in Kim Khoa payload", kimKhoaMinPurity)
 	}
 
 	return prices, nil
@@ -136,10 +158,10 @@ func parseKimKhoaPrices(page string) ([]Price, error) {
 // A fineness token (999.9 / 9999 → 99.99, 98 → 98, 610 → 61, 41.7 → 41.7)
 // wins over a karat label (24K → 100). Weights and counts ("1 chỉ",
 // "1.5 lượng", "10 gram") and karat labels outside (0, 24] are ignored.
-// Non-gold rows (silver) and gold rows with neither report false.
+// Silver rows and rows with neither report false.
 func kimKhoaGoldPurity(name string) (float64, bool) {
 	lower := strings.ToLower(name)
-	if !strings.HasPrefix(lower, "vàng") {
+	if strings.Contains(lower, "bạc") {
 		return 0, false
 	}
 
@@ -196,14 +218,33 @@ func cleanKimKhoaText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(s)), " ")
 }
 
-// parseKimKhoaVND parses a single amount like "13.530.000đ" into 13530000;
-// anything else (empty, several numbers, stray text) is 0.
-func parseKimKhoaVND(s string) float64 {
+// sanitizeKimKhoaName cleans an already tag-stripped product name for display
+// (purity is detected on the full name before this) and removes characters that are
+// active in Telegram/Zalo markdown, then caps its length.
+func sanitizeKimKhoaName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case '*', '_', '`', '[', ']', '~', '\\':
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > kimKhoaMaxNameRunes {
+		s = strings.TrimSpace(string(r[:kimKhoaMaxNameRunes]))
+	}
+	return s
+}
+
+// parseKimKhoaAmount parses a single amount like "11,670" into 11670;
+// anything else (empty, several numbers, stray text, signs, more than
+// two digit groups) is 0.
+func parseKimKhoaAmount(s string) float64 {
 	s = cleanKimKhoaText(s)
 	if !kimKhoaAmountRe.MatchString(s) {
 		return 0
 	}
-	v, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(strings.TrimSuffix(s, "đ")), ".", ""), 64)
+	v, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", ""), 64)
 	if err != nil {
 		return 0
 	}

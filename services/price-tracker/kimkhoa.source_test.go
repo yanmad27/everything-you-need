@@ -1,101 +1,187 @@
 package pricetracker
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
-// Trimmed from the real page (table.goldbox-table), captured 2026-10-06.
-const kimKhoaSampleHTML = `<div class="goldbox"><table class="goldbox-table"><thead><tr><th>Sản Phẩm</th><th>Mua (đ)</th><th>Bán (đ)</th></tr>
-</thead><tbody><tr><td class="goldbox-product-name">Vàng 999.9</td><td class="goldbox-price goldbox-buy">13.530.000đ</td><td class="goldbox-price goldbox-sell">13.710.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng 98 Kim Khoa 24k</td><td class="goldbox-price goldbox-buy">13.190.000đ</td><td class="goldbox-price goldbox-sell">13.350.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng 97</td><td class="goldbox-price goldbox-buy">12.970.000đ</td><td class="goldbox-price goldbox-sell">13.130.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng 96</td><td class="goldbox-price goldbox-buy">12.840.000đ</td><td class="goldbox-price goldbox-sell">13.000.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng Nữ Trang KK 98</td><td class="goldbox-price goldbox-buy">13.200.000đ</td><td class="goldbox-price goldbox-sell">13.530.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng NL Ngoài 9999</td><td class="goldbox-price goldbox-buy">13.480.000đ</td><td class="goldbox-price goldbox-sell">0</td></tr>
-<tr><td class="goldbox-product-name">Vàng NL Ngoài 999</td><td class="goldbox-price goldbox-buy">13.430.000đ</td><td class="goldbox-price goldbox-sell">0</td></tr>
-<tr><td class="goldbox-product-name">Vàng 41.7</td><td class="goldbox-price goldbox-buy">5.710.000đ</td><td class="goldbox-price goldbox-sell">6.020.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng 41.7 W (Trắng)</td><td class="goldbox-price goldbox-buy">5.760.000đ</td><td class="goldbox-price goldbox-sell">6.100.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng Kim Khoa 610</td><td class="goldbox-price goldbox-buy">8.170.000đ</td><td class="goldbox-price goldbox-sell">8.540.000đ</td></tr>
-<tr><td class="goldbox-product-name">Vàng Đúc</td><td class="goldbox-price goldbox-buy">8.310.000đ</td><td class="goldbox-price goldbox-sell">8.680.000đ</td></tr>
-<tr><td class="goldbox-product-name">Bạc Kim Khoa 1kilo Thỏi</td><td class="goldbox-price goldbox-buy">61.060.000đ</td><td class="goldbox-price goldbox-sell">63.600.000đ</td></tr>
-<tr><td class="goldbox-product-name">Bạc miếng 1L</td><td class="goldbox-price goldbox-buy">2.295.000đ</td><td class="goldbox-price goldbox-sell">2.390.000đ</td></tr>
-<tr><td class="goldbox-product-name">Trang Sức Bạc Kim Khoa</td><td class="goldbox-price goldbox-buy">130.000.000đ</td><td class="goldbox-price goldbox-sell">250.000.000đ</td></tr>
-</tbody></table></div>`
+// Fixture: testdata/kimkhoa/gold-price.json, a plain GET of
+// https://kimkhoalegend.vn/gold-price captured 2026-11-26T08:19:02Z
+// (payload last_update "14:45 26/11/2026"). See testdata/kimkhoa/CAPTURE.txt.
+func kimKhoaFixture(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile("testdata/kimkhoa/gold-price.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func kimKhoaPayload(rows ...[3]string) []byte {
+	var sb strings.Builder
+	sb.WriteString(`<table><thead><tr><th>Loại vàng</th><th>Mua vào</th><th>Bán ra</th></tr></thead><tbody>`)
+	for _, r := range rows {
+		fmt.Fprintf(&sb, `<tr><td>%s</td><td class="buy-price">%s</td><td class="sell-price">%s</td></tr>`, r[0], r[1], r[2])
+	}
+	sb.WriteString(`</tbody></table>`)
+	b, _ := json.Marshal(sb.String())
+	return []byte(`{"message":"success","data":{"view":` + string(b) + `,"last_update":"14:45 26/11/2026"}}`)
+}
 
 func TestKimKhoaSource_GetSourceName(t *testing.T) {
-	if name := NewKimKhoaSource("").GetSourceName(); name != KimKhoaSourceName {
-		t.Errorf("unexpected source name %q", name)
+	if got := NewKimKhoaSource("").GetSourceName(); got != KimKhoaSourceName {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestParseKimKhoaPrices_KeepsOnlyPurity97Plus(t *testing.T) {
-	prices, err := parseKimKhoaPrices(kimKhoaSampleHTML)
+func TestParseKimKhoaPrices_Fixture(t *testing.T) {
+	prices, err := parseKimKhoaPrices(kimKhoaFixture(t))
 	if err != nil {
-		t.Fatalf("parse failed: %v", err)
+		t.Fatal(err)
 	}
-
 	want := []Price{
-		{Type: "VÀNG 999.9", BuyPrice: 13530, SellPrice: 13710},
-		{Type: "VÀNG 98 KIM KHOA 24K", BuyPrice: 13190, SellPrice: 13350},
-		{Type: "VÀNG 97", BuyPrice: 12970, SellPrice: 13130},
-		{Type: "VÀNG NỮ TRANG KK 98", BuyPrice: 13200, SellPrice: 13530},
-		{Type: "VÀNG NL NGOÀI 9999", BuyPrice: 13480, SellPrice: 0}, // sell not quoted
-		{Type: "VÀNG NL NGOÀI 999", BuyPrice: 13430, SellPrice: 0},
+		{Type: "KIM KHOA 999.9 ÉP VĨ", BuyPrice: 11670, SellPrice: 11800},
+		{Type: "KIM KHOA 999.9", BuyPrice: 11650, SellPrice: 11800},
+		{Type: "NỮ TRANG 98%", BuyPrice: 11400, SellPrice: 11700},
+		{Type: "NHẪN 97%", BuyPrice: 11250, SellPrice: 11400},
 	}
 	if len(prices) != len(want) {
-		t.Fatalf("got %d prices, want %d: %+v", len(prices), len(want), prices)
+		t.Fatalf("got %d rows, want %d: %+v", len(prices), len(want), prices)
 	}
 	for i, w := range want {
 		g := prices[i]
-		if g.Type != w.Type || g.BuyPrice != w.BuyPrice || g.SellPrice != w.SellPrice {
+		if g.Type != w.Type || g.BuyPrice != w.BuyPrice || g.SellPrice != w.SellPrice || g.Unit != "nghìn/chỉ" || g.Currency != "VND" {
 			t.Errorf("row %d: got %+v, want %+v", i, g, w)
 		}
-		if g.Currency != "VND" || g.Unit != "nghìn/chỉ" {
-			t.Errorf("row %d: unexpected currency/unit %q/%q", i, g.Currency, g.Unit)
+	}
+}
+
+func TestParseKimKhoaPrices_DropsInvalidRows(t *testing.T) {
+	good := [3]string{"KIM KHOA 999.9", "11,650", "11,800"}
+	bad := [][3]string{
+		{"Vàng 999.9 A", "11,650", ""},
+		{"Vàng 999.9 B", "11,650", "0"},
+		{"Vàng 999.9 C", "11,650", "-11,800"},
+		{"Vàng 999.9 D", "-11,650", "11,800"},
+		{"Vàng 999.9 E", "11,650", "abc"},
+		{"Vàng 999.9 F", "11,650", "11.800"},
+		{"Vàng 999.9 G", "11,650", "11,800 11,900"},
+		{"Vàng 999.9 H", "0", "11,800"},
+		{"Vàng 999.9 I", "11,800", "11,650"},
+		{"Vàng 999.9 J", "11,670,000", "11,800,000"},
+		{"Vàng 999.9 K", "11,650", "11,800,000"},
+		{"Vàng 999.9 L", "999", "1,100"},
+		{"Vàng 999.9 M", "11,650", "100,001"},
+		{"Nhẫn 96%", "11,000", "11,100"},
+		{"Bạc 999.9", "1,000", "1,100"},
+	}
+	for _, b := range bad {
+		prices, err := parseKimKhoaPrices(kimKhoaPayload(good, b))
+		if err != nil {
+			t.Fatalf("%v: %v", b, err)
+		}
+		if len(prices) != 1 || prices[0].Type != "KIM KHOA 999.9" {
+			t.Errorf("%v must be dropped, got %+v", b, prices)
 		}
 	}
 }
 
-func TestParseKimKhoaPrices_NoRows(t *testing.T) {
-	if _, err := parseKimKhoaPrices("<html></html>"); err == nil {
-		t.Error("expected error when page has no price rows")
+func TestParseKimKhoaPrices_Errors(t *testing.T) {
+	cases := map[string][]byte{
+		"all invalid":     kimKhoaPayload([3]string{"Vàng 999.9", "11,650", "0"}, [3]string{"Nhẫn 97%", "", "11,400"}),
+		"all full-dong":   kimKhoaPayload([3]string{"Vàng 999.9", "11,670,000", "11,800,000"}, [3]string{"Nhẫn 97%", "11,250,000", "11,400,000"}),
+		"no rows":         kimKhoaPayload(),
+		"changed schema":  []byte(`{"message":"success","data":{"rows":[{"name":"Vàng 999.9","buy":11650,"sell":11800}]}}`),
+		"missing data":    []byte(`{"message":"success"}`),
+		"not json":        []byte(`<html>blocked</html>`),
+		"short rows only": []byte(`{"data":{"view":"<table><tr><td>Vàng 999.9</td><td>11,650</td></tr></table>"}}`),
+		"empty":           nil,
+		"view not string": []byte(`{"data":{"view":42}}`),
+	}
+	for name, body := range cases {
+		prices, err := parseKimKhoaPrices(body)
+		if err == nil || len(prices) != 0 {
+			t.Errorf("%s: want error and no prices, got %+v, %v", name, prices, err)
+		}
 	}
 }
 
-func TestParseKimKhoaPrices_NothingSurvivesFilter(t *testing.T) {
-	page := `<table><tr><td class="goldbox-product-name">Vàng 96</td><td class="goldbox-price goldbox-buy">1.000.000đ</td><td class="goldbox-price goldbox-sell">1.100.000đ</td></tr></table>`
-	if _, err := parseKimKhoaPrices(page); err == nil {
-		t.Error("expected error when no product reaches the purity threshold")
+func TestParseKimKhoaPrices_SanitizesName(t *testing.T) {
+	long := "Vàng 999.9 " + strings.Repeat("x", 200)
+	prices, err := parseKimKhoaPrices(kimKhoaPayload(
+		[3]string{"KIM KHOA 999.9 [x](http://evil) *b* _i_ `c`", "11,650", "11,800"},
+		[3]string{long, "11,650", "11,800"}))
+	if err != nil || len(prices) != 2 {
+		t.Fatalf("got %+v, %v", prices, err)
+	}
+	if want := "KIM KHOA 999.9 X(HTTP://EVIL) B I C"; prices[0].Type != want {
+		t.Errorf("got %q, want %q", prices[0].Type, want)
+	}
+	if n := len([]rune(prices[1].Type)); n > 100 {
+		t.Errorf("name not capped: %d runes", n)
 	}
 }
 
-func TestParseKimKhoaPrices_ExtraCellDoesNotFuseDigits(t *testing.T) {
-	page := `<table><tr><td class="goldbox-product-name">Vàng 97</td><td class="goldbox-price goldbox-buy">12.970.000đ</td><td class="goldbox-price goldbox-sell">13.130.000đ</td><td class="chg">▲ 50.000</td></tr></table>`
-	prices, err := parseKimKhoaPrices(page)
-	if err != nil {
-		t.Fatalf("parse failed: %v", err)
+func TestParseKimKhoaPrices_PurityUsesFullName(t *testing.T) {
+	name := "Vàng 24K " + strings.Repeat("x", 100) + " 610"
+	if _, err := parseKimKhoaPrices(kimKhoaPayload([3]string{name, "11,650", "11,800"})); err == nil {
+		t.Fatal("61% row hidden behind a long name must be dropped")
 	}
-	if len(prices) != 1 || prices[0].BuyPrice != 12970 || prices[0].SellPrice != 13130 {
-		t.Errorf("unexpected prices: %+v", prices)
+	prices, err := parseKimKhoaPrices(kimKhoaPayload([3]string{"Nhẫn 97% ~a~ b\\c", "11,650", "11,800"}))
+	if err != nil || prices[0].Type != "NHẪN 97% A BC" {
+		t.Fatalf("got %+v, %v", prices, err)
 	}
 }
 
-func TestParseKimKhoaVND(t *testing.T) {
+func TestParseKimKhoaPrices_PartialLayoutChange(t *testing.T) {
+	view := `<table><tr><td>Vàng 999.9 short</td><td>11,650</td></tr><tr><td>KIM KHOA 999.9</td><td>11,650</td><td>11,800</td></tr></table>`
+	b, _ := json.Marshal(view)
+	prices, err := parseKimKhoaPrices([]byte(`{"data":{"view":` + string(b) + `}}`))
+	if err != nil || len(prices) != 1 || prices[0].Type != "KIM KHOA 999.9" {
+		t.Fatalf("got %+v, %v", prices, err)
+	}
+}
+
+func TestParseKimKhoaAmount(t *testing.T) {
 	cases := map[string]float64{
-		"13.530.000đ":       13530000,
-		" 13.530.000 đ ":    13530000,
-		"0":                 0,
-		"":                  0,
-		"13.130.000đ 50":    0,
-		"13.130.000đ50.000": 0,
-		"abc":               0,
-		"1.2.3":             0,
+		"11,670": 11670, " 11,800 ": 11800, "950": 950, "1,234,567": 0, "999,999": 999999,
+		"": 0, "0": 0, "-5": 0, "11.670": 0, "11,67": 0, "1,2345": 0, "abc": 0, "11,670 11,800": 0, "11,670đ": 0,
 	}
 	for in, want := range cases {
-		if got := parseKimKhoaVND(in); got != want {
+		if got := parseKimKhoaAmount(in); got != want {
 			t.Errorf("%q: got %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestKimKhoaSource_GetPrices_Server(t *testing.T) {
+	fixture := kimKhoaFixture(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/err" {
+			http.Error(w, "boom", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(fixture)
+	}))
+	defer srv.Close()
+
+	prices, err := NewKimKhoaSource(srv.URL).GetPrices()
+	if err != nil || len(prices) != 4 {
+		t.Fatalf("got %d prices, err %v", len(prices), err)
+	}
+	for _, p := range prices {
+		if p.Source != KimKhoaSourceName || p.Timestamp.IsZero() || p.SellPrice <= 0 {
+			t.Errorf("bad row %+v", p)
+		}
+	}
+	if _, err := NewKimKhoaSource(srv.URL + "/err").GetPrices(); err == nil {
+		t.Fatal("non-200 must error")
 	}
 }
 
@@ -127,6 +213,10 @@ func TestKimKhoaGoldPurity(t *testing.T) {
 		"Vàng 96 K":               {0, false},
 		"Vàng 98k":                {0, false},
 		"Vàng 1 chỉ":              {0, false},
+		"KIM KHOA 999.9 ép vĩ":    {99.99, true},
+		"Nữ trang 98%":            {98, true},
+		"Nhẫn 97%":                {97, true},
+		"Nhẫn 96%":                {96, true},
 	}
 	for name, c := range cases {
 		got, ok := kimKhoaGoldPurity(name)

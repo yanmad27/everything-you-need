@@ -65,18 +65,17 @@ func TestGenerateGoldWatchNotification(t *testing.T) {
 	})
 }
 
-// kimKhoaFixture mirrors the rows the Kim Khoa source keeps from the live page.
+// kimKhoaFixture mirrors the rows the Kim Khoa source keeps from the live
+// payload (kimkhoalegend.vn/gold-price, captured 2026-11-26).
 func kimKhoaFixture() []pricetracker.Price {
 	row := func(name string, buy, sell float64) pricetracker.Price {
 		return pricetracker.Price{Type: name, BuyPrice: buy, SellPrice: sell, Unit: "nghìn/chỉ", Currency: "VND", Source: pricetracker.KimKhoaSourceName}
 	}
 	return []pricetracker.Price{
-		row("VÀNG 999.9", 13530, 13710),
-		row("VÀNG 98 KIM KHOA 24K", 13190, 13350),
-		row("VÀNG 97", 12970, 13130),
-		row("VÀNG NỮ TRANG KK 98", 13200, 13530),
-		row("VÀNG NL NGOÀI 9999", 13480, 0),
-		row("VÀNG NL NGOÀI 999", 13430, 0),
+		row("KIM KHOA 999.9 ÉP VĨ", 11670, 11800),
+		row("KIM KHOA 999.9", 11650, 11800),
+		row("NỮ TRANG 98%", 11400, 11700),
+		row("NHẪN 97%", 11250, 11400),
 	}
 }
 
@@ -99,8 +98,11 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 				t.Errorf("%q appears %d times, want 1\n%s", p.Type, n, message)
 			}
 		}
-		if !strings.Contains(message, "*13.480* - *0* - VÀNG NL NGOÀI 9999\n") {
-			t.Errorf("sell 0 row not rendered as expected\n%s", message)
+		if !strings.Contains(message, "*11.670* - *11.800* - KIM KHOA 999.9 ÉP VĨ\n") {
+			t.Errorf("Kim Khoa row not rendered as expected\n%s", message)
+		}
+		if strings.Contains(message, "- *0* -") {
+			t.Errorf("no Kim Khoa row may render a 0 sell price\n%s", message)
 		}
 		if strings.Contains(message, "Vàng nhẫn 999.9") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)

@@ -1,0 +1,3 @@
+Plain curl GET https://kimkhoalegend.vn/gold-price (the endpoint the home page's inline script calls, polled every 20s)
+Captured: 2026-11-26T08:19:02Z (15:19 +07). Payload last_update: "14:45 26/11/2026".
+Units: values are nghìn VND per chỉ (header says "VNĐ/Chỉ", 11,670 = 11.67M VND/chỉ).

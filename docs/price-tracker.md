@@ -56,11 +56,12 @@ type PriceService struct {
 
 ## 📊 Available Sources
 
-### Kim Khoa Cam Ranh Source (disabled)
-- **Status**: disabled (`price_sources.kimkhoa.enabled: false` in `config.docker.yaml` and the built-in default) until a reliable upstream exists. The parser and tests are kept; to re-enable set `enabled: true` (and `url`) or env `PRICE_SOURCES_KIMKHOA_ENABLED=true`.
-- **Description**: Gold prices of Kim Khoa (Cam Ranh), scraped from the HTML price table
-- **Page**: `https://tuanquangdong.com/gia-vang/kim-khoa-cam-ranh/`
-- **Filter**: only gold products with purity ≥ 97% (999.9, 9999, 999, 98, 97); lower purities and silver are dropped; a sell price of 0 on the page means not quoted and is reported as 0
+### Kim Khoa Cam Ranh Source
+- **Status**: enabled (`price_sources.kimkhoa.enabled: true` in `config.docker.yaml` and the built-in default); disable with `PRICE_SOURCES_KIMKHOA_ENABLED=false`.
+- **Description**: The shop's own prices (Kim Khoa Legend), read from the JSON endpoint its home page polls every 20s
+- **Endpoint**: `https://kimkhoalegend.vn/gold-price` (`data.view` is an HTML table, `data.last_update` the shop's update time); values are nghìn VND per chỉ
+- **Filter**: only gold products with purity ≥ 97% (999.9, 98%, 97%); lower purities and silver are dropped. Rows with a missing, zero, negative or malformed buy/sell, or sell < buy, are dropped (never emitted as 0); if nothing valid remains the source returns an error
+- **Fixture**: `services/price-tracker/testdata/kimkhoa/` (capture time in `CAPTURE.txt`)
 - **Usage**:
   ```go
   kimKhoaSource := pricetracker.NewKimKhoaSource("") // empty → DefaultKimKhoaURL

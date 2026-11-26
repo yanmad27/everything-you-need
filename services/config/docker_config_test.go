@@ -119,8 +119,8 @@ func TestTelegramReactionsDefaultAndEnv(t *testing.T) {
 	}
 }
 
-// Kim Khoa is off both in the baked docker config and when the key is absent.
-func TestKimKhoaDisabled(t *testing.T) {
+// Kim Khoa is on both in the baked docker config and when the key is absent.
+func TestKimKhoaEnabled(t *testing.T) {
 	src, err := os.ReadFile(filepath.Join("..", "..", "config.docker.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -130,8 +130,8 @@ func TestKimKhoaDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	if cfg := LoadConfig(); cfg == nil || cfg.PriceSources.KimKhoa.Enabled {
-		t.Fatalf("docker config must leave kimkhoa disabled, got %+v", cfg)
+	if cfg := LoadConfig(); cfg == nil || !cfg.PriceSources.KimKhoa.Enabled || cfg.PriceSources.KimKhoa.URL != "https://kimkhoalegend.vn/gold-price" {
+		t.Fatalf("docker config must enable kimkhoa with the kimkhoalegend.vn URL, got %+v", cfg)
 	}
 
 	empty := t.TempDir()
@@ -139,7 +139,7 @@ func TestKimKhoaDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(empty)
-	if cfg := LoadConfig(); cfg == nil || cfg.PriceSources.KimKhoa.Enabled {
-		t.Fatalf("missing kimkhoa key must mean disabled, got %+v", cfg)
+	if cfg := LoadConfig(); cfg == nil || !cfg.PriceSources.KimKhoa.Enabled || cfg.PriceSources.KimKhoa.URL != "https://kimkhoalegend.vn/gold-price" {
+		t.Fatalf("missing kimkhoa key must mean enabled with default URL, got %+v", cfg)
 	}
 }
