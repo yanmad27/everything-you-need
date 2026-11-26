@@ -49,6 +49,12 @@ type FearGreedInfo struct {
 	Change    int // today - yesterday
 }
 
+// fearGreedExtremeNote is appended to the tool result only for Extreme Fear
+// (<=25) or Extreme Greed (>=75). The tool output is model input, so emphasis
+// is requested explicitly. Tools exist only on the Zalo path, which renders
+// markdown (**bold**); the emoji alone survives any plain-text fallback.
+const fearGreedExtremeNote = "⚠️ MỨC CỰC ĐOAN: khi trả lời, nhắc tới chỉ số này bằng một câu in đậm (**...**) mở đầu bằng ⚠️. Chỉ số ở mức khác thì không nhấn mạnh.\n"
+
 var fearGreedLabels = map[string]string{"Extreme Fear": "Sợ hãi tột độ", "Fear": "Sợ hãi", "Neutral": "Trung lập",
 	"Greed": "Tham lam", "Extreme Greed": "Tham lam tột độ"}
 
@@ -272,6 +278,9 @@ func (s *Service) buildTools() []toolImpl {
 					label = vn + " (" + f.Class + ")"
 				}
 				fmt.Fprintf(&b, "Fear & Greed: %d/100\nNhãn: %s\nNgày: %s\n", f.Value, label, f.Date.UTC().Format("2006-01-02"))
+				if f.Value <= 25 || f.Value >= 75 {
+					b.WriteString(fearGreedExtremeNote)
+				}
 				if f.HasChange {
 					fmt.Fprintf(&b, "Thay đổi so với hôm qua: %+d\n", f.Change)
 				} else {

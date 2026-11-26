@@ -93,6 +93,18 @@ Rate semantics (fixed constants, no configuration):
 - When the rate is unavailable the message is sent with USD only; it never fails and never shows a
   zero or wrong VND value.
 
+### Fear & Greed emphasis
+
+The crypto Fear & Greed index is emphasized only when it is Extreme Fear (<= 25) or Extreme
+Greed (>= 75); 26-74 render exactly as before. Presentation is per channel:
+
+- Scheduled price report (Telegram legacy `Markdown`): `⚠️ *😱 Fear & Greed: 20 — ...*` (bold + emoji).
+- `/fng` and `/feargreed` direct reply (Telegram, plain `SendReply`): `⚠️ ` prefix only, no markup.
+- Chat `fear_greed_index` tool (Zalo, `SendMarkdown`): the tool output is model input, so for
+  extreme values it appends an explicit instruction note (leading `⚠️`) asking the model to state the
+  index in a bold `**...**` sentence starting with `⚠️`. Emphasis there depends on the model following
+  the note; the note is absent at 26-74.
+
 ### Doji Source
 - **Description**: Vietnamese gold and silver price provider
 - **API**: `https://banggia.doji.vn/api/TablePrice/GetTablePrice` (backs https://banggia.doji.vn/gold-price)

@@ -274,7 +274,7 @@ func registerJobs(scheduler *jobscheduler.JobScheduler, priceService *pricetrack
 	}
 }
 
-// fearGreedLine returns the Telegram Fear & Greed line, or "" (after one log
+// fearGreedLine returns the Telegram (legacy Markdown) Fear & Greed line, or "" (after one log
 // line) when the source is unavailable, so the price message still renders.
 func fearGreedLine(src fearGreedGetter) string {
 	if src == nil {
@@ -287,7 +287,7 @@ func fearGreedLine(src fearGreedGetter) string {
 		log.Printf("fear&greed unavailable for price update: %v", err)
 		return ""
 	}
-	return f.Line()
+	return f.TelegramMarkdownLine()
 }
 
 func generatePriceNotification(allPrices map[string][]pricetracker.Price, changes map[string][]pricetracker.PriceChange, err error) string {

@@ -26,7 +26,7 @@ type stubFG struct {
 func (s stubFG) Get(context.Context) (pricetracker.FearGreed, error) { return s.f, s.err }
 
 func sampleFG() pricetracker.FearGreed {
-	return pricetracker.FearGreed{Value: 25, Classification: "Fear", Date: time.Date(2025, 11, 3, 0, 0, 0, 0, time.UTC), HasPrev: true, Change: -3}
+	return pricetracker.FearGreed{Value: 30, Classification: "Fear", Date: time.Date(2025, 11, 3, 0, 0, 0, 0, time.UTC), HasPrev: true, Change: -3}
 }
 
 func cryptoPrices() map[string][]pricetracker.Price {
@@ -111,7 +111,7 @@ func TestPriceNotificationUnknownLabelFallback(t *testing.T) {
 	f := sampleFG()
 	f.Classification = ""
 	m := generatePriceNotificationFG(cryptoPrices(), nil, nil, f.Line())
-	if !strings.Contains(m, "📉 Fear & Greed: 25 — Không rõ · ▼3 so với hôm qua") || !strings.Contains(m, "Bitcoin") {
+	if !strings.Contains(m, "📉 Fear & Greed: 30 — Không rõ · ▼3 so với hôm qua") || !strings.Contains(m, "Bitcoin") {
 		t.Fatalf("%s", m)
 	}
 }
@@ -120,7 +120,7 @@ func TestFearGreedCommandReply(t *testing.T) {
 	var sent []string
 	send := func(s string) error { sent = append(sent, s); return nil }
 	replyFearGreed(context.Background(), stubFG{f: sampleFG()}, send)
-	if len(sent) != 1 || sent[0] != "😨 Fear & Greed: 25 — Sợ hãi (Fear) · ▼3 so với hôm qua" {
+	if len(sent) != 1 || sent[0] != "😨 Fear & Greed: 30 — Sợ hãi (Fear) · ▼3 so với hôm qua" {
 		t.Fatalf("%q", sent)
 	}
 	var logged strings.Builder
