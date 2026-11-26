@@ -73,6 +73,10 @@ func TestParseKimKhoaPrices_DropsInvalidRows(t *testing.T) {
 		{"Vàng 999.9 G", "11,650", "11,800 11,900"},
 		{"Vàng 999.9 H", "0", "11,800"},
 		{"Vàng 999.9 I", "11,800", "11,650"},
+		{"Vàng 999.9 J", "11,670,000", "11,800,000"},
+		{"Vàng 999.9 K", "11,650", "11,800,000"},
+		{"Vàng 999.9 L", "999", "1,100"},
+		{"Vàng 999.9 M", "11,650", "100,001"},
 		{"Nhẫn 96%", "11,000", "11,100"},
 		{"Bạc 999.9", "1,000", "1,100"},
 	}
@@ -90,10 +94,12 @@ func TestParseKimKhoaPrices_DropsInvalidRows(t *testing.T) {
 func TestParseKimKhoaPrices_Errors(t *testing.T) {
 	cases := map[string][]byte{
 		"all invalid":     kimKhoaPayload([3]string{"Vàng 999.9", "11,650", "0"}, [3]string{"Nhẫn 97%", "", "11,400"}),
+		"all full-dong":   kimKhoaPayload([3]string{"Vàng 999.9", "11,670,000", "11,800,000"}, [3]string{"Nhẫn 97%", "11,250,000", "11,400,000"}),
 		"no rows":         kimKhoaPayload(),
 		"changed schema":  []byte(`{"message":"success","data":{"rows":[{"name":"Vàng 999.9","buy":11650,"sell":11800}]}}`),
 		"missing data":    []byte(`{"message":"success"}`),
 		"not json":        []byte(`<html>blocked</html>`),
+		"short rows only": []byte(`{"data":{"view":"<table><tr><td>Vàng 999.9</td><td>11,650</td></tr></table>"}}`),
 		"empty":           nil,
 		"view not string": []byte(`{"data":{"view":42}}`),
 	}
@@ -105,9 +111,34 @@ func TestParseKimKhoaPrices_Errors(t *testing.T) {
 	}
 }
 
+func TestParseKimKhoaPrices_SanitizesName(t *testing.T) {
+	long := "Vàng 999.9 " + strings.Repeat("x", 200)
+	prices, err := parseKimKhoaPrices(kimKhoaPayload(
+		[3]string{"KIM KHOA 999.9 [x](http://evil) *b* _i_ `c`", "11,650", "11,800"},
+		[3]string{long, "11,650", "11,800"}))
+	if err != nil || len(prices) != 2 {
+		t.Fatalf("got %+v, %v", prices, err)
+	}
+	if want := "KIM KHOA 999.9 X(HTTP://EVIL) B I C"; prices[0].Type != want {
+		t.Errorf("got %q, want %q", prices[0].Type, want)
+	}
+	if n := len([]rune(prices[1].Type)); n > 100 {
+		t.Errorf("name not capped: %d runes", n)
+	}
+}
+
+func TestParseKimKhoaPrices_PartialLayoutChange(t *testing.T) {
+	view := `<table><tr><td>Vàng 999.9 short</td><td>11,650</td></tr><tr><td>KIM KHOA 999.9</td><td>11,650</td><td>11,800</td></tr></table>`
+	b, _ := json.Marshal(view)
+	prices, err := parseKimKhoaPrices([]byte(`{"data":{"view":` + string(b) + `}}`))
+	if err != nil || len(prices) != 1 || prices[0].Type != "KIM KHOA 999.9" {
+		t.Fatalf("got %+v, %v", prices, err)
+	}
+}
+
 func TestParseKimKhoaAmount(t *testing.T) {
 	cases := map[string]float64{
-		"11,670": 11670, " 11,800 ": 11800, "950": 950, "1,234,567": 1234567,
+		"11,670": 11670, " 11,800 ": 11800, "950": 950, "1,234,567": 0, "999,999": 999999,
 		"": 0, "0": 0, "-5": 0, "11.670": 0, "11,67": 0, "1,2345": 0, "abc": 0, "11,670 11,800": 0, "11,670đ": 0,
 	}
 	for in, want := range cases {

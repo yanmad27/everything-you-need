@@ -27,6 +27,16 @@ const kimKhoaMinPurity = 97.0
 // kimKhoaMaxBody bounds the response body read from the upstream.
 const kimKhoaMaxBody = 1 << 20
 
+// Sane bounds (nghìn VND per chỉ) for a quoted price; full-đồng values such as
+// "11,670,000" are rejected, never converted.
+const (
+	kimKhoaMinAmount = 1000
+	kimKhoaMaxAmount = 100000
+)
+
+// kimKhoaMaxNameRunes caps the product name length.
+const kimKhoaMaxNameRunes = 100
+
 // kimKhoaCell matches cell content without crossing a closing tag.
 const kimKhoaCell = `((?:[^<]|<[^/])*)`
 
@@ -36,7 +46,7 @@ var (
 		`</td>\s*<td[^>]*>` + kimKhoaCell + `</td>\s*</tr>`)
 	kimKhoaTagRe    = regexp.MustCompile(`<[^>]*>`)
 	kimKhoaNumberRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
-	kimKhoaAmountRe = regexp.MustCompile(`^\d{1,3}(,\d{3})*$`)
+	kimKhoaAmountRe = regexp.MustCompile(`^\d{1,3}(,\d{3})?$`)
 )
 
 type KimKhoaSource struct {
@@ -117,13 +127,13 @@ func parseKimKhoaPrices(payload []byte) ([]Price, error) {
 
 	var prices []Price
 	for _, row := range rows {
-		name := cleanKimKhoaText(row[1])
+		name := sanitizeKimKhoaName(row[1])
 		if purity, ok := kimKhoaGoldPurity(name); !ok || purity < kimKhoaMinPurity {
 			continue
 		}
 
 		buy, sell := parseKimKhoaAmount(row[2]), parseKimKhoaAmount(row[3])
-		if buy <= 0 || sell <= 0 || sell < buy {
+		if buy < kimKhoaMinAmount || buy > kimKhoaMaxAmount || sell < kimKhoaMinAmount || sell > kimKhoaMaxAmount || sell < buy {
 			continue
 		}
 
@@ -208,8 +218,26 @@ func cleanKimKhoaText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(s)), " ")
 }
 
+// sanitizeKimKhoaName cleans a product name and removes characters that are
+// active in Telegram/Zalo markdown, then caps its length.
+func sanitizeKimKhoaName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case '*', '_', '`', '[', ']':
+			return -1
+		}
+		return r
+	}, cleanKimKhoaText(s))
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > kimKhoaMaxNameRunes {
+		s = strings.TrimSpace(string(r[:kimKhoaMaxNameRunes]))
+	}
+	return s
+}
+
 // parseKimKhoaAmount parses a single amount like "11,670" into 11670;
-// anything else (empty, several numbers, stray text, signs) is 0.
+// anything else (empty, several numbers, stray text, signs, more than
+// two digit groups) is 0.
 func parseKimKhoaAmount(s string) float64 {
 	s = cleanKimKhoaText(s)
 	if !kimKhoaAmountRe.MatchString(s) {
