@@ -127,7 +127,7 @@ func parseKimKhoaPrices(payload []byte) ([]Price, error) {
 
 	var prices []Price
 	for _, row := range rows {
-		name := sanitizeKimKhoaName(row[1])
+		name := cleanKimKhoaText(row[1])
 		if purity, ok := kimKhoaGoldPurity(name); !ok || purity < kimKhoaMinPurity {
 			continue
 		}
@@ -139,7 +139,7 @@ func parseKimKhoaPrices(payload []byte) ([]Price, error) {
 
 		// Values are already thousands of VND per chỉ.
 		prices = append(prices, Price{
-			Type:      strings.ToUpper(name),
+			Type:      strings.ToUpper(sanitizeKimKhoaName(name)),
 			BuyPrice:  buy,
 			SellPrice: sell,
 			Unit:      "nghìn/chỉ",
@@ -218,16 +218,17 @@ func cleanKimKhoaText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(s)), " ")
 }
 
-// sanitizeKimKhoaName cleans a product name and removes characters that are
+// sanitizeKimKhoaName cleans an already tag-stripped product name for display
+// (purity is detected on the full name before this) and removes characters that are
 // active in Telegram/Zalo markdown, then caps its length.
 func sanitizeKimKhoaName(s string) string {
 	s = strings.Map(func(r rune) rune {
 		switch r {
-		case '*', '_', '`', '[', ']':
+		case '*', '_', '`', '[', ']', '~', '\\':
 			return -1
 		}
 		return r
-	}, cleanKimKhoaText(s))
+	}, s)
 	s = strings.Join(strings.Fields(s), " ")
 	if r := []rune(s); len(r) > kimKhoaMaxNameRunes {
 		s = strings.TrimSpace(string(r[:kimKhoaMaxNameRunes]))

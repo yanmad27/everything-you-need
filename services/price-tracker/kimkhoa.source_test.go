@@ -127,6 +127,17 @@ func TestParseKimKhoaPrices_SanitizesName(t *testing.T) {
 	}
 }
 
+func TestParseKimKhoaPrices_PurityUsesFullName(t *testing.T) {
+	name := "Vàng 24K " + strings.Repeat("x", 100) + " 610"
+	if _, err := parseKimKhoaPrices(kimKhoaPayload([3]string{name, "11,650", "11,800"})); err == nil {
+		t.Fatal("61% row hidden behind a long name must be dropped")
+	}
+	prices, err := parseKimKhoaPrices(kimKhoaPayload([3]string{"Nhẫn 97% ~a~ b\\c", "11,650", "11,800"}))
+	if err != nil || prices[0].Type != "NHẪN 97% A BC" {
+		t.Fatalf("got %+v, %v", prices, err)
+	}
+}
+
 func TestParseKimKhoaPrices_PartialLayoutChange(t *testing.T) {
 	view := `<table><tr><td>Vàng 999.9 short</td><td>11,650</td></tr><tr><td>KIM KHOA 999.9</td><td>11,650</td><td>11,800</td></tr></table>`
 	b, _ := json.Marshal(view)
