@@ -51,7 +51,7 @@ func TestCryptoNotificationVNDTelegramPayload(t *testing.T) {
 		t.Fatalf("%v", c.bodies)
 	}
 	got, usd := c.bodies[0]["text"].(string), c.bodies[1]["text"].(string)
-	if !strings.Contains(got, "• 💵 USD: *68.000* - Bitcoin — ≈ 1.797.512.000 ₫ (USDT/VND P2P)") || !strings.Contains(got, "*3.400* - Ethereum — ≈ 89.875.600 ₫") {
+	if !strings.Contains(got, "• Bitcoin *68.000*\n   ≈ 1,80 tỷ ₫\n") || !strings.Contains(got, "• Ethereum *3.400*\n   ≈ 89,9 tr ₫\n≈ ₫ theo USDT/VND P2P\n") || strings.Count(got, "USDT/VND P2P") != 1 {
 		t.Fatalf("%s", got)
 	}
 	if strings.Contains(usd, "₫") || strings.Contains(usd, "≈") {

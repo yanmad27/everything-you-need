@@ -100,7 +100,7 @@ func TestGeneratePriceNotificationPinned(t *testing.T) {
 	m := generatePriceNotification(cryptoPrices(), nil, nil)
 	lines := strings.Split(m, "\n")
 	lines[1] = "<time>"
-	want := "📊 *Price Update*\n<time>\n\n*CoinGecko* (2 items)\n• 💵 USD: *68.000* - Bitcoin\n• 💵 USD: *3.400* - Ethereum\n\n🤖 _Automated update_"
+	want := "📊 *Price Update*\n<time>\n\n*CoinGecko* (2 items)\n💵 USD\n• Bitcoin *68.000*\n• Ethereum *3.400*\n\n🤖 _Automated update_"
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Fatalf("renderer changed:\n%q\nwant\n%q", got, want)
 	}
