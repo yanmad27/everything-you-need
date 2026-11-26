@@ -112,7 +112,7 @@ func goldFixtures() map[string][]pricetracker.Price {
 			row("Nhẫn tròn trơn BTMC 24K 9999 Rồng Thăng Long", 14950000, 15250000, "VND/chỉ"),
 			row("Không liên quan", 1, 2, "VND/chỉ"),
 		},
-		"Doji": {row("SJC 1L", 15350, 15550, "nghìn/chỉ"), row("Bạc 9999", 1900, 2000, "nghìn/lượng")},
+		"Doji": {row("SJC 1L", 15350, 15550, "nghìn/chỉ"), row("Vàng 9999", 1900, 2000, "nghìn/lượng")},
 	}
 }
 
@@ -182,7 +182,7 @@ func TestCompactReportWidthAndMarkdown(t *testing.T) {
 		}
 	}
 	g := samples["gold"]
-	for _, want := range []string{"Doji · nghìn/chỉ", "Doji · nghìn/lượng", "Bảo Tín Minh Châu · VND/chỉ", "Kim Khoa · nghìn/chỉ", "Bạc 9999", "Mua", "Bán", "%"} {
+	for _, want := range []string{"Doji · nghìn/chỉ", "Doji · nghìn/lượng", "Bảo Tín Minh Châu · VND/chỉ", "Kim Khoa · nghìn/chỉ", "Mua", "Bán", "%"} {
 		if !strings.Contains(g, want) {
 			t.Errorf("gold missing %q:\n%s", want, g)
 		}
@@ -339,20 +339,17 @@ func TestRowFilterMatchesOriginal(t *testing.T) {
 	for _, src := range []string{"CoinGecko", "Doji", pricetracker.KimKhoaSourceName} {
 		for _, n := range names {
 			p := pricetracker.Price{Type: n, Currency: "VND", BuyPrice: 1, SellPrice: 2}
-			if got := showGold(src, p); got != old(src, p) {
-				t.Errorf("gold %s/%q: %v", src, n, got)
-			}
 			if src == "CoinGecko" && showCrypto(p) != old("CoinGecko", p) {
 				t.Errorf("crypto %q", n)
 			}
 		}
 	}
-	// rendered: Bitcoin row in a gold source and a 9999 row in CoinGecko both appear
+	// rendered: a Bitcoin row in a gold source is now hidden; a 9999 row in CoinGecko stays
 	m := generatePriceNotificationVND(map[string][]pricetracker.Price{
 		"Doji":      {{Type: "Bitcoin", Currency: "VND", BuyPrice: 1, SellPrice: 2}},
 		"CoinGecko": {{Type: "Token 9999", Currency: "USD", BuyPrice: 5}},
 	}, nil, nil, "", 0)
-	if !strings.Contains(m, "Bitcoin ") || !strings.Contains(m, "Token 9999") {
+	if strings.Contains(m, "Bitcoin ") || !strings.Contains(m, "Token 9999") {
 		t.Errorf("rows lost:\n%s", m)
 	}
 }

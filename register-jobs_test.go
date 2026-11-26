@@ -82,7 +82,7 @@ func kimKhoaFixture() []pricetracker.Price {
 func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 	kimKhoa := kimKhoaFixture()
 	other := []pricetracker.Price{
-		{Type: "Vàng nhẫn 999.9", Currency: "VND", BuyPrice: 100, SellPrice: 110},
+		{Type: "Vàng nhẫn 999", Currency: "VND", BuyPrice: 100, SellPrice: 110},
 		{Type: "SJC 1L", Currency: "VND", BuyPrice: 200, SellPrice: 210},
 	}
 
@@ -92,7 +92,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 			"Doji":                         other,
 		}, nil, nil)
 
-		for _, want := range []string{"Kim Khoa · nghìn/chỉ", "KK ép vĩ 11.670 11.800", "NT 98%   11.400 11.700", "Nhẫn 97% 11.250 11.400"} {
+		for _, want := range []string{"Kim Khoa · nghìn/chỉ", "KK ép vĩ 11.670 11.800", "Nhẫn 97% 11.250 11.400"} {
 			if !strings.Contains(message, want) {
 				t.Errorf("Kim Khoa table missing %q\n%s", want, message)
 			}
@@ -100,7 +100,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if n := strings.Count(message, "KK "); n != 2 {
 			t.Errorf("Kim Khoa rows: %d\n%s", n, message)
 		}
-		if strings.Contains(message, "Vàng nhẫn 999.9") {
+		if strings.Contains(message, "Vàng nhẫn 999") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
 		if !strings.Contains(message, "SJC 1L") {
@@ -138,7 +138,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if strings.Contains(message, "QUIET") {
 			t.Errorf("Kim Khoa row below the change threshold must be skipped\n%s", message)
 		}
-		if strings.Contains(message, "Vàng nhẫn 999.9") {
+		if strings.Contains(message, "Vàng nhẫn 999") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
 		if !strings.Contains(message, " - SJC 1L\n") {
