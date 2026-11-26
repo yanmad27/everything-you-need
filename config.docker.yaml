@@ -21,8 +21,8 @@ price_sources:
     base_url: "https://mihong.com/gia-vang-trong-nuoc"
     api_url: "https://api.mihong.com/v1/gold-prices?market=domestic"
   kimkhoa:
-    enabled: false # disabled: no reliable upstream; set true to re-enable
-    url: "https://tuanquangdong.com/gia-vang/kim-khoa-cam-ranh/"
+    enabled: true
+    url: "https://kimkhoalegend.vn/gold-price"
   coingecko:
     enabled: true
     api_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin&vs_currencies=usd"

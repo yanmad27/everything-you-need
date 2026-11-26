@@ -28,14 +28,24 @@ func TestKimKhoaSourceRegisteredOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestDisabledKimKhoaAbsentFromReaderAndLookup(t *testing.T) {
-	svc := NewPriceTrackerService(&config.Config{})
-	for _, name := range NewCachedPriceReader(svc, time.Minute).Sources() {
+func TestKimKhoaListedByReaderWhenEnabled(t *testing.T) {
+	disabled := NewPriceTrackerService(&config.Config{})
+	for _, name := range NewCachedPriceReader(disabled, time.Minute).Sources() {
 		if name == KimKhoaSourceName {
-			t.Fatalf("reader still lists %q", name)
+			t.Fatalf("reader lists %q while disabled", name)
 		}
 	}
-	if _, err := svc.GetPricesFromSource(KimKhoaSourceName); err == nil {
+	if _, err := disabled.GetPricesFromSource(KimKhoaSourceName); err == nil {
 		t.Fatal("lookup of a disabled source must return an error, not prices")
+	}
+
+	cfg := &config.Config{}
+	cfg.PriceSources.KimKhoa.Enabled = true
+	found := false
+	for _, name := range NewCachedPriceReader(NewPriceTrackerService(cfg), time.Minute).Sources() {
+		found = found || name == KimKhoaSourceName
+	}
+	if !found {
+		t.Fatal("reader must list the kimkhoa source when enabled")
 	}
 }
