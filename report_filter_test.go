@@ -64,11 +64,11 @@ func TestGoldFilterDoesNotTouchOtherConsumers(t *testing.T) {
 			t.Errorf("shared/crypto filter changed for %q", n)
 		}
 	}
-	// gold-watch keeps its own filter: a Doji "Nữ trang 9999" move still alerts.
+	// gold-watch uses the report filter: a Doji "Nữ trang 9999" move is silent.
 	msg, ok := generateGoldWatchNotification(map[string][]pricetracker.PriceChange{
 		"Doji": {{Price: pricetracker.Price{Type: "NỮ TRANG 9999", Currency: "VND", BuyPrice: 1, SellPrice: 2}, BuyChange: 5, SellChange: 5}},
 	})
-	if !ok || !strings.Contains(msg, "NỮ TRANG 9999") {
+	if ok || msg != "" {
 		t.Errorf("gold-watch output changed:\n%s", msg)
 	}
 	// Telegram report: a source left with no wanted rows shows N/A.

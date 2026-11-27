@@ -12,7 +12,6 @@ import (
 	telebot "everything-you-need/m/services/tele-bot"
 	"fmt"
 	"log"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -367,77 +366,6 @@ func generatePriceNotificationVND(allPrices map[string][]pricetracker.Price, cha
 
 	message += "🤖 _Automated update_"
 	return message
-}
-
-// generateGoldWatchNotification builds an alert listing only the gold prices
-// that moved since the previous check. Returns the message and whether any
-// tracked gold price actually changed (false → caller stays silent).
-func generateGoldWatchNotification(changes map[string][]pricetracker.PriceChange) (string, bool) {
-	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
-	if err != nil {
-		loc = time.FixedZone("UTC+7", 7*60*60)
-	}
-	now := time.Now().In(loc)
-
-	keywords := []string{"9999", "tròn trơn", "sjc"}
-
-	hasChange := false
-	body := ""
-
-	for source, sourceChanges := range changes {
-		sourceLines := ""
-		for _, change := range sourceChanges {
-			if math.Abs(change.BuyChange) <= goldWatchChangeThreshold && math.Abs(change.SellChange) <= goldWatchChangeThreshold {
-				continue
-			}
-
-			price := change.Price
-			// Kim Khoa rows are already filtered by purity at the source.
-			matched := source == pricetracker.KimKhoaSourceName
-			for _, keyword := range keywords {
-				if strings.Contains(strings.ToLower(price.Type), keyword) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
-
-			hasChange = true
-
-			buyText := fmt.Sprintf("*%s*", formatPrice(price.BuyPrice))
-			if change.BuyChange > 0 {
-				buyText += fmt.Sprintf(" 📈+%.1f%%", change.BuyChange)
-			} else if change.BuyChange < 0 {
-				buyText += fmt.Sprintf(" 📉%.1f%%", change.BuyChange)
-			}
-
-			sellText := fmt.Sprintf("*%s*", formatPrice(price.SellPrice))
-			if change.SellChange > 0 {
-				sellText += fmt.Sprintf(" 📈+%.1f%%", change.SellChange)
-			} else if change.SellChange < 0 {
-				sellText += fmt.Sprintf(" 📉%.1f%%", change.SellChange)
-			}
-
-			sourceLines += fmt.Sprintf("• %s %s: %s - %s - %s\n",
-				currencyMap[price.Currency], price.Currency, buyText, sellText, formatType(price.Type))
-		}
-
-		if sourceLines != "" {
-			body += fmt.Sprintf("*%s*\n%s\n", source, sourceLines)
-		}
-	}
-
-	if !hasChange {
-		return "", false
-	}
-
-	message := "🟡 *Gold Price Change*\n"
-	message += fmt.Sprintf("🕐 %s\n\n", now.Format("15:04 02/01/2006"))
-	message += body
-	message += "🤖 _Gold watch (5m)_"
-	return message, true
 }
 
 func formatType(typeStr string) string {
