@@ -43,8 +43,8 @@ func TestGenerateGoldWatchNotification(t *testing.T) {
 		if !strings.Contains(message, "Gold Price Change") {
 			t.Errorf("expected title in message, got %q", message)
 		}
-		if !strings.Contains(message, "📈+1.2%") {
-			t.Errorf("expected up marker in message, got %q", message)
+		if !strings.Contains(message, "+1.2") || !strings.Contains(message, "SJC 8.100.000") {
+			t.Errorf("expected table row with +1.2, got %q", message)
 		}
 	})
 
@@ -129,10 +129,9 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if !hasChange {
 			t.Fatal("expected hasChange=true")
 		}
-		for _, p := range kimKhoa {
-			line := " - " + p.Type + "\n"
-			if n := strings.Count(message, line); n != 1 {
-				t.Errorf("%q appears %d times, want 1\n%s", p.Type, n, message)
+		for _, want := range []string{"KK ép vĩ", "Nhẫn 97%"} {
+			if n := strings.Count(message, want); n != 1 {
+				t.Errorf("%q appears %d times, want 1\n%s", want, n, message)
 			}
 		}
 		if strings.Contains(message, "QUIET") {
@@ -141,7 +140,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if strings.Contains(message, "Vàng nhẫn 999") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
-		if !strings.Contains(message, " - SJC 1L\n") {
+		if !strings.Contains(message, "SJC 1L") {
 			t.Errorf("keyword row from another source must stay visible\n%s", message)
 		}
 	})
