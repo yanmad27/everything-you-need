@@ -140,7 +140,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if strings.Contains(message, "Vàng nhẫn 999") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
-		if !strings.Contains(message, "SJC 200") {
+		if !strings.Contains(message, "SJC 1L") {
 			t.Errorf("keyword row from another source must stay visible\n%s", message)
 		}
 	})
