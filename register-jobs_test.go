@@ -43,7 +43,7 @@ func TestGenerateGoldWatchNotification(t *testing.T) {
 		if !strings.Contains(message, "Gold Price Change") {
 			t.Errorf("expected title in message, got %q", message)
 		}
-		if !strings.Contains(message, "+1.2") || !strings.Contains(message, "SJC 1L") {
+		if !strings.Contains(message, "+1.2") || !strings.Contains(message, "SJC 8.100.000") {
 			t.Errorf("expected table row with +1.2, got %q", message)
 		}
 	})
@@ -140,7 +140,7 @@ func TestKimKhoaRowsBypassKeywordFilter(t *testing.T) {
 		if strings.Contains(message, "Vàng nhẫn 999") {
 			t.Errorf("non-keyword row from another source must stay hidden\n%s", message)
 		}
-		if !strings.Contains(message, "SJC 1L") {
+		if !strings.Contains(message, "SJC 200") {
 			t.Errorf("keyword row from another source must stay visible\n%s", message)
 		}
 	})
